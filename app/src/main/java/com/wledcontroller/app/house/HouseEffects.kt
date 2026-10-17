@@ -35,35 +35,35 @@ data class HouseEffectParams(
 
 object HouseRenderer {
 
-    private fun frac(v: Float) = v - floor(v)
+    internal fun frac(v: Float) = v - floor(v)
 
     /** Cheap deterministic hash → 0..1. */
-    private fun hash(a: Int, b: Int = 0): Float {
+    internal fun hash(a: Int, b: Int = 0): Float {
         var h = a * 374761393 + b * 668265263
         h = (h xor (h ushr 13)) * 1274126177
         h = h xor (h ushr 16)
         return (h and 0xFFFFFF) / 16777215f
     }
 
-    private fun lerp(a: Int, b: Int, f: Float): Int {
+    internal fun lerp(a: Int, b: Int, f: Float): Int {
         fun ch(s: Int) = (((a shr s) and 0xFF) * (1 - f) + ((b shr s) and 0xFF) * f).toInt()
         return (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
     }
 
     /** Smooth cyclic palette through the colours. */
-    private fun palette(colors: List<Int>, pos: Float): Int {
+    internal fun palette(colors: List<Int>, pos: Float): Int {
         val n = colors.size.coerceAtLeast(1)
         val p = frac(pos) * n
         val i = p.toInt() % n
         return lerp(colors[i], colors[(i + 1) % n], p - p.toInt())
     }
 
-    private fun scale(rgb: Int, f: Float): Int {
+    internal fun scale(rgb: Int, f: Float): Int {
         val k = f.coerceIn(0f, 1f)
         return ((((rgb shr 16) and 0xFF) * k).toInt() shl 16) or ((((rgb shr 8) and 0xFF) * k).toInt() shl 8) or ((rgb and 0xFF) * k).toInt()
     }
 
-    private fun hsv(h: Float, v: Float = 1f): Int = android.graphics.Color.HSVToColor(floatArrayOf(frac(h) * 360f, 1f, v)) and 0xFFFFFF
+    internal fun hsv(h: Float, v: Float = 1f): Int = android.graphics.Color.HSVToColor(floatArrayOf(frac(h) * 360f, 1f, v)) and 0xFFFFFF
 
     /**
      * Colour (0xRRGGBB, brightness applied) of an LED at ([x], [y]) at time [t] seconds.
@@ -126,7 +126,7 @@ object HouseRenderer {
         return scale(rgb, p.brightness)
     }
 
-    private fun maxRgb(a: Int, b: Int) =
+    internal fun maxRgb(a: Int, b: Int) =
         (maxOf((a shr 16) and 0xFF, (b shr 16) and 0xFF) shl 16) or
             (maxOf((a shr 8) and 0xFF, (b shr 8) and 0xFF) shl 8) or
             maxOf(a and 0xFF, b and 0xFF)

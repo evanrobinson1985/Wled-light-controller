@@ -114,6 +114,8 @@ import com.wledcontroller.app.house.HouseMap
 import com.wledcontroller.app.house.HouseRenderer
 import com.wledcontroller.app.house.LightRun
 import com.wledcontroller.app.house.MapPoint
+import com.wledcontroller.app.house.PropGroup
+import com.wledcontroller.app.house.PropType
 import com.wledcontroller.app.house.StandalonePlan
 import com.wledcontroller.app.house.ledPositions
 import com.wledcontroller.app.house.fillGaps
@@ -129,7 +131,7 @@ import java.util.UUID
 // ================================================================== shared canvas
 
 @Composable
-private fun rememberPhoto(path: String?): ImageBitmap? {
+internal fun rememberPhoto(path: String?): ImageBitmap? {
     val photo by produceState<ImageBitmap?>(null, path) {
         value = path?.let { withContext(Dispatchers.IO) { BitmapFactory.decodeFile(it)?.asImageBitmap() } }
     }
@@ -138,7 +140,7 @@ private fun rememberPhoto(path: String?): ImageBitmap? {
 
 /** The house photo (or a dark canvas) with an overlay drawn in the same normalised coordinates. */
 @Composable
-private fun HouseCanvas(
+internal fun HouseCanvas(
     map: HouseMap,
     photo: ImageBitmap?,
     modifier: Modifier = Modifier,
@@ -171,7 +173,7 @@ private val RunColors = listOf(0xFFFFB86B, 0xFF6BC8FF, 0xFFB98CFF, 0xFF7BE07B, 0
 // ================================================================== player
 
 @Composable
-fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> Unit) {
+fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> Unit, onShows: () -> Unit) {
     val container = LocalAppContainer.current
     val context = LocalContext.current
     val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
@@ -296,6 +298,16 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             GradientSlider(params.brightness, { container.house.params.value = params.copy(brightness = it) }, label = "Brightness", valueText = "${(params.brightness * 100).toInt()}%", height = 34.dp)
 
             Spacer(Modifier.height(16.dp))
+            Card(onClick = onShows, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Shows", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Choreograph your props on a timeline — like xLights, on your phone.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
             Card(onClick = onStandalone, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Run without the phone", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -325,6 +337,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     val draft = remember { mutableStateListOf<MapPoint>() }
     var editRun by remember { mutableStateOf<LightRun?>(null) }
     var deleteRun by remember { mutableStateOf<LightRun?>(null) }
+    var editGroup by remember { mutableStateOf<PropGroup?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
 
     // Per-LED editing state.
@@ -507,7 +520,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(run.name, fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    "${device?.device?.name ?: "Missing device"} · LEDs ${run.startLed}–${run.endLed - 1}" +
+                                    "${run.prop.label} · ${device?.device?.name ?: "Missing device"} · LEDs ${run.startLed}–${run.endLed - 1}" +
                                         when {
                                             run.isPlacedPerLed -> " · ${run.placedCount} of ${run.count} placed"
                                             run.points.size < 2 -> " · not traced yet"
@@ -541,6 +554,36 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 8.dp),
             )
+
+            SectionTitle("Prop groups") {
+                TextButton(onClick = { editGroup = PropGroup(UUID.randomUUID().toString(), "", emptyList()) }, enabled = map.runs.isNotEmpty()) {
+                    Icon(Icons.Filled.Add, null); Text("Add")
+                }
+            }
+            if (map.groups.isEmpty()) {
+                Text(
+                    "Group props to animate them together in shows — e.g. \"All arches\" or \"Roof\".",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            map.groups.forEach { g ->
+                Surface(
+                    onClick = { editGroup = g },
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(g.name, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            map.runs.filter { it.id in g.runIds }.joinToString { it.name }.ifEmpty { "No props" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -551,6 +594,22 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             saveRun(updated)
             editRun = null
             if (isNew) { drawingRunId = updated.id; draft.clear() }
+        }
+    }
+    editGroup?.let { g ->
+        GroupDialog(
+            group = g, runs = map.runs, onDismiss = { editGroup = null },
+            onDelete = {
+                scope.launch { container.store.updateHouseMap { m -> m.copy(groups = m.groups.filterNot { it.id == g.id }) } }
+                editGroup = null
+            },
+        ) { updated ->
+            scope.launch {
+                container.store.updateHouseMap { m ->
+                    m.copy(groups = if (m.groups.any { it.id == updated.id }) m.groups.map { if (it.id == updated.id) updated else it } else m.groups + updated)
+                }
+            }
+            editGroup = null
         }
     }
     deleteRun?.let { run ->
@@ -588,6 +647,7 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
     var name by remember { mutableStateOf(run.name) }
     var deviceId by remember { mutableStateOf(run.deviceId) }
     var menu by remember { mutableStateOf(false) }
+    var prop by remember { mutableStateOf(run.prop) }
     val device = devices.firstOrNull { it.id == deviceId }
     val ledCount = device?.snapshot?.value?.info?.ledCount ?: 0
     // Default a new run to the LEDs on this controller that no other run uses yet.
@@ -603,8 +663,14 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
         onDismissRequest = onDismiss,
         title = { Text(if (run.count == 0) "New light run" else "Edit light run") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("Name (e.g. Roofline)") }, singleLine = true)
+                Text("Prop type", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PropType.entries.forEach { p ->
+                        FilterChip(selected = prop == p, onClick = { prop = p }, label = { Text(p.label) })
+                    }
+                }
                 Box {
                     OutlinedButton(onClick = { menu = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(device?.device?.name ?: "Choose controller", Modifier.weight(1f)); Icon(Icons.Filled.ArrowDropDown, null)
@@ -631,7 +697,7 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
             }
         },
         confirmButton = {
-            TextButton(enabled = valid, onClick = { onSave(run.copy(name = name.trim(), deviceId = deviceId, startLed = s!!, count = c!!)) }) {
+            TextButton(enabled = valid, onClick = { onSave(run.copy(name = name.trim(), deviceId = deviceId, startLed = s!!, count = c!!, prop = prop)) }) {
                 Text(if (run.count == 0) "Next: trace it" else "Save")
             }
         },
@@ -989,4 +1055,43 @@ private fun LedEditControls(
             Button(onClick = onDone) { Text("Save") }
         }
     }
+}
+
+@Composable
+private fun GroupDialog(
+    group: PropGroup,
+    runs: List<LightRun>,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+    onSave: (PropGroup) -> Unit,
+) {
+    var name by remember { mutableStateOf(group.name) }
+    val chosen = remember { mutableStateListOf<String>().apply { addAll(group.runIds) } }
+    val isNew = group.name.isEmpty()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isNew) "New prop group" else "Edit group") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(name, { name = it }, label = { Text("Name (e.g. All arches)") }, singleLine = true)
+                Spacer(Modifier.height(8.dp))
+                runs.forEach { r ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(
+                            checked = r.id in chosen,
+                            onCheckedChange = { if (it) chosen.add(r.id) else chosen.remove(r.id) },
+                        )
+                        Text("${r.name} · ${r.prop.label}")
+                    }
+                }
+                if (!isNew) TextButton(onClick = onDelete) { Text("Delete group", color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = name.isNotBlank() && chosen.isNotEmpty(), onClick = {
+                onSave(group.copy(name = name.trim(), runIds = runs.map { it.id }.filter { it in chosen }))
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

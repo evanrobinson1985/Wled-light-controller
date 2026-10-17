@@ -7,6 +7,8 @@ import com.wledcontroller.app.data.Discovery
 import com.wledcontroller.app.data.WledApi
 import com.wledcontroller.app.house.HouseEngine
 import com.wledcontroller.app.house.StandaloneSetup
+import com.wledcontroller.app.show.SequencePlayer
+import com.wledcontroller.app.show.SequenceRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,4 +36,6 @@ class AppContainer(context: Context) {
     val discovery = Discovery(context, api)
     val house = HouseEngine(context, store, scope)
     val standalone = StandaloneSetup(context, api, store)
+    val sequences = SequenceRepository(context, scope)
+    val player = SequencePlayer(store, house, scope)
 }

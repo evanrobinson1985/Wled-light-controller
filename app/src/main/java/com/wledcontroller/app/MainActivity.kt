@@ -19,6 +19,8 @@ import com.wledcontroller.app.ui.screens.HouseMapEditor
 import com.wledcontroller.app.ui.screens.HouseScreen
 import com.wledcontroller.app.ui.screens.StandaloneScreen
 import com.wledcontroller.app.ui.screens.LedSetupScreen
+import com.wledcontroller.app.ui.screens.SequenceEditorScreen
+import com.wledcontroller.app.ui.screens.ShowsScreen
 import com.wledcontroller.app.ui.screens.WebUiScreen
 import com.wledcontroller.app.ui.theme.WledTheme
 
@@ -48,7 +50,18 @@ class MainActivity : ComponentActivity() {
                                 onBack = { nav.popBackStack() },
                                 onEditMap = { nav.navigate("house/map") },
                                 onStandalone = { nav.navigate("house/standalone") },
+                                onShows = { nav.navigate("shows") },
                             )
+                        }
+                        composable("shows") {
+                            ShowsScreen(
+                                onBack = { nav.popBackStack() },
+                                onOpen = { nav.navigate("shows/$it") },
+                                onEditMap = { nav.navigate("house/map") },
+                            )
+                        }
+                        composable("shows/{id}", arguments = idArg) { entry ->
+                            SequenceEditorScreen(sequenceId = entry.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
                         }
                         composable("house/map") {
                             HouseMapEditor(onBack = { nav.popBackStack() }, onScan = { nav.navigate("house/scan") })

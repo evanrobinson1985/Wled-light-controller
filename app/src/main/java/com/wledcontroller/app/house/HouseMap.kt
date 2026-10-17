@@ -22,6 +22,8 @@ data class LightRun(
     val points: List<MapPoint> = emptyList(),
     /** Exact position of each LED in the run; null = not placed (stays dark). Overrides [points]. */
     val ledPoints: List<MapPoint?>? = null,
+    /** What kind of prop this run is; sets the natural direction effects travel in. */
+    val prop: PropType = PropType.LINE,
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
@@ -35,7 +37,38 @@ data class HouseMap(
     /** Photo width / height. */
     val aspect: Float = 1.5f,
     val runs: List<LightRun> = emptyList(),
+    val groups: List<PropGroup> = emptyList(),
 )
+
+/** A named set of props (e.g. "All arches") that sequences can target together. */
+@Serializable
+data class PropGroup(val id: String, val name: String, val runIds: List<String>)
+
+/** How an effect's motion is laid out over the lights it covers. */
+@Serializable
+enum class Direction(val label: String) {
+    AUTO("Prop default"),
+    ALONG("Along"),
+    REVERSE("Reverse"),
+    ENDS_IN("Ends → middle"),
+    CENTER_OUT("Centre out"),
+    LEFT_RIGHT("Left → right"),
+    RIGHT_LEFT("Right → left"),
+    UP("Bottom → top"),
+    DOWN("Top → bottom"),
+}
+
+@Serializable
+enum class PropType(val label: String, val natural: Direction) {
+    LINE("Line / roofline", Direction.ALONG),
+    ARCH("Arch", Direction.ALONG),
+    TREE("Tree", Direction.UP),
+    WINDOW("Window / outline", Direction.ALONG),
+    CANDY_CANE("Candy cane", Direction.ALONG),
+    STAR("Star", Direction.CENTER_OUT),
+    MATRIX("Matrix / panel", Direction.LEFT_RIGHT),
+    BUSH("Bush / cluster", Direction.CENTER_OUT),
+}
 
 /** A placed LED: which device and physical index, where it is, and its order within its run. */
 data class PlacedLed(val deviceId: String, val index: Int, val x: Float, val y: Float, val runIndex: Int, val orderInRun: Int)
