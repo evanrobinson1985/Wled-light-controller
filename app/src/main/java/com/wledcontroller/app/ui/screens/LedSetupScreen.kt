@@ -42,7 +42,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -377,10 +379,66 @@ private fun OutputCard(index: Int, out: OutputEdit, canRemove: Boolean, onRemove
                 FilterChip(selected = out.order == i, onClick = { out.order = i }, label = { Text(label) })
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Reverse direction", Modifier.weight(1f))
-            Switch(checked = out.reverse, onCheckedChange = { out.reverse = it })
+        Text("Controller position", style = MaterialTheme.typography.labelLarge)
+        // The first LED sits next to the controller. With the controller on the right, WLED
+        // reverses the output so animations still run left → right as you face the lights.
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SegmentedButton(
+                selected = !out.reverse,
+                onClick = { out.reverse = false },
+                shape = SegmentedButtonDefaults.itemShape(0, 2),
+            ) { Text("Left end") }
+            SegmentedButton(
+                selected = out.reverse,
+                onClick = { out.reverse = true },
+                shape = SegmentedButtonDefaults.itemShape(1, 2),
+            ) { Text("Right end") }
         }
+        ControllerDiagram(controllerOnRight = out.reverse)
+        Text(
+            "Looking at the lights, which end is the controller plugged into? Effects will then run left → right.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Row of bulbs with the controller box at one end and an arrow showing the effect direction. */
+@Composable
+private fun ControllerDiagram(controllerOnRight: Boolean) {
+    val box = MaterialTheme.colorScheme.primary
+    val wire = MaterialTheme.colorScheme.outline
+    val bulb = MaterialTheme.colorScheme.tertiary
+    val arrow = MaterialTheme.colorScheme.onSurfaceVariant
+    androidx.compose.foundation.Canvas(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .padding(vertical = 4.dp)
+    ) {
+        val h = size.height
+        val boxW = 28.dp.toPx()
+        val boxX = if (controllerOnRight) size.width - boxW else 0f
+        val lineY = h * 0.35f
+        val startX = if (controllerOnRight) 0f else boxW
+        val endX = if (controllerOnRight) size.width - boxW else size.width
+        drawLine(wire, androidx.compose.ui.geometry.Offset(startX, lineY), androidx.compose.ui.geometry.Offset(endX, lineY), 2.dp.toPx())
+        drawRoundRect(
+            box,
+            topLeft = androidx.compose.ui.geometry.Offset(boxX, lineY - 9.dp.toPx()),
+            size = androidx.compose.ui.geometry.Size(boxW, 18.dp.toPx()),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()),
+        )
+        val n = 9
+        val gap = (endX - startX) / (n + 1)
+        for (i in 1..n) drawCircle(bulb, 5.dp.toPx(), androidx.compose.ui.geometry.Offset(startX + gap * i, lineY))
+        // Effect direction: always left → right.
+        val ay = h * 0.85f
+        val ax0 = size.width * 0.3f
+        val ax1 = size.width * 0.7f
+        drawLine(arrow, androidx.compose.ui.geometry.Offset(ax0, ay), androidx.compose.ui.geometry.Offset(ax1, ay), 1.5.dp.toPx())
+        drawLine(arrow, androidx.compose.ui.geometry.Offset(ax1, ay), androidx.compose.ui.geometry.Offset(ax1 - 6.dp.toPx(), ay - 4.dp.toPx()), 1.5.dp.toPx())
+        drawLine(arrow, androidx.compose.ui.geometry.Offset(ax1, ay), androidx.compose.ui.geometry.Offset(ax1 - 6.dp.toPx(), ay + 4.dp.toPx()), 1.5.dp.toPx())
     }
 }
 
