@@ -5,6 +5,8 @@ import com.wledcontroller.app.data.AppStore
 import com.wledcontroller.app.data.DeviceManager
 import com.wledcontroller.app.data.Discovery
 import com.wledcontroller.app.data.WledApi
+import com.wledcontroller.app.house.HouseEngine
+import com.wledcontroller.app.house.StandaloneSetup
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,4 +32,6 @@ class AppContainer(context: Context) {
     val store = AppStore(context)
     val devices = DeviceManager(api, wsClient, store, scope)
     val discovery = Discovery(context, api)
+    val house = HouseEngine(context, store, scope)
+    val standalone = StandaloneSetup(context, api, store)
 }

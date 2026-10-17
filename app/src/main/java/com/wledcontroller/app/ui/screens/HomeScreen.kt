@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Search
@@ -73,7 +74,7 @@ import com.wledcontroller.app.ui.components.toComposeColor
 import kotlinx.coroutines.launch
 
 @Composable
-fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit) {
+fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, onOpenHouse: () -> Unit) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val controllers by container.devices.list.collectAsStateWithLifecycle()
@@ -139,6 +140,24 @@ fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit) {
                                         scene.entries.forEach { e -> container.devices.get(e.deviceId)?.applyScene(e.state) }
                                     },
                                     onLongClick = { deleteScene = scene },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    val houseRunning by container.house.running.collectAsStateWithLifecycle()
+                    Card(onClick = onOpenHouse, shape = RoundedCornerShape(24.dp), modifier = Modifier.padding(top = 12.dp)) {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Home, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Whole house", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (houseRunning) "Effect running across your lights" else "Map your lights and run effects across every controller",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (houseRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }

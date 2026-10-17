@@ -14,6 +14,9 @@ import androidx.navigation.navArgument
 import com.wledcontroller.app.ui.screens.DeviceScreen
 import com.wledcontroller.app.ui.screens.GroupScreen
 import com.wledcontroller.app.ui.screens.HomeScreen
+import com.wledcontroller.app.ui.screens.HouseMapEditor
+import com.wledcontroller.app.ui.screens.HouseScreen
+import com.wledcontroller.app.ui.screens.StandaloneScreen
 import com.wledcontroller.app.ui.screens.LedSetupScreen
 import com.wledcontroller.app.ui.screens.WebUiScreen
 import com.wledcontroller.app.ui.theme.WledTheme
@@ -36,7 +39,19 @@ class MainActivity : ComponentActivity() {
                             HomeScreen(
                                 onOpenDevice = { nav.navigate("device/$it") },
                                 onOpenGroup = { nav.navigate("group/$it") },
+                                onOpenHouse = { nav.navigate("house") },
                             )
+                        }
+                        composable("house") {
+                            HouseScreen(
+                                onBack = { nav.popBackStack() },
+                                onEditMap = { nav.navigate("house/map") },
+                                onStandalone = { nav.navigate("house/standalone") },
+                            )
+                        }
+                        composable("house/map") { HouseMapEditor(onBack = { nav.popBackStack() }) }
+                        composable("house/standalone") {
+                            StandaloneScreen(onBack = { nav.popBackStack() }, onOpenDevice = { nav.navigate("device/$it") })
                         }
                         composable("device/{id}", arguments = idArg) { entry ->
                             DeviceScreen(

@@ -43,6 +43,16 @@ class WledApi(val client: OkHttpClient) {
 
     suspend fun postConfig(host: String, body: JsonObject): JsonElement = post(host, "/json/cfg", body)
 
+    /** Uploads a file to the device's filesystem (e.g. "/ledmap.json"). */
+    suspend fun uploadFile(host: String, name: String, content: String): Unit = withContext(Dispatchers.IO) {
+        val body = okhttp3.MultipartBody.Builder()
+            .setType(okhttp3.MultipartBody.FORM)
+            .addFormDataPart("data", name, content.toRequestBody(jsonType))
+            .build()
+        val req = Request.Builder().url(baseUrl(host) + "/upload").post(body).build()
+        client.newCall(req).execute().use { resp -> if (!resp.isSuccessful) throw IOException("Upload failed: HTTP ${resp.code}") }
+    }
+
     private suspend fun post(host: String, path: String, body: JsonObject): JsonElement = withContext(Dispatchers.IO) {
         val req = Request.Builder()
             .url(baseUrl(host) + path)

@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import com.wledcontroller.app.house.HouseMap
 
 @Serializable
 data class SavedDevice(val id: String, val name: String, val host: String)
@@ -40,6 +41,7 @@ class AppStore(private val context: Context) {
         val FAVORITE_EFFECTS = stringSetPreferencesKey("favorite_effects")
         val TILE_DEVICE = stringPreferencesKey("tile_device")
         val LIGHT_PROFILES = stringPreferencesKey("light_profiles")
+        val HOUSE_MAP = stringPreferencesKey("house_map")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -106,6 +108,17 @@ class AppStore(private val context: Context) {
             val cur = prefs[Keys.LIGHT_PROFILES]?.let { runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull() } ?: emptyMap()
             val next = if (profile == null) cur - key else cur + (key to profile.name)
             prefs[Keys.LIGHT_PROFILES] = json.encodeToString(next)
+        }
+    }
+
+    val houseMap: Flow<HouseMap> = context.dataStore.data.map { prefs ->
+        prefs[Keys.HOUSE_MAP]?.let { runCatching { json.decodeFromString<HouseMap>(it) }.getOrNull() } ?: HouseMap()
+    }
+
+    suspend fun updateHouseMap(transform: (HouseMap) -> HouseMap) {
+        context.dataStore.edit { prefs ->
+            val cur = prefs[Keys.HOUSE_MAP]?.let { runCatching { json.decodeFromString<HouseMap>(it) }.getOrNull() } ?: HouseMap()
+            prefs[Keys.HOUSE_MAP] = json.encodeToString(transform(cur))
         }
     }
 
