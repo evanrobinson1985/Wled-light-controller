@@ -41,6 +41,7 @@ class SequenceRepository(context: Context, scope: CoroutineScope) {
 
     suspend fun delete(id: String) {
         val audio = get(id)?.audioFile
+        val fseq = get(id)?.fseqFile
         _all.value = _all.value.filterNot { it.id == id }
         withContext(Dispatchers.IO) {
             File(dir, "$id.json").delete()
@@ -48,7 +49,43 @@ class SequenceRepository(context: Context, scope: CoroutineScope) {
             if (audio != null && _all.value.none { it.audioFile == audio }) {
                 File(audio).delete(); File("$audio.env").delete()
             }
+            if (fseq != null && _all.value.none { it.fseqFile == fseq }) {
+                FseqReader.forget(fseq); File(fseq).delete()
+            }
         }
+    }
+
+    /**
+     * Imports an xLights .fseq as a show. Controllers are laid out one after another in the
+     * channel data ([devices]: id and LED count, in order) — adjust or import the xLights
+     * network setup afterwards if that's not how the sequence was made.
+     */
+    suspend fun importFseq(context: Context, uri: android.net.Uri, devices: List<Pair<String, Int>>): Sequence = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        val title = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        } ?: "xLights sequence"
+        val fseqDir = File(dir.parentFile, "fseq").apply { mkdirs() }
+        val file = File(fseqDir, "${java.util.UUID.randomUUID()}.fseq")
+        resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } }
+            ?: throw IllegalArgumentException("Couldn't open that file")
+        val reader = try {
+            FseqReader.open(file.absolutePath)
+        } catch (e: Exception) {
+            file.delete()
+            throw IllegalArgumentException("That isn't an xLights .fseq sequence (${e.message})")
+        }
+        var next = 1
+        val map = devices.map { (id, leds) -> FseqMapping(id, next, leds).also { next += leds * 3 } }
+        val seq = Sequence(
+            id = java.util.UUID.randomUUID().toString(),
+            name = title.substringBeforeLast('.'),
+            durationMs = reader.durationMs,
+            fseqFile = file.absolutePath,
+            fseqMap = map,
+        )
+        save(seq)
+        seq
     }
 
     /** Copies a picked song into app storage. Returns (path, title, durationMs). */

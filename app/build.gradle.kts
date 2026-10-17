@@ -71,4 +71,7 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$camerax")
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
+
+    // Decompresses xLights .fseq sequences (zstd).
+    implementation("com.github.luben:zstd-jni:1.5.6-3@aar")
 }

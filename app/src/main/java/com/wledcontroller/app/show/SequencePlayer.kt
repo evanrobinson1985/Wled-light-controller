@@ -121,7 +121,22 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
                     }
                     last = now
                     val lay = layout
-                    if (_live.value && seq != null && lay != null && lay.leds.isNotEmpty()) {
+                    val fseqPath = seq?.fseqFile
+                    if (_live.value && seq != null && fseqPath != null) {
+                        val reader = runCatching { FseqReader.open(fseqPath) }.getOrNull()
+                        if (reader != null) {
+                            val frame = reader.frame((_position.value / reader.stepMs).toInt())
+                            withContext(Dispatchers.IO) {
+                                for (m in seq.fseqMap) {
+                                    if (!m.enabled || m.ledCount <= 0) continue
+                                    val host = hosts[m.deviceId] ?: continue
+                                    val buf = ByteArray(m.ledCount * 3)
+                                    reader.copyChannels(frame, m.startChannel - 1, buf.size, buf)
+                                    runCatching { ddp.send(host, buf) }
+                                }
+                            }
+                        }
+                    } else if (_live.value && seq != null && lay != null && lay.leds.isNotEmpty()) {
                         if (colors.size != lay.leds.size) colors = IntArray(lay.leds.size)
                         SequenceRenderer.render(seq, lay, _position.value, colors)
                         val buffers = HashMap<String, ByteArray>()

@@ -72,7 +72,17 @@ data class Sequence(
     val marks: List<Long> = emptyList(),
     /** Detected tempo, for display. */
     val bpm: Float? = null,
+    /** For shows imported from xLights: the .fseq file, played instead of [tracks]. */
+    val fseqFile: String? = null,
+    /** Where each controller's LEDs are in the .fseq channel data. */
+    val fseqMap: List<FseqMapping> = emptyList(),
 )
+
+/** A controller's place in an xLights sequence: its first channel (1-based, as xLights shows it) and LED count. */
+@Serializable
+data class FseqMapping(val deviceId: String, val startChannel: Int, val ledCount: Int, val enabled: Boolean = true) {
+    val endChannel get() = startChannel + ledCount * 3 - 1
+}
 
 fun formatTime(ms: Long, tenths: Boolean = false): String {
     val total = (ms / 1000).coerceAtLeast(0)

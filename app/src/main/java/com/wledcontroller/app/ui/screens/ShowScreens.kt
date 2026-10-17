@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -142,6 +143,19 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
     val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
     var creating by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Sequence?>(null) }
+    var importError by remember { mutableStateOf<String?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val controllers by container.devices.list.collectAsStateWithLifecycle()
+    val importer = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            importError = null
+            runCatching {
+                container.sequences.importFseq(context, uri, controllers.map { it.id to (it.snapshot.value.info?.ledCount ?: 0) })
+            }.onSuccess { onOpen(it.id) }.onFailure { importError = it.message }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -149,6 +163,7 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                 title = { Text("Shows") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
+                    IconButton(onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Filled.FileOpen, "Import xLights .fseq") }
                     TextButton(onClick = onSchedule) {
                         Icon(Icons.Filled.Schedule, null); Spacer(Modifier.width(6.dp)); Text("Schedule")
                     }
@@ -175,6 +190,7 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                     }
                 }
             }
+            importError?.let { e -> item { Text(e, color = MaterialTheme.colorScheme.error) } }
             if (shows.isEmpty()) {
                 item {
                     Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -182,7 +198,7 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                         Spacer(Modifier.height(8.dp))
                         Text("No shows yet", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            "A show is a timeline: put effects on your props and groups, and they play back in sync across every controller.",
+                            "A show is a timeline: put effects on your props and groups, and they play back in sync across every controller. You can also import sequences made in xLights (.fseq) with the import button above.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
@@ -196,7 +212,8 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                         Column(Modifier.weight(1f)) {
                             Text(s.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                             Text(
-                                "${formatTime(s.durationMs)} · ${s.tracks.size} tracks · ${s.tracks.sumOf { it.clips.size }} effects",
+                                if (s.fseqFile != null) "${formatTime(s.durationMs)} · xLights sequence" + (if (s.audioFile != null) " · with song" else "")
+                                else "${formatTime(s.durationMs)} · ${s.tracks.size} tracks · ${s.tracks.sumOf { it.clips.size }} effects",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -286,7 +303,7 @@ fun SequenceEditorScreen(sequenceId: String, onBack: () -> Unit) {
         }) { p -> Box(Modifier.padding(p).fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading…") } }
         return
     }
-    SequenceEditor(stored, onBack)
+    if (stored.fseqFile != null) FseqShowEditor(stored, onBack) else SequenceEditor(stored, onBack)
 }
 
 @Composable
@@ -944,7 +961,7 @@ private fun ClipInspector(
 private enum class BeatStyle(val label: String) { FLASH("Flash"), PULSE("Pulse"), SPARKLE("Sparkle"), CHASE("Chase") }
 
 @Composable
-private fun MusicSheet(
+internal fun MusicSheet(
     seq: Sequence,
     envelope: AudioEnvelope?,
     selectedTrack: Track?,
