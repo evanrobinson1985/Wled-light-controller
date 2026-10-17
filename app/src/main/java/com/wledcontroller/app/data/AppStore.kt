@@ -12,6 +12,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import com.wledcontroller.app.house.HouseMap
+import com.wledcontroller.app.show.Playlist
+import com.wledcontroller.app.show.ScheduleEntry
 
 @Serializable
 data class SavedDevice(val id: String, val name: String, val host: String)
@@ -42,6 +44,9 @@ class AppStore(private val context: Context) {
         val TILE_DEVICE = stringPreferencesKey("tile_device")
         val LIGHT_PROFILES = stringPreferencesKey("light_profiles")
         val HOUSE_MAP = stringPreferencesKey("house_map")
+        val PLAYLISTS = stringPreferencesKey("playlists")
+        val SCHEDULES = stringPreferencesKey("schedules")
+        val SCHEDULE_ON = androidx.datastore.preferences.core.booleanPreferencesKey("schedule_on")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -121,6 +126,23 @@ class AppStore(private val context: Context) {
             prefs[Keys.HOUSE_MAP] = json.encodeToString(transform(cur))
         }
     }
+
+    val playlists: Flow<List<Playlist>> = listFlow(Keys.PLAYLISTS)
+    val schedules: Flow<List<ScheduleEntry>> = listFlow(Keys.SCHEDULES)
+    val scheduleOn: Flow<Boolean> = context.dataStore.data.map { it[Keys.SCHEDULE_ON] ?: false }
+
+    suspend fun upsertPlaylist(p: Playlist) = editList<Playlist>(Keys.PLAYLISTS) { list ->
+        if (list.any { it.id == p.id }) list.map { if (it.id == p.id) p else it } else list + p
+    }
+    suspend fun removePlaylist(id: String) {
+        editList<Playlist>(Keys.PLAYLISTS) { list -> list.filterNot { it.id == id } }
+        editList<ScheduleEntry>(Keys.SCHEDULES) { list -> list.filterNot { it.playlistId == id } }
+    }
+    suspend fun upsertSchedule(e: ScheduleEntry) = editList<ScheduleEntry>(Keys.SCHEDULES) { list ->
+        if (list.any { it.id == e.id }) list.map { if (it.id == e.id) e else it } else list + e
+    }
+    suspend fun removeSchedule(id: String) = editList<ScheduleEntry>(Keys.SCHEDULES) { list -> list.filterNot { it.id == id } }
+    suspend fun setScheduleOn(on: Boolean) { context.dataStore.edit { it[Keys.SCHEDULE_ON] = on } }
 
     suspend fun setTileDevice(id: String) {
         context.dataStore.edit { it[Keys.TILE_DEVICE] = id }

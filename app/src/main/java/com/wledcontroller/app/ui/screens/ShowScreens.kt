@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.VolumeOff
@@ -134,7 +135,7 @@ import kotlin.math.roundToLong
 // ================================================================== show list
 
 @Composable
-fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> Unit) {
+fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> Unit, onSchedule: () -> Unit) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val shows by container.sequences.all.collectAsStateWithLifecycle()
@@ -147,6 +148,11 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
             TopAppBar(
                 title = { Text("Shows") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                actions = {
+                    TextButton(onClick = onSchedule) {
+                        Icon(Icons.Filled.Schedule, null); Spacer(Modifier.width(6.dp)); Text("Schedule")
+                    }
+                },
             )
         },
         floatingActionButton = {

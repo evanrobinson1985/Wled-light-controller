@@ -9,6 +9,7 @@ import com.wledcontroller.app.house.HouseEngine
 import com.wledcontroller.app.house.StandaloneSetup
 import com.wledcontroller.app.show.SequencePlayer
 import com.wledcontroller.app.show.SequenceRepository
+import com.wledcontroller.app.show.ShowRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,4 +39,5 @@ class AppContainer(context: Context) {
     val standalone = StandaloneSetup(context, api, store)
     val sequences = SequenceRepository(context, scope)
     val player = SequencePlayer(store, house, scope)
+    val showRunner = ShowRunner(store, api, sequences, house, scope)
 }
