@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">WLED Controller</string>
+    <string name="tile_label">WLED Lights</string>
+</resources>
