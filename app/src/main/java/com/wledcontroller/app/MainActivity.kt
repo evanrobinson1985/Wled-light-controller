@@ -11,6 +11,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.wledcontroller.app.ui.screens.CameraScanScreen
 import com.wledcontroller.app.ui.screens.DeviceScreen
 import com.wledcontroller.app.ui.screens.GroupScreen
 import com.wledcontroller.app.ui.screens.HomeScreen
@@ -49,7 +50,19 @@ class MainActivity : ComponentActivity() {
                                 onStandalone = { nav.navigate("house/standalone") },
                             )
                         }
-                        composable("house/map") { HouseMapEditor(onBack = { nav.popBackStack() }) }
+                        composable("house/map") {
+                            HouseMapEditor(onBack = { nav.popBackStack() }, onScan = { nav.navigate("house/scan") })
+                        }
+                        composable("house/scan") {
+                            CameraScanScreen(
+                                onBack = { nav.popBackStack() },
+                                onFinished = {
+                                    // Land in the editor to fine-tune the result.
+                                    nav.popBackStack()
+                                    if (nav.currentDestination?.route != "house/map") nav.navigate("house/map")
+                                },
+                            )
+                        }
                         composable("house/standalone") {
                             StandaloneScreen(onBack = { nav.popBackStack() }, onOpenDevice = { nav.navigate("device/$it") })
                         }

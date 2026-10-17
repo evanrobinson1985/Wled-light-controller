@@ -94,6 +94,17 @@ class HouseEngine(private val context: Context, private val store: AppStore, pri
         }
     }
 
+    /** Lights a single LED (white) for a few seconds, everything else on that controller off. */
+    fun identifyLed(host: String, index: Int) {
+        identifyJob?.cancel()
+        identifyJob = scope.launch(Dispatchers.IO) {
+            val buf = ByteArray((index + 1) * 3)
+            buf[index * 3] = 0xFF.toByte(); buf[index * 3 + 1] = 0xFF.toByte(); buf[index * 3 + 2] = 0xFF.toByte()
+            DdpSender().use { ddp -> repeat(12) { runCatching { ddp.send(host, buf) }; delay(250) } }
+        }
+    }
+    private var identifyJob: Job? = null
+
     /** Copies a picked photo into app storage, downscaled so it is cheap to draw. Returns (path, aspect). */
     suspend fun importPhoto(uri: Uri): Pair<String, Float> = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
@@ -104,10 +115,17 @@ class HouseEngine(private val context: Context, private val store: AppStore, pri
         val bmp = resolver.openInputStream(uri).use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
         } ?: throw IllegalArgumentException("Couldn't read that image")
+        savePhoto(bmp)
+    }
+
+    /** Saves a camera frame as the map background. Returns (path, aspect). */
+    suspend fun importBitmap(bmp: Bitmap): Pair<String, Float> = withContext(Dispatchers.IO) { savePhoto(bmp) }
+
+    private fun savePhoto(bmp: Bitmap): Pair<String, Float> {
         val file = File(context.filesDir, "house_${System.currentTimeMillis()}.jpg")
         file.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 88, it) }
         context.filesDir.listFiles { f -> f.name.startsWith("house_") && f != file }?.forEach { it.delete() }
-        file.absolutePath to bmp.width.toFloat() / bmp.height
+        return file.absolutePath to bmp.width.toFloat() / bmp.height
     }
 
     private companion object {

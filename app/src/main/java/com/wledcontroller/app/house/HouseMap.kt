@@ -8,8 +8,9 @@ import kotlin.math.hypot
 data class MapPoint(val x: Float, val y: Float)
 
 /**
- * One physical run of lights (a roofline, a window, a bush …) traced on the photo.
- * The first point is where LED [startLed] sits; LEDs are spread evenly along the line.
+ * One physical run of lights (a roofline, a window, a bush …) on the photo.
+ * Either traced as a line ([points]: the first point is LED [startLed], LEDs spread evenly
+ * along it) or placed LED by LED ([ledPoints], from a camera scan or manual editing).
  */
 @Serializable
 data class LightRun(
@@ -19,8 +20,12 @@ data class LightRun(
     val startLed: Int,
     val count: Int,
     val points: List<MapPoint> = emptyList(),
+    /** Exact position of each LED in the run; null = not placed (stays dark). Overrides [points]. */
+    val ledPoints: List<MapPoint?>? = null,
 ) {
     val endLed get() = startLed + count
+    val isPlacedPerLed get() = ledPoints != null
+    val placedCount get() = ledPoints?.count { it != null } ?: if (points.size >= 2) count else 0
 }
 
 @Serializable
@@ -35,8 +40,14 @@ data class HouseMap(
 /** A placed LED: which device and physical index, where it is, and its order within its run. */
 data class PlacedLed(val deviceId: String, val index: Int, val x: Float, val y: Float, val runIndex: Int, val orderInRun: Int)
 
+/** Position of every LED in the run (index = order in run); null where an LED isn't placed. */
+fun LightRun.ledPositions(aspect: Float): List<MapPoint?> {
+    ledPoints?.let { lp -> return List(count) { lp.getOrNull(it) } }
+    return tracedPositions(aspect)
+}
+
 /** Spreads [LightRun.count] LEDs evenly by distance along the traced line (in photo-proportional space). */
-fun LightRun.ledPositions(aspect: Float): List<MapPoint> {
+fun LightRun.tracedPositions(aspect: Float): List<MapPoint> {
     if (count <= 0 || points.isEmpty()) return emptyList()
     if (points.size == 1 || count == 1) return List(count) { points.first() }
     // Measure in a space where x and y have the same scale so diagonal runs aren't distorted.
@@ -53,5 +64,25 @@ fun LightRun.ledPositions(aspect: Float): List<MapPoint> {
 }
 
 fun HouseMap.placedLeds(): List<PlacedLed> = runs.flatMapIndexed { r, run ->
-    run.ledPositions(aspect).mapIndexed { i, p -> PlacedLed(run.deviceId, run.startLed + i, p.x, p.y, r, i) }
+    run.ledPositions(aspect).mapIndexedNotNull { i, p -> p?.let { PlacedLed(run.deviceId, run.startLed + i, it.x, it.y, r, i) } }
+}
+
+/** Fills unplaced LEDs by interpolating between the nearest placed LEDs on either side. */
+fun List<MapPoint?>.fillGaps(): List<MapPoint?> {
+    val placed = indices.filter { this[it] != null }
+    if (placed.size < 2) return this
+    return List(size) { i ->
+        this[i] ?: run {
+            val before = placed.lastOrNull { it < i }
+            val after = placed.firstOrNull { it > i }
+            when {
+                before != null && after != null -> {
+                    val a = this[before]!!; val b = this[after]!!
+                    val f = (i - before).toFloat() / (after - before)
+                    MapPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
+                }
+                else -> null // Outside the detected span: leave for the user to place.
+            }
+        }
+    }
 }

@@ -11,6 +11,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +34,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -40,6 +46,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -87,6 +94,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -107,6 +116,7 @@ import com.wledcontroller.app.house.LightRun
 import com.wledcontroller.app.house.MapPoint
 import com.wledcontroller.app.house.StandalonePlan
 import com.wledcontroller.app.house.ledPositions
+import com.wledcontroller.app.house.fillGaps
 import com.wledcontroller.app.house.placedLeds
 import com.wledcontroller.app.ui.components.GradientSlider
 import com.wledcontroller.app.ui.components.SectionTitle
@@ -304,7 +314,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
 // ================================================================== map editor
 
 @Composable
-fun HouseMapEditor(onBack: () -> Unit) {
+fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
@@ -316,6 +326,12 @@ fun HouseMapEditor(onBack: () -> Unit) {
     var editRun by remember { mutableStateOf<LightRun?>(null) }
     var deleteRun by remember { mutableStateOf<LightRun?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
+
+    // Per-LED editing state.
+    var editingRunId by remember { mutableStateOf<String?>(null) }
+    val editPoints = remember { mutableStateListOf<MapPoint?>() }
+    var selectedLed by remember { mutableStateOf<Int?>(null) }
+    var placingLed by remember { mutableStateOf<Int?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch {
@@ -333,13 +349,41 @@ fun HouseMapEditor(onBack: () -> Unit) {
     }
 
     val drawingRun = map.runs.firstOrNull { it.id == drawingRunId }
+    val editingRun = map.runs.firstOrNull { it.id == editingRunId }
+
+    fun startEditing(run: LightRun) {
+        editPoints.clear()
+        editPoints.addAll(run.ledPositions(map.aspect).let { pos -> List(run.count) { pos.getOrNull(it) } })
+        selectedLed = null; placingLed = null
+        editingRunId = run.id
+    }
+    fun nextMissing(from: Int = 0): Int? = (from until editPoints.size).firstOrNull { editPoints[it] == null }
+        ?: (0 until from.coerceAtMost(editPoints.size)).firstOrNull { editPoints[it] == null }
+    fun lightLed(i: Int) {
+        val run = editingRun ?: return
+        val host = devices.firstOrNull { it.id == run.deviceId }?.device?.host ?: return
+        container.house.identifyLed(host, run.startLed + i)
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (drawingRun != null) "Trace ${drawingRun.name}" else "House map") },
+                title = {
+                    Text(
+                        when {
+                            drawingRun != null -> "Trace ${drawingRun.name}"
+                            editingRun != null -> "Edit ${editingRun.name}"
+                            else -> "House map"
+                        }
+                    )
+                },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
-                actions = { IconButton(onClick = { pickPhoto() }) { Icon(Icons.Filled.Image, "Choose photo") } },
+                actions = {
+                    if (drawingRun == null && editingRun == null) {
+                        IconButton(onClick = onScan) { Icon(Icons.Filled.PhotoCamera, "Scan with camera") }
+                        IconButton(onClick = { pickPhoto() }) { Icon(Icons.Filled.Image, "Choose photo") }
+                    }
+                },
             )
         },
     ) { padding ->
@@ -347,17 +391,52 @@ fun HouseMapEditor(onBack: () -> Unit) {
             if (map.photoPath == null) {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.padding(bottom = 12.dp)) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Add a photo of your house", fontWeight = FontWeight.SemiBold)
+                        Text("Map your lights", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "Stand across the street and take a photo that shows all your lights, then trace each run on it. You can also trace on the blank canvas below.",
+                            "Easiest: scan with the camera — each light flashes and the app finds it. Or choose a photo of your house and trace each run by hand (you can also trace on the blank canvas below).",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Spacer(Modifier.height(8.dp))
-                        FilledTonalButton(onClick = { pickPhoto() }) { Icon(Icons.Filled.Image, null); Spacer(Modifier.width(8.dp)); Text("Choose photo") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = onScan) { Icon(Icons.Filled.PhotoCamera, null); Spacer(Modifier.width(8.dp)); Text("Camera scan") }
+                            FilledTonalButton(onClick = { pickPhoto() }) { Icon(Icons.Filled.Image, null); Spacer(Modifier.width(8.dp)); Text("Photo") }
+                        }
                     }
                 }
             }
             importError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+            if (editingRun != null) {
+                LedEditCanvas(
+                    map = map, photo = photo, editingRunId = editingRun.id, points = editPoints, selected = selectedLed,
+                    onTapEmpty = { p ->
+                        val i = placingLed
+                        if (i != null && i < editPoints.size) {
+                            editPoints[i] = p
+                            lightLed(i)
+                            placingLed = nextMissing(i + 1)
+                        } else selectedLed = null
+                    },
+                    onTapLed = { i -> selectedLed = i; placingLed = null; lightLed(i) },
+                    onMoveLed = { i, p -> editPoints[i] = p; selectedLed = i },
+                )
+                LedEditControls(
+                    points = editPoints, selected = selectedLed, placing = placingLed,
+                    onRemove = { i -> editPoints[i] = null; selectedLed = null },
+                    onFillGaps = { val filled = editPoints.toList().fillGaps(); editPoints.clear(); editPoints.addAll(filled) },
+                    onPlaceMissing = { placingLed = nextMissing(); selectedLed = null; placingLed?.let { lightLed(it) } },
+                    onStopPlacing = { placingLed = null },
+                    onSkip = { i -> placingLed = nextMissing(i + 1)?.takeIf { it != i }; placingLed?.let { lightLed(it) } },
+                    onAddAtEnd = { editPoints.add(null); placingLed = editPoints.lastIndex; selectedLed = null; lightLed(editPoints.lastIndex) },
+                    onRemoveLast = { if (editPoints.size > 1) { editPoints.removeAt(editPoints.lastIndex); selectedLed = null; placingLed = null } },
+                    onCancel = { editingRunId = null },
+                    onDone = {
+                        saveRun(editingRun.copy(count = editPoints.size, ledPoints = editPoints.toList()))
+                        editingRunId = null
+                    },
+                )
+                return@Column
+            }
 
             HouseCanvas(
                 map, photo,
@@ -367,16 +446,17 @@ fun HouseMapEditor(onBack: () -> Unit) {
                 map.runs.forEachIndexed { r, run ->
                     if (run.id == drawingRunId) return@forEachIndexed
                     val col = RunColors[r % RunColors.size]
-                    drawRun(run.points, col, stroke, dashed = false)
-                    run.ledPositions(map.aspect).forEach { p -> drawCircle(col, 2.5.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
-                    run.points.firstOrNull()?.let { s ->
+                    val placed = run.ledPositions(map.aspect).filterNotNull()
+                    drawRun(if (run.isPlacedPerLed) placed else run.points, col, stroke, dashed = false)
+                    placed.forEach { p -> drawCircle(col, 2.5.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
+                    placed.firstOrNull()?.let { s ->
                         drawCircle(Color.White, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height), style = Stroke(stroke))
                     }
                 }
                 if (drawingRun != null) {
                     drawRun(draft, Color.White, stroke, dashed = true)
                     val preview = drawingRun.copy(points = draft.toList()).ledPositions(map.aspect)
-                    preview.forEach { p -> drawCircle(Color.White, 2.5.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
+                    preview.filterNotNull().forEach { p -> drawCircle(Color.White, 2.5.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
                     draft.firstOrNull()?.let { s -> drawCircle(Color.Red, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height)) }
                 }
             }
@@ -394,7 +474,7 @@ fun HouseMapEditor(onBack: () -> Unit) {
                     TextButton(onClick = { drawingRunId = null; draft.clear() }) { Text("Cancel") }
                     Spacer(Modifier.weight(1f))
                     Button(enabled = draft.size >= 2, onClick = {
-                        saveRun(drawingRun.copy(points = draft.toList()))
+                        saveRun(drawingRun.copy(points = draft.toList(), ledPoints = null))
                         drawingRunId = null; draft.clear()
                     }) { Text("Done") }
                 }
@@ -428,7 +508,11 @@ fun HouseMapEditor(onBack: () -> Unit) {
                                 Text(run.name, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     "${device?.device?.name ?: "Missing device"} · LEDs ${run.startLed}–${run.endLed - 1}" +
-                                        if (run.points.size < 2) " · not traced yet" else "",
+                                        when {
+                                            run.isPlacedPerLed -> " · ${run.placedCount} of ${run.count} placed"
+                                            run.points.size < 2 -> " · not traced yet"
+                                            else -> ""
+                                        },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -436,9 +520,12 @@ fun HouseMapEditor(onBack: () -> Unit) {
                             IconButton(onClick = { editRun = run }) { Icon(Icons.Filled.Edit, "Edit run") }
                             IconButton(onClick = { deleteRun = run }) { Icon(Icons.Outlined.Delete, "Delete run") }
                         }
-                        Row {
-                            TextButton(onClick = { drawingRunId = run.id; draft.clear() }) { Text(if (run.points.size < 2) "Trace" else "Retrace") }
-                            TextButton(enabled = run.points.size >= 2, onClick = { saveRun(run.copy(points = run.points.reversed())) }) {
+                        Row(Modifier.horizontalScroll(rememberScrollState())) {
+                            TextButton(enabled = run.placedCount > 0, onClick = { startEditing(run) }) { Text("Edit LEDs") }
+                            TextButton(onClick = { drawingRunId = run.id; draft.clear() }) {
+                                Text(if (run.points.size < 2 && !run.isPlacedPerLed) "Trace" else "Retrace")
+                            }
+                            TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { saveRun(run.copy(points = run.points.reversed())) }) {
                                 Icon(Icons.Filled.SwapHoriz, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Flip start")
                             }
                             TextButton(enabled = device != null, onClick = { device?.let { container.house.identify(run, it.device.host) } }) {
@@ -702,5 +789,204 @@ private fun KeyRow(k: String, v: String) {
     Row(Modifier.fillMaxWidth()) {
         Text(k, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(v, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+    }
+}
+
+// ================================================================== per-LED editing
+
+/**
+ * The map with one run's LEDs editable: pinch to zoom, drag with two fingers (or one, when
+ * zoomed and not on an LED) to pan, drag an LED to move it, tap an LED to select it.
+ */
+@Composable
+private fun LedEditCanvas(
+    map: HouseMap,
+    photo: ImageBitmap?,
+    editingRunId: String,
+    points: List<MapPoint?>,
+    selected: Int?,
+    onTapEmpty: (MapPoint) -> Unit,
+    onTapLed: (Int) -> Unit,
+    onMoveLed: (Int, MapPoint) -> Unit,
+) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
+    val tapEmpty by rememberUpdatedState(onTapEmpty)
+    val tapLed by rememberUpdatedState(onTapLed)
+    val moveLed by rememberUpdatedState(onMoveLed)
+    val currentPoints by rememberUpdatedState(points)
+    val others = remember(map, editingRunId) {
+        map.runs.filter { it.id != editingRunId }.flatMap { it.ledPositions(map.aspect).filterNotNull() }
+    }
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(map.aspect.coerceIn(0.4f, 3f))
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF101218))
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale; scaleY = scale
+                    translationX = pan.x; translationY = pan.y
+                    transformOrigin = TransformOrigin(0f, 0f)
+                }
+        ) {
+            if (photo != null) Image(photo, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds, alpha = 0.75f)
+            Canvas(Modifier.fillMaxSize()) {
+                val r = 3.dp.toPx() / scale
+                others.forEach { p -> drawCircle(Color.White.copy(alpha = 0.25f), r * 0.8f, Offset(p.x * size.width, p.y * size.height)) }
+                // Thin line through the run in LED order makes misplaced LEDs obvious.
+                val placed = points.withIndex().filter { it.value != null }
+                placed.zipWithNext { a, b ->
+                    if (b.index == a.index + 1) drawLine(
+                        Color(0xFFFFB86B).copy(alpha = 0.6f),
+                        Offset(a.value!!.x * size.width, a.value!!.y * size.height),
+                        Offset(b.value!!.x * size.width, b.value!!.y * size.height),
+                        strokeWidth = 1.dp.toPx() / scale,
+                    )
+                }
+                placed.forEach { (i, p) ->
+                    val o = Offset(p!!.x * size.width, p.y * size.height)
+                    val col = when {
+                        i == selected -> Color.White
+                        i == 0 -> Color.Red
+                        else -> Color(0xFFFFB86B)
+                    }
+                    drawCircle(col, if (i == selected) r * 1.6f else r, o)
+                    if (i == selected) drawCircle(Color.White, r * 3f, o, style = Stroke(1.5.dp.toPx() / scale))
+                }
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    fun clampPan(p: Offset) = Offset(
+                        p.x.coerceIn(size.width - size.width * scale, 0f),
+                        p.y.coerceIn(size.height - size.height * scale, 0f),
+                    )
+                    fun toMap(screen: Offset): MapPoint {
+                        val c = (screen - pan) / scale
+                        return MapPoint((c.x / size.width).coerceIn(0f, 1f), (c.y / size.height).coerceIn(0f, 1f))
+                    }
+                    fun hit(screen: Offset): Int? {
+                        val radius = 24.dp.toPx()
+                        var best: Int? = null
+                        var bestD = Float.MAX_VALUE
+                        currentPoints.forEachIndexed { i, p ->
+                            if (p == null) return@forEachIndexed
+                            val s = Offset(p.x * size.width, p.y * size.height) * scale + pan
+                            val d = (s - screen).getDistance()
+                            if (d < radius && d < bestD) { bestD = d; best = i }
+                        }
+                        return best
+                    }
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val target = hit(down.position)
+                        var dragging = false
+                        var multi = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val pressed = event.changes.filter { it.pressed }
+                            if (pressed.isEmpty()) break
+                            if (pressed.size >= 2) {
+                                multi = true
+                                val zoom = event.calculateZoom()
+                                val centroid = event.calculateCentroid()
+                                val newScale = (scale * zoom).coerceIn(1f, 8f)
+                                pan = clampPan(centroid - (centroid - pan) * (newScale / scale) + event.calculatePan())
+                                scale = newScale
+                                event.changes.forEach { it.consume() }
+                            } else if (!multi) {
+                                val ch = pressed.first()
+                                if (!dragging && (ch.position - down.position).getDistance() > viewConfiguration.touchSlop) dragging = true
+                                if (dragging) {
+                                    if (target != null) moveLed(target, toMap(ch.position))
+                                    else if (scale > 1f) pan = clampPan(pan + (ch.position - ch.previousPosition))
+                                    ch.consume()
+                                }
+                            }
+                        }
+                        if (!dragging && !multi) {
+                            if (target != null) tapLed(target) else tapEmpty(toMap(down.position))
+                        }
+                    }
+                }
+        )
+    }
+}
+
+@Composable
+private fun LedEditControls(
+    points: List<MapPoint?>,
+    selected: Int?,
+    placing: Int?,
+    onRemove: (Int) -> Unit,
+    onFillGaps: () -> Unit,
+    onPlaceMissing: () -> Unit,
+    onStopPlacing: () -> Unit,
+    onSkip: (Int) -> Unit,
+    onAddAtEnd: () -> Unit,
+    onRemoveLast: () -> Unit,
+    onCancel: () -> Unit,
+    onDone: () -> Unit,
+) {
+    val placed = points.count { it != null }
+    val missing = points.size - placed
+    Column(Modifier.padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "$placed of ${points.size} LEDs placed" + if (missing > 0) " · $missing missing" else "",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        when {
+            placing != null -> {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Tap where LED ${placing + 1} is", fontWeight = FontWeight.SemiBold)
+                        Text("It's lit up on your house now.", style = MaterialTheme.typography.bodySmall)
+                        Row {
+                            TextButton(onClick = { onSkip(placing) }) { Text("Skip") }
+                            TextButton(onClick = onStopPlacing) { Text("Stop placing") }
+                        }
+                    }
+                }
+            }
+            selected != null -> {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Row(Modifier.padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("LED ${selected + 1} — drag it to move, or", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { onRemove(selected) }) {
+                            Icon(Icons.Outlined.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Remove")
+                        }
+                    }
+                }
+            }
+            else -> Text(
+                "Pinch to zoom. Drag a light to move it; tap one to select it (it lights up on your house).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            OutlinedButton(onClick = onFillGaps, enabled = missing > 0) { Text("Fill gaps") }
+            OutlinedButton(onClick = onPlaceMissing, enabled = missing > 0 && placing == null) { Text("Place missing") }
+            OutlinedButton(onClick = onAddAtEnd) { Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Text("Add LED") }
+            OutlinedButton(onClick = onRemoveLast, enabled = points.size > 1) { Text("Remove last LED") }
+        }
+        Text(
+            "Fill gaps guesses missed lights between found ones. Place missing walks you through each one. Add / Remove last LED changes how many lights this run has.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+            Spacer(Modifier.weight(1f))
+            Button(onClick = onDone) { Text("Save") }
+        }
     }
 }
