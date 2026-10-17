@@ -39,6 +39,7 @@ class AppStore(private val context: Context) {
         val RECENT_COLORS = stringPreferencesKey("recent_colors")
         val FAVORITE_EFFECTS = stringSetPreferencesKey("favorite_effects")
         val TILE_DEVICE = stringPreferencesKey("tile_device")
+        val LIGHT_PROFILES = stringPreferencesKey("light_profiles")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -92,6 +93,19 @@ class AppStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             val cur = prefs[Keys.FAVORITE_EFFECTS] ?: emptySet()
             prefs[Keys.FAVORITE_EFFECTS] = if (name in cur) cur - name else cur + name
+        }
+    }
+
+    /** Light type per device ("deviceId") or per segment ("deviceId#segId"). */
+    val lightProfiles: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
+        prefs[Keys.LIGHT_PROFILES]?.let { runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull() } ?: emptyMap()
+    }
+
+    suspend fun setLightProfile(key: String, profile: LightProfile?) {
+        context.dataStore.edit { prefs ->
+            val cur = prefs[Keys.LIGHT_PROFILES]?.let { runCatching { json.decodeFromString<Map<String, String>>(it) }.getOrNull() } ?: emptyMap()
+            val next = if (profile == null) cur - key else cur + (key to profile.name)
+            prefs[Keys.LIGHT_PROFILES] = json.encodeToString(next)
         }
     }
 

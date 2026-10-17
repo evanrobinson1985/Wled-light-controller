@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -88,6 +89,8 @@ import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.DeviceController
 import com.wledcontroller.app.data.DeviceSnapshot
 import com.wledcontroller.app.data.EffectMeta
+import com.wledcontroller.app.data.LightProfile
+import com.wledcontroller.app.data.profileFor
 import com.wledcontroller.app.data.Preset
 import com.wledcontroller.app.data.Segment
 import com.wledcontroller.app.data.WledColor
@@ -283,10 +286,14 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
     val seg = snap.state?.activeSegment ?: return NoSegments()
     val meta = snap.effectMeta(seg.fx)
     val favorites by container.store.favoriteEffects.collectAsStateWithLifecycle(emptySet())
+    val profiles by container.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
+    val profile = profiles.profileFor(controller.id, seg.id)
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableIntStateOf(0) }
+    val filters = EffectFilters + listOfNotNull(profile?.let { "Best for ${it.label.substringBefore(" /").lowercase()}" })
+    if (filter >= filters.size) filter = 0
 
-    val items = remember(snap.effects, snap.fxData, query, filter, favorites) {
+    val items = remember(snap.effects, snap.fxData, query, filter, favorites, profile) {
         snap.effects.withIndex()
             .filter { (_, n) -> isRealName(n) }
             .filter { (_, n) -> query.isBlank() || n.contains(query.trim(), ignoreCase = true) }
@@ -295,6 +302,7 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
                     1 -> n in favorites
                     2 -> snap.effectMeta(i).is2D
                     3 -> snap.effectMeta(i).isAudio
+                    4 -> profile?.suggests(n, snap.effectMeta(i)) ?: true
                     else -> true
                 }
             }
@@ -312,8 +320,8 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
         }
         item {
             SearchField(query, { query = it }, "Search ${snap.effects.count(::isRealName)} effects")
-            Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                EffectFilters.forEachIndexed { i, label ->
+            Row(Modifier.padding(vertical = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                filters.forEachIndexed { i, label ->
                     FilterChip(selected = filter == i, onClick = { filter = i }, label = { Text(label) })
                 }
             }
@@ -325,7 +333,10 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
             val m = snap.effectMeta(i)
             SelectableRow(
                 selected = seg.fx == i,
-                onClick = { controller.setEffect(i) },
+                onClick = {
+                    controller.setEffect(i)
+                    profile?.effectSpeed?.let { controller.setSegValue("sx", it) }
+                },
             ) {
                 Text(name, Modifier.weight(1f), fontWeight = if (seg.fx == i) FontWeight.SemiBold else FontWeight.Normal)
                 if (m.is2D) Badge("2D")
@@ -430,6 +441,8 @@ fun PalettesTab(controller: DeviceController, snap: DeviceSnapshot) {
     val meta = snap.effectMeta(seg.fx)
     var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(controller) { controller.loadPalettePreviews() }
+    val profiles by LocalAppContainer.current.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
+    val profile = profiles.profileFor(controller.id, seg.id)
 
     val items = remember(snap.palettes, query) {
         snap.palettes.withIndex()
@@ -442,9 +455,23 @@ fun PalettesTab(controller: DeviceController, snap: DeviceSnapshot) {
         item {
             HolidayThemesSection(
                 availableEffects = snap.effects,
-                onApply = { colors, effect, theme -> controller.applyTheme(colors, effect, theme.bands, theme.speed, theme.intensity) },
+                preferBands = profile?.preferBands == true,
+                onApply = { colors, effect, theme ->
+                    val scale = profile?.speedScale ?: 1f
+                    controller.applyTheme(colors, effect, theme.bands || profile?.preferBands == true, (theme.speed * scale).toInt(), theme.intensity)
+                },
                 modifier = Modifier.padding(bottom = 12.dp),
             )
+        }
+        if (profile == LightProfile.BULLETS) {
+            item {
+                Text(
+                    "Tip for bullet strings: bulbs are far apart, so smooth gradients change very little from bulb to bulb. High-contrast palettes such as Party, Rainbow Bands or \"* Colors Only\" read best.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
         }
         if (!meta.usesPalette) {
             item {
@@ -591,6 +618,15 @@ private fun SegmentDetails(seg: Segment, ledCount: Int, controller: DeviceContro
         ToggleRow("Reverse direction", seg.rev) { controller.updateSegment(seg.id, buildJsonObject { put("rev", it) }) }
         ToggleRow("Mirror", seg.mi) { controller.updateSegment(seg.id, buildJsonObject { put("mi", it) }) }
         ToggleRow("Freeze animation", seg.frz) { controller.updateSegment(seg.id, buildJsonObject { put("frz", it) }) }
+        val container = LocalAppContainer.current
+        val scope = rememberCoroutineScope()
+        val profiles by container.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
+        val own = LightProfile.parse(profiles[LightProfile.segmentKey(controller.id, seg.id)])
+        val inherited = LightProfile.parse(profiles[LightProfile.deviceKey(controller.id)])
+        Text("Light type", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+        LightProfilePicker(own, inheritLabel = "Same as device" + (inherited?.let { " (${it.label})" } ?: "")) { p ->
+            scope.launch { container.store.setLightProfile(LightProfile.segmentKey(controller.id, seg.id), p) }
+        }
     }
 }
 

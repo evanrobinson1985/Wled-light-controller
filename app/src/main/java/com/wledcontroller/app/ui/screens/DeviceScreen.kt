@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewWeek
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -78,7 +79,7 @@ private val Tabs = listOf(
 )
 
 @Composable
-fun DeviceScreen(deviceId: String, onBack: () -> Unit, onOpenWebUi: (String) -> Unit) {
+fun DeviceScreen(deviceId: String, onBack: () -> Unit, onOpenWebUi: (String) -> Unit, onOpenLedSetup: (String) -> Unit) {
     val container = LocalAppContainer.current
     val controllers by container.devices.list.collectAsStateWithLifecycle()
     val controller = controllers.firstOrNull { it.id == deviceId }
@@ -90,11 +91,11 @@ fun DeviceScreen(deviceId: String, onBack: () -> Unit, onOpenWebUi: (String) -> 
         }) { p -> Box(Modifier.padding(p).fillMaxSize(), contentAlignment = Alignment.Center) { Text("Device not found") } }
         return
     }
-    DeviceContent(controller, onBack, onOpenWebUi)
+    DeviceContent(controller, onBack, onOpenWebUi, onOpenLedSetup)
 }
 
 @Composable
-private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOpenWebUi: (String) -> Unit) {
+private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOpenWebUi: (String) -> Unit, onOpenLedSetup: (String) -> Unit) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val snap by controller.snapshot.collectAsStateWithLifecycle()
@@ -149,6 +150,10 @@ private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOp
                             DropdownMenuItem(
                                 text = { Text("Device info") }, leadingIcon = { Icon(Icons.Filled.Info, null) },
                                 onClick = { menu = false; showInfo = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("LED setup & light type") }, leadingIcon = { Icon(Icons.Filled.Tune, null) },
+                                onClick = { menu = false; onOpenLedSetup(controller.id) },
                             )
                             DropdownMenuItem(
                                 text = { Text("WLED web interface") }, leadingIcon = { Icon(Icons.Filled.Language, null) },

@@ -36,9 +36,16 @@ class WledApi(val client: OkHttpClient) {
         }
     }
 
-    suspend fun postState(host: String, body: JsonObject): JsonElement = withContext(Dispatchers.IO) {
+    suspend fun postState(host: String, body: JsonObject): JsonElement = post(host, "/json/state", body)
+
+    /** Device configuration (LED hardware, power limit …) — same shape as WLED's cfg.json. */
+    suspend fun config(host: String): JsonObject = get(host, "/json/cfg") as? JsonObject ?: throw IOException("Bad config")
+
+    suspend fun postConfig(host: String, body: JsonObject): JsonElement = post(host, "/json/cfg", body)
+
+    private suspend fun post(host: String, path: String, body: JsonObject): JsonElement = withContext(Dispatchers.IO) {
         val req = Request.Builder()
-            .url(baseUrl(host) + "/json/state")
+            .url(baseUrl(host) + path)
             .post(body.toString().toRequestBody(jsonType))
             .build()
         client.newCall(req).execute().use { resp ->

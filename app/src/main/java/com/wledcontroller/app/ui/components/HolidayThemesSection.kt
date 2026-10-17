@@ -80,6 +80,7 @@ fun HolidayThemesSection(
     availableEffects: List<String>,
     onApply: (colors: List<Int>, effect: String?, theme: HolidayTheme) -> Unit,
     modifier: Modifier = Modifier,
+    preferBands: Boolean = false,
 ) {
     val themes = remember { HolidayThemes.forToday() }
     var open by remember { mutableStateOf<HolidayTheme?>(null) }
@@ -100,7 +101,7 @@ fun HolidayThemesSection(
                     modifier = Modifier.width(156.dp),
                 ) {
                     Column(Modifier.padding(12.dp)) {
-                        ThemeBar(t.colors, t.bands, 22.dp)
+                        ThemeBar(t.colors, t.bands || preferBands, 22.dp)
                         Spacer(Modifier.height(10.dp))
                         Text(t.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
                         Text(
@@ -115,7 +116,7 @@ fun HolidayThemesSection(
     }
 
     open?.let { t ->
-        ThemeSheet(t, availableEffects, onDismiss = { open = null }) { colors, effect ->
+        ThemeSheet(t, t.bands || preferBands, availableEffects, onDismiss = { open = null }) { colors, effect ->
             onApply(colors, effect, t)
             open = null
         }
@@ -125,6 +126,7 @@ fun HolidayThemesSection(
 @Composable
 private fun ThemeSheet(
     theme: HolidayTheme,
+    bands: Boolean,
     availableEffects: List<String>,
     onDismiss: () -> Unit,
     onApply: (List<Int>, String?) -> Unit,
@@ -141,12 +143,12 @@ private fun ThemeSheet(
         Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding()) {
             Text(theme.name, style = MaterialTheme.typography.headlineSmall)
             Text(
-                if (theme.bands) "Repeating colour bands" else "Smooth colour ramp",
+                if (bands) "Repeating colour bands" else "Smooth colour ramp",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(16.dp))
-            ThemeBar(colors, theme.bands, 44.dp)
+            ThemeBar(colors, bands, 44.dp)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 colors.forEach { ColorSwatch(it.toComposeColor(), onClick = {}, size = 36.dp) }

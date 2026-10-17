@@ -24,6 +24,8 @@ multi-device control, scenes, and nicer controls.
 - Groups: control several devices together (power, brightness, colour, effect by name, speed/intensity)
 - Scenes: snapshot the look of any set of devices and restore them with one tap
 - Holiday themes (Christmas, Halloween, Hanukkah, Diwali, July 4th, Valentine's and more): in-season ones listed first, one-tap apply with a matching effect, and a Remix button that generates fresh variations
+- LED setup in the app: chip type (WS2811 / WS2812B / SK6812 …), LED count, start, data pin, colour order (with a red/green/blue test), reverse, skip, multiple outputs and power limit — saved to the controller with a reboot
+- Light types (LED strip, bullet / pixel string, matrix) per device or per segment: suggested effects, slower defaults and colour bands for bullets, 2D effects for matrices
 - Palette gradient previews, searchable effect/palette lists, effect favourites, 2D/audio filters
 - Favourite and recent colours, hex entry, random colour, white-temperature presets
 - Quick Settings tile to toggle a light from the notification shade

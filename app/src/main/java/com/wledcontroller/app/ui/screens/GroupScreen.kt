@@ -56,6 +56,7 @@ import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.DeviceGroup
 import com.wledcontroller.app.data.WledColor
 import com.wledcontroller.app.data.isRealName
+import com.wledcontroller.app.data.profileFor
 import com.wledcontroller.app.ui.components.ColorPickerPanel
 import com.wledcontroller.app.ui.components.ColorSwatch
 import com.wledcontroller.app.ui.components.GradientSlider
@@ -83,6 +84,7 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
     val anyOn = online.any { it.second.state?.on == true }
     val avgBri = online.mapNotNull { it.second.state?.bri }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 128f
     var effectQuery by rememberSaveable { mutableStateOf("") }
+    val profiles by container.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
 
     Scaffold(
         topBar = {
@@ -146,7 +148,11 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
             HolidayThemesSection(
                 availableEffects = lead?.effects ?: emptyList(),
                 onApply = { colors, effect, theme ->
-                    online.forEach { (c, _) -> c.applyTheme(colors, effect, theme.bands, theme.speed, theme.intensity) }
+                    online.forEach { (c, s) ->
+                        val p = profiles.profileFor(c.id, s.state?.activeSegment?.id)
+                        val bands = theme.bands || p?.preferBands == true
+                        c.applyTheme(colors, effect, bands, (theme.speed * (p?.speedScale ?: 1f)).toInt(), theme.intensity)
+                    }
                 },
             )
 

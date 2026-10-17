@@ -14,6 +14,7 @@ import androidx.navigation.navArgument
 import com.wledcontroller.app.ui.screens.DeviceScreen
 import com.wledcontroller.app.ui.screens.GroupScreen
 import com.wledcontroller.app.ui.screens.HomeScreen
+import com.wledcontroller.app.ui.screens.LedSetupScreen
 import com.wledcontroller.app.ui.screens.WebUiScreen
 import com.wledcontroller.app.ui.theme.WledTheme
 
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
                                 deviceId = entry.arguments?.getString("id").orEmpty(),
                                 onBack = { nav.popBackStack() },
                                 onOpenWebUi = { nav.navigate("web/$it") },
+                                onOpenLedSetup = { nav.navigate("setup/$it") },
                             )
                         }
                         composable("group/{id}", arguments = idArg) { entry ->
@@ -49,6 +51,12 @@ class MainActivity : ComponentActivity() {
                                 groupId = entry.arguments?.getString("id").orEmpty(),
                                 onBack = { nav.popBackStack() },
                                 onOpenDevice = { nav.navigate("device/$it") },
+                            )
+                        }
+                        composable("setup/{id}", arguments = idArg) { entry ->
+                            LedSetupScreen(
+                                deviceId = entry.arguments?.getString("id").orEmpty(),
+                                onBack = { nav.popBackStack() },
                             )
                         }
                         composable("web/{id}", arguments = idArg) { entry ->
