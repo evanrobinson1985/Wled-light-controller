@@ -95,6 +95,7 @@ import com.wledcontroller.app.data.isRealName
 import com.wledcontroller.app.ui.components.ColorPickerPanel
 import com.wledcontroller.app.ui.components.ColorSwatch
 import com.wledcontroller.app.ui.components.GradientSlider
+import com.wledcontroller.app.ui.components.HolidayThemesSection
 import com.wledcontroller.app.ui.components.PaletteBar
 import com.wledcontroller.app.ui.components.QuickColors
 import com.wledcontroller.app.ui.components.SectionTitle
@@ -438,6 +439,13 @@ fun PalettesTab(controller: DeviceController, snap: DeviceSnapshot) {
     }
 
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        item {
+            HolidayThemesSection(
+                availableEffects = snap.effects,
+                onApply = { colors, effect, theme -> controller.applyTheme(colors, effect, theme.bands, theme.speed, theme.intensity) },
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
         if (!meta.usesPalette) {
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {

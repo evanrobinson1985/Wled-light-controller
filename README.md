@@ -23,6 +23,7 @@ multi-device control, scenes, and nicer controls.
 - Instant, optimistic controls: slider drags are throttled and merged so the ESP isn't flooded
 - Groups: control several devices together (power, brightness, colour, effect by name, speed/intensity)
 - Scenes: snapshot the look of any set of devices and restore them with one tap
+- Holiday themes (Christmas, Halloween, Hanukkah, Diwali, July 4th, Valentine's and more): in-season ones listed first, one-tap apply with a matching effect, and a Remix button that generates fresh variations
 - Palette gradient previews, searchable effect/palette lists, effect favourites, 2D/audio filters
 - Favourite and recent colours, hex entry, random colour, white-temperature presets
 - Quick Settings tile to toggle a light from the notification shade

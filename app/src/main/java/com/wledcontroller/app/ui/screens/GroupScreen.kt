@@ -59,6 +59,7 @@ import com.wledcontroller.app.data.isRealName
 import com.wledcontroller.app.ui.components.ColorPickerPanel
 import com.wledcontroller.app.ui.components.ColorSwatch
 import com.wledcontroller.app.ui.components.GradientSlider
+import com.wledcontroller.app.ui.components.HolidayThemesSection
 import com.wledcontroller.app.ui.components.QuickColors
 import com.wledcontroller.app.ui.components.SectionTitle
 import com.wledcontroller.app.ui.components.toComposeColor
@@ -140,6 +141,14 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
                     ColorSwatch(c.toComposeColor(), onClick = { online.forEach { (d, _) -> d.setColor(0, WledColor.fromRgb(c)) } })
                 }
             }
+
+            Spacer(Modifier.height(16.dp))
+            HolidayThemesSection(
+                availableEffects = lead?.effects ?: emptyList(),
+                onApply = { colors, effect, theme ->
+                    online.forEach { (c, _) -> c.applyTheme(colors, effect, theme.bands, theme.speed, theme.intensity) }
+                },
+            )
 
             if (lead != null) {
                 val seg = lead.state?.activeSegment
