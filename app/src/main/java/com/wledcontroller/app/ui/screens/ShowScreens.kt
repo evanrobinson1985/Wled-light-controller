@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -105,6 +107,8 @@ import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.HolidayThemes
 import com.wledcontroller.app.house.Direction
 import com.wledcontroller.app.house.HouseMap
+import com.wledcontroller.app.show.AudioAnalyzer
+import com.wledcontroller.app.show.AudioEnvelope
 import com.wledcontroller.app.show.Clip
 import com.wledcontroller.app.show.SeqEffect
 import com.wledcontroller.app.show.Sequence
@@ -119,7 +123,9 @@ import com.wledcontroller.app.ui.components.QuickColors
 import com.wledcontroller.app.ui.components.SectionTitle
 import com.wledcontroller.app.ui.components.themeBrush
 import com.wledcontroller.app.ui.components.toComposeColor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlin.math.abs
@@ -297,7 +303,13 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
     val layout = remember(map, targets) { SequenceRenderer.prepare(map, seq.tracks) }
     DisposableEffect(Unit) {
         player.seek(0)
-        onDispose { player.stopAll() }
+        onDispose { player.stopAll(); player.loadAudio(null) }
+    }
+    var envelope by remember(seq.audioFile) { mutableStateOf<AudioEnvelope?>(null) }
+    LaunchedEffect(seq.audioFile) {
+        val path = seq.audioFile
+        withContext(Dispatchers.IO) { player.loadAudio(path) }
+        envelope = path?.let { withContext(Dispatchers.Default) { runCatching { AudioAnalyzer.envelope(it) }.getOrNull() } }
     }
     LaunchedEffect(seq) { player.sequence = seq }
     LaunchedEffect(layout) { player.layout = layout }
@@ -316,6 +328,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
     var pxPerSec by remember { mutableFloatStateOf(with(density) { 36.dp.toPx() }) }
     var scrollX by remember { mutableFloatStateOf(0f) }
     var addingTrack by remember { mutableStateOf(false) }
+    var showMusic by remember { mutableStateOf(false) }
 
     fun updateTrack(id: String, f: (Track) -> Track) { seq = seq.copy(tracks = seq.tracks.map { if (it.id == id) f(it) else it }) }
     fun updateClip(trackId: String, clip: Clip) = updateTrack(trackId) { t -> t.copy(clips = t.clips.map { if (it.id == clip.id) clip else it }) }
@@ -336,6 +349,9 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                 title = { Text(seq.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
+                    IconButton(onClick = { showMusic = true }) {
+                        Icon(Icons.Filled.MusicNote, "Music", tint = if (seq.audioFile != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Text("Live", style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.width(6.dp))
                     Switch(checked = live, onCheckedChange = { player.setLive(it) })
@@ -369,13 +385,19 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                     Spacer(Modifier.width(10.dp))
                     Text("${formatTime(pos, tenths = true)} / ${formatTime(seq.durationMs)}", style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.weight(1f))
+                    if (playing) {
+                        FilledTonalButton(
+                            onClick = { seq = seq.copy(marks = (seq.marks + pos).sorted()) },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                        ) { Text("Tap beat") }
+                    }
                     IconButton(onClick = { pxPerSec = (pxPerSec / 1.5f).coerceAtLeast(4f) }) { Icon(Icons.Filled.ZoomOut, "Zoom out") }
                     IconButton(onClick = { pxPerSec = (pxPerSec * 1.5f).coerceAtMost(800f) }) { Icon(Icons.Filled.ZoomIn, "Zoom in") }
                 }
             }
             val timeline: @Composable (Modifier) -> Unit = { m ->
                 Timeline(
-                    seq = seq, map = map, position = pos, pxPerSec = pxPerSec, scrollX = scrollX,
+                    seq = seq, map = map, envelope = envelope, position = pos, pxPerSec = pxPerSec, scrollX = scrollX,
                     selectedTrack = selectedTrack, selectedClip = selectedClip,
                     onZoom = { pxPerSec = it }, onScroll = { scrollX = it },
                     onSeek = { player.seek(it) },
@@ -449,6 +471,15 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
         }
     }
 
+    if (showMusic) {
+        MusicSheet(
+            seq = seq,
+            envelope = envelope,
+            selectedTrack = seq.tracks.firstOrNull { it.id == selectedTrack },
+            onDismiss = { showMusic = false },
+            onChange = { seq = it; if (it.audioFile != initial.audioFile) player.seek(0) },
+        )
+    }
     if (addingTrack) {
         AddTrackDialog(map, onDismiss = { addingTrack = false }) { name, target ->
             val t = Track(UUID.randomUUID().toString(), name, target)
@@ -494,6 +525,7 @@ private val RulerHeight = 28.dp
 private fun Timeline(
     seq: Sequence,
     map: HouseMap,
+    envelope: AudioEnvelope?,
     position: Long,
     pxPerSec: Float,
     scrollX: Float,
@@ -568,6 +600,48 @@ private fun Timeline(
                 drawLine(playhead, Offset(px, 0f), Offset(px, size.height), 2.dp.toPx())
             }
         }
+        if (envelope != null || seq.marks.isNotEmpty()) {
+            val wave = MaterialTheme.colorScheme.tertiary
+            Row(Modifier.height(34.dp)) {
+                Box(Modifier.width(HeaderWidth).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+                    Text(
+                        "  " + (seq.audioTitle ?: "Beats"),
+                        style = MaterialTheme.typography.labelSmall, color = textColor, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Canvas(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(laneBg)
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                seek((((down.position.x + state.scrollX) / state.pps) * 1000).roundToLong().coerceIn(0, state.seq.durationMs))
+                            }
+                        }
+                ) {
+                    val env = envelope
+                    if (env != null) {
+                        val step = 2.dp.toPx()
+                        var x = 0f
+                        while (x < size.width) {
+                            val ms = ((x + scrollX) / pxPerSec * 1000).toLong()
+                            if (ms > seq.durationMs) break
+                            val a = env.at(ms) * size.height * 0.9f
+                            drawLine(wave.copy(alpha = 0.7f), Offset(x, (size.height - a) / 2), Offset(x, (size.height + a) / 2), step * 0.6f)
+                            x += step
+                        }
+                    }
+                    seq.marks.forEach { m ->
+                        val mx = m / 1000f * pxPerSec - scrollX
+                        if (mx in 0f..size.width) drawLine(Color.White.copy(alpha = 0.8f), Offset(mx, 0f), Offset(mx, size.height * 0.3f), 1.5.dp.toPx())
+                    }
+                    val px = position / 1000f * pxPerSec - scrollX
+                    drawLine(playhead, Offset(px, 0f), Offset(px, size.height), 2.dp.toPx())
+                }
+            }
+        }
         HorizontalDivider()
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             seq.tracks.forEach { track ->
@@ -600,6 +674,7 @@ private fun Timeline(
                                     fun snap(ms: Long, exclude: String): Long {
                                         val candidates = buildList {
                                             add(s0.position)
+                                            addAll(s0.seq.marks)
                                             s0.seq.tracks.forEach { tr -> tr.clips.forEach { c -> if (c.id != exclude) { add(c.startMs); add(c.endMs) } } }
                                         }
                                         val near = candidates.minByOrNull { abs(it - ms) }
@@ -656,6 +731,12 @@ private fun Timeline(
                             val endX = seq.durationMs / 1000f * pxPerSec - scrollX
                             if (endX < size.width) drawRect(Color.Black.copy(alpha = 0.35f), Offset(endX, 0f), Size(size.width - endX, size.height))
                             val pad = 6.dp.toPx()
+                            if (seq.marks.size < 2 || (seq.marks[1] - seq.marks[0]) / 1000f * pxPerSec > 4f) {
+                                seq.marks.forEach { m ->
+                                    val mx = m / 1000f * pxPerSec - scrollX
+                                    if (mx in 0f..size.width) drawLine(gridColor.copy(alpha = 0.5f), Offset(mx, 0f), Offset(mx, size.height), 1f)
+                                }
+                            }
                             track.clips.forEach { c ->
                                 val x0 = c.startMs / 1000f * pxPerSec - scrollX
                                 val x1 = c.endMs / 1000f * pxPerSec - scrollX
@@ -849,5 +930,166 @@ private fun ClipInspector(
             },
             dismissButton = { TextButton(onClick = { editingSlot = -1 }) { Text("Cancel") } },
         )
+    }
+}
+
+// ================================================================== music
+
+private enum class BeatStyle(val label: String) { FLASH("Flash"), PULSE("Pulse"), SPARKLE("Sparkle"), CHASE("Chase") }
+
+@Composable
+private fun MusicSheet(
+    seq: Sequence,
+    envelope: AudioEnvelope?,
+    selectedTrack: Track?,
+    onDismiss: () -> Unit,
+    onChange: (Sequence) -> Unit,
+) {
+    val container = LocalAppContainer.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val current by rememberUpdatedState(seq)
+    var busy by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var every by remember { mutableIntStateOf(1) }
+    var style by remember { mutableStateOf(BeatStyle.FLASH) }
+    var replace by remember { mutableStateOf(true) }
+    val themes = remember { HolidayThemes.forToday() }
+    var colors by remember { mutableStateOf(themes.first().colors) }
+
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            busy = "Importing song…"; error = null
+            runCatching { container.sequences.importAudio(context, uri) }
+                .onSuccess { (path, title, dur) ->
+                    onChange(current.copy(audioFile = path, audioTitle = title, durationMs = dur, marks = emptyList(), bpm = null))
+                }
+                .onFailure { error = it.message }
+            busy = null
+        }
+    }
+
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.padding(horizontal = 20.dp).navigationBarsPadding().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Music", style = MaterialTheme.typography.headlineSmall)
+            if (seq.audioFile == null) {
+                Text(
+                    "Pick a song from your phone. The show's length is set to match it, and it plays in sync with the timeline.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                FilledTonalButton(onClick = { picker.launch(arrayOf("audio/*")) }, enabled = busy == null) {
+                    Icon(Icons.Filled.MusicNote, null); Spacer(Modifier.width(8.dp)); Text("Choose song")
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(seq.audioTitle ?: "Song", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(formatTime(seq.durationMs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { picker.launch(arrayOf("audio/*")) }, enabled = busy == null) { Text("Change") }
+                    TextButton(onClick = { onChange(seq.copy(audioFile = null, audioTitle = null)) }) { Text("Remove") }
+                }
+            }
+            busy?.let {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp)); Text(it)
+                }
+            }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+            HorizontalDivider()
+            Text("Beats", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (seq.marks.isEmpty()) "No beat marks yet. Detect them from the song, or press Play and tap \"Tap beat\" in time with the music."
+                else "${seq.marks.size} marks" + (seq.bpm?.let { " · about ${it.toInt()} BPM" } ?: "") + ". Effects snap to them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(
+                    enabled = seq.audioFile != null && busy == null,
+                    onClick = {
+                        val path = seq.audioFile
+                        if (path != null) scope.launch {
+                            busy = "Listening for the beat…"; error = null
+                            runCatching {
+                                withContext(Dispatchers.Default) {
+                                    AudioAnalyzer.detectBeats(envelope ?: AudioAnalyzer.envelope(path))
+                                }
+                            }.onSuccess { r ->
+                                if (r.beats.isEmpty()) error = "Couldn't find a steady beat in this song. Try tapping it instead."
+                                else onChange(current.copy(marks = r.beats.filter { it < current.durationMs }, bpm = r.bpm))
+                            }.onFailure { error = "Couldn't analyse the song: ${it.message}" }
+                            busy = null
+                        }
+                    },
+                ) { Text("Detect beats") }
+                OutlinedButton(enabled = seq.marks.isNotEmpty(), onClick = { onChange(seq.copy(marks = emptyList(), bpm = null)) }) { Text("Clear marks") }
+            }
+
+            HorizontalDivider()
+            Text("Effect on every beat", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (selectedTrack == null || seq.marks.isEmpty()) {
+                Text(
+                    "Add beat marks and select a track first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text("Fills \"${selectedTrack.name}\" with an effect on each beat.", style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    BeatStyle.entries.forEach { b -> FilterChip(selected = style == b, onClick = { style = b }, label = { Text(b.label) }) }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(1 to "Every beat", 2 to "Every 2nd", 4 to "Every 4th (bar)").forEach { (n, l) ->
+                        FilterChip(selected = every == n, onClick = { every = n }, label = { Text(l) })
+                    }
+                }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(themes, key = { it.id }) { t ->
+                        Surface(
+                            onClick = { colors = t.colors }, shape = RoundedCornerShape(10.dp),
+                            color = if (colors == t.colors) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Column(Modifier.padding(8.dp).width(84.dp)) {
+                                Box(Modifier.fillMaxWidth().height(10.dp).clip(CircleShape).background(themeBrush(t.colors, false)))
+                                Text(t.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = replace, onCheckedChange = { replace = it })
+                    Text("Replace the track's existing effects")
+                }
+                FilledTonalButton(onClick = {
+                    val beats = seq.marks.filterIndexed { i, _ -> i % every == 0 }
+                    val clips = beats.mapIndexed { i, m ->
+                        val next = beats.getOrNull(i + 1) ?: seq.durationMs
+                        val gap = (next - m).coerceAtLeast(80)
+                        val color = colors[i % colors.size]
+                        when (style) {
+                            BeatStyle.FLASH -> Clip(UUID.randomUUID().toString(), m, minOf(gap, 600L), SeqEffect.ON, listOf(color), fadeOutMs = minOf(gap, 600L) * 7 / 10)
+                            BeatStyle.PULSE -> Clip(UUID.randomUUID().toString(), m, gap, SeqEffect.ON, listOf(color), fadeInMs = gap / 5, fadeOutMs = gap * 3 / 5)
+                            BeatStyle.SPARKLE -> Clip(UUID.randomUUID().toString(), m, gap, SeqEffect.SPARKLE, listOf(color), speed = 0.7f, fadeOutMs = gap / 2)
+                            BeatStyle.CHASE -> Clip(UUID.randomUUID().toString(), m, gap, SeqEffect.CHASE, colors, speed = 0.6f)
+                        }
+                    }
+                    onChange(seq.copy(tracks = seq.tracks.map { t ->
+                        if (t.id == selectedTrack.id) t.copy(clips = (if (replace) emptyList() else t.clips) + clips) else t
+                    }))
+                    onDismiss()
+                }) { Text("Create ${seq.marks.size / every} effects") }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
     }
 }

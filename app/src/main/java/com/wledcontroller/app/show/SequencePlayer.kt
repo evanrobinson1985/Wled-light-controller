@@ -34,17 +34,54 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
 
     private var loop: Job? = null
 
+    // The song, when the show has one, is the master clock.
+    private var media: android.media.MediaPlayer? = null
+    private var mediaPath: String? = null
+    @Volatile private var lastMediaPos = -1L
+    @Volatile private var mediaAnchor = 0L
+
+    /** Loads (or with null, releases) the show's song. */
+    fun loadAudio(path: String?) {
+        if (path == mediaPath) return
+        media?.release()
+        media = null
+        mediaPath = path
+        if (path != null) {
+            media = runCatching { android.media.MediaPlayer().apply { setDataSource(path); prepare() } }.getOrNull()
+        }
+    }
+
+    val hasAudio get() = media != null
+
     fun play() {
         val seq = sequence ?: return
         if (_position.value >= seq.durationMs) _position.value = 0
+        media?.let { mp ->
+            if (_position.value < mp.duration) {
+                seekMedia(mp, _position.value)
+                lastMediaPos = -1L
+                mp.start()
+            }
+        }
         _playing.value = true
         ensureLoop()
     }
 
-    fun pause() { _playing.value = false }
+    fun pause() {
+        _playing.value = false
+        media?.let { if (it.isPlaying) it.pause() }
+    }
 
     fun seek(ms: Long) {
         _position.value = ms.coerceIn(0, sequence?.durationMs ?: ms)
+        media?.let { mp ->
+            if (_position.value < mp.duration) seekMedia(mp, _position.value) else if (mp.isPlaying) mp.pause()
+            lastMediaPos = -1L
+        }
+    }
+
+    private fun seekMedia(mp: android.media.MediaPlayer, ms: Long) {
+        if (android.os.Build.VERSION.SDK_INT >= 26) mp.seekTo(ms, android.media.MediaPlayer.SEEK_CLOSEST) else mp.seekTo(ms.toInt())
     }
 
     fun setLive(on: Boolean) {
@@ -54,7 +91,7 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
 
     /** Stops playback and streaming; the controllers return to their own effects shortly after. */
     fun stopAll() {
-        _playing.value = false
+        pause()
         _live.value = false
     }
 
@@ -69,8 +106,18 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
                     val now = SystemClock.elapsedRealtime()
                     val seq = sequence
                     if (_playing.value && seq != null) {
-                        val next = _position.value + (now - last)
-                        if (next >= seq.durationMs) { _position.value = seq.durationMs; _playing.value = false } else _position.value = next
+                        val mp = media
+                        val audioPlaying = mp != null && runCatching { mp.isPlaying }.getOrDefault(false)
+                        val next = if (audioPlaying) {
+                            // MediaPlayer reports position in coarse steps: extrapolate between them.
+                            val p = mp!!.currentPosition.toLong()
+                            if (p != lastMediaPos) { lastMediaPos = p; mediaAnchor = now }
+                            lastMediaPos + (now - mediaAnchor).coerceAtMost(250)
+                        } else {
+                            _position.value + (now - last)
+                        }
+                        if (next >= seq.durationMs) { _position.value = seq.durationMs; _playing.value = false; mp?.let { if (it.isPlaying) it.pause() } }
+                        else _position.value = next
                     }
                     last = now
                     val lay = layout

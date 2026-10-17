@@ -65,6 +65,13 @@ data class Sequence(
     val durationMs: Long,
     val tracks: List<Track> = emptyList(),
     val modifiedAt: Long = 0,
+    /** Song copied into app storage, played in sync with the timeline. */
+    val audioFile: String? = null,
+    val audioTitle: String? = null,
+    /** Timing marks (beats), ms from the start. Effects snap to them. */
+    val marks: List<Long> = emptyList(),
+    /** Detected tempo, for display. */
+    val bpm: Float? = null,
 )
 
 fun formatTime(ms: Long, tenths: Boolean = false): String {
