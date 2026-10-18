@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Search
@@ -75,7 +76,7 @@ import com.wledcontroller.app.ui.components.toComposeColor
 import kotlinx.coroutines.launch
 
 @Composable
-fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, onOpenHouse: () -> Unit, onOpenSchedule: () -> Unit) {
+fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, onOpenHouse: () -> Unit, onOpenSchedule: () -> Unit, onOpenSettings: () -> Unit) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val controllers by container.devices.list.collectAsStateWithLifecycle()
@@ -99,6 +100,7 @@ fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, on
                         Icon(Icons.Filled.PowerSettingsNew, "All off")
                     }
                     IconButton(onClick = { showAdd = true }) { Icon(Icons.Filled.Search, "Find devices") }
+                    IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
                 },
                 scrollBehavior = scrollBehavior,
             )

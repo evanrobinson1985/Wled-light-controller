@@ -44,9 +44,14 @@ android {
     buildFeatures {
         compose = true
     }
+    // Unit tests run on the JVM; Android calls they don't stub return defaults instead of throwing.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")

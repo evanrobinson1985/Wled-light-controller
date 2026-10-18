@@ -37,7 +37,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.AddToPhotos
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
@@ -112,6 +116,7 @@ import com.wledcontroller.app.house.HouseMap
 import com.wledcontroller.app.show.AudioAnalyzer
 import com.wledcontroller.app.show.AudioEnvelope
 import com.wledcontroller.app.show.Clip
+import com.wledcontroller.app.show.ClipClipboard
 import com.wledcontroller.app.show.SeqEffect
 import com.wledcontroller.app.show.Sequence
 import com.wledcontroller.app.show.SequenceRenderer
@@ -348,12 +353,71 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
 
     var selectedTrack by remember { mutableStateOf(seq.tracks.firstOrNull()?.id) }
     var selectedClip by remember { mutableStateOf<String?>(null) }
+    /** Extra clips selected with a long-press, moved / copied / deleted together. */
+    var multi by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pxPerSec by remember { mutableFloatStateOf(with(density) { 36.dp.toPx() }) }
     var scrollX by remember { mutableFloatStateOf(0f) }
     var addingTrack by remember { mutableStateOf(false) }
     var showMusic by remember { mutableStateOf(false) }
 
+    // Undo history: a snapshot is recorded once the show has been still for a moment, so a whole
+    // drag is one step.
+    val history = remember(initial.id) { mutableListOf(initial) }
+    var historyIndex by remember(initial.id) { mutableIntStateOf(0) }
+    LaunchedEffect(seq) {
+        delay(350)
+        if (seq != history[historyIndex]) {
+            while (history.size > historyIndex + 1) history.removeAt(history.lastIndex)
+            history += seq
+            if (history.size > 100) history.removeAt(0)
+            historyIndex = history.lastIndex
+        }
+    }
+    fun undo() { if (historyIndex > 0) { historyIndex--; seq = history[historyIndex] } }
+    fun redo() { if (historyIndex < history.lastIndex) { historyIndex++; seq = history[historyIndex] } }
+
     fun updateTrack(id: String, f: (Track) -> Track) { seq = seq.copy(tracks = seq.tracks.map { if (it.id == id) f(it) else it }) }
+    fun allSelected(): Set<String> = multi + listOfNotNull(selectedClip)
+    fun selectedPairs(): List<Pair<String, Clip>> = seq.tracks.flatMap { t -> t.clips.filter { it.id in allSelected() }.map { t.id to it } }
+    /** A dragged clip: when it's part of a multi-selection, the others move by the same amount. */
+    fun dragClip(trackId: String, clip: Clip) {
+        val old = seq.tracks.firstOrNull { it.id == trackId }?.clips?.firstOrNull { it.id == clip.id }
+        val group = allSelected()
+        if (old != null && clip.id in group && group.size > 1 && clip.durationMs == old.durationMs) {
+            val others = selectedPairs().map { it.second }
+            val delta = (clip.startMs - old.startMs)
+                .coerceAtLeast(-(others.minOfOrNull { it.startMs } ?: 0L))
+                .coerceAtMost(seq.durationMs - (others.maxOfOrNull { it.endMs } ?: seq.durationMs))
+            seq = seq.copy(tracks = seq.tracks.map { t ->
+                t.copy(clips = t.clips.map { c -> if (c.id in group) c.copy(startMs = c.startMs + delta) else c })
+            })
+        } else {
+            updateTrack(trackId) { t -> t.copy(clips = t.clips.map { if (it.id == clip.id) clip else it }) }
+        }
+    }
+    fun deleteSelected() {
+        val group = allSelected()
+        seq = seq.copy(tracks = seq.tracks.map { t -> t.copy(clips = t.clips.filterNot { it.id in group }) })
+        selectedClip = null; multi = emptySet()
+    }
+    fun paste() {
+        val items = ClipClipboard.items
+        if (items.isEmpty()) return
+        val fallback = selectedTrack ?: seq.tracks.firstOrNull()?.id ?: return
+        val base = (pos / 100) * 100
+        val pasted = mutableSetOf<String>()
+        var tracks = seq.tracks
+        items.forEach { (trackId, c) ->
+            // Same track when pasting within a show, otherwise onto the selected track.
+            val target = if (tracks.any { it.id == trackId }) trackId else fallback
+            val start = (base + c.startMs).coerceAtMost(seq.durationMs - 200)
+            val nc = c.copy(id = UUID.randomUUID().toString(), startMs = start, durationMs = c.durationMs.coerceAtMost(seq.durationMs - start))
+            pasted += nc.id
+            tracks = tracks.map { t -> if (t.id == target) t.copy(clips = t.clips + nc) else t }
+        }
+        seq = seq.copy(tracks = tracks)
+        selectedClip = pasted.firstOrNull(); multi = pasted
+    }
     fun updateClip(trackId: String, clip: Clip) = updateTrack(trackId) { t -> t.copy(clips = t.clips.map { if (it.id == clip.id) clip else it }) }
     fun addClip() {
         val trackId = selectedTrack ?: seq.tracks.firstOrNull()?.id ?: return
@@ -372,6 +436,8 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                 title = { Text(seq.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
+                    IconButton(onClick = { undo() }, enabled = historyIndex > 0) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
+                    IconButton(onClick = { redo() }, enabled = historyIndex < history.lastIndex) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
                     IconButton(onClick = { showMusic = true }) {
                         Icon(Icons.Filled.MusicNote, "Music", tint = if (seq.audioFile != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -421,12 +487,23 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
             val timeline: @Composable (Modifier) -> Unit = { m ->
                 Timeline(
                     seq = seq, map = map, envelope = envelope, position = pos, pxPerSec = pxPerSec, scrollX = scrollX,
-                    selectedTrack = selectedTrack, selectedClip = selectedClip,
+                    selectedTrack = selectedTrack, selectedClip = selectedClip, multiSelected = multi,
                     onZoom = { pxPerSec = it }, onScroll = { scrollX = it },
                     onSeek = { player.seek(it) },
-                    onSelectTrack = { selectedTrack = it; selectedClip = null },
-                    onSelectClip = { t, c -> selectedTrack = t; selectedClip = c },
-                    onClipChange = { t, c -> updateClip(t, c) },
+                    onSelectTrack = { selectedTrack = it; selectedClip = null; multi = emptySet() },
+                    onSelectClip = { t, c ->
+                        selectedTrack = t
+                        // Tapping a clip outside the group starts a fresh selection.
+                        if (c !in allSelected()) multi = emptySet()
+                        selectedClip = c
+                    },
+                    onLongPressClip = { t, c ->
+                        selectedTrack = t
+                        val group = allSelected()
+                        multi = if (c in group) group - c else group + c
+                        selectedClip = if (c in multi) c else multi.firstOrNull()
+                    },
+                    onClipChange = { t, c -> dragClip(t, c) },
                     onTrackChange = { t -> updateTrack(t.id) { t } },
                     onTrackDelete = { t -> seq = seq.copy(tracks = seq.tracks.filterNot { it.id == t.id }); if (selectedTrack == t.id) { selectedTrack = null; selectedClip = null } },
                     onTrackMove = { t, delta ->
@@ -439,7 +516,23 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
             }
             val inspector: @Composable (Modifier) -> Unit = { m ->
                 val trackId = selectedTrack
-                if (selected != null && trackId != null) {
+                val group = allSelected()
+                if (group.size > 1) {
+                    Column(m.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("${group.size} effects selected", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Drag any of them to move them all. Long-press an effect to add or remove it from the selection.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { ClipClipboard.copy(selectedPairs()) }) { Icon(Icons.Filled.ContentCopy, null); Spacer(Modifier.width(6.dp)); Text("Copy") }
+                            OutlinedButton(onClick = { ClipClipboard.copy(selectedPairs()); deleteSelected() }) { Text("Cut") }
+                            OutlinedButton(onClick = { deleteSelected() }) { Icon(Icons.Outlined.Delete, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
+                            TextButton(onClick = { multi = emptySet(); selectedClip = null }) { Text("Clear selection") }
+                        }
+                    }
+                } else if (selected != null && trackId != null) {
                     ClipInspector(
                         clip = selected,
                         maxMs = seq.durationMs,
@@ -451,6 +544,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                             selectedClip = copy.id
                         },
                         onClose = { selectedClip = null },
+                        onCopy = { ClipClipboard.copy(listOf(trackId to selected)) },
                         modifier = m,
                     )
                 } else {
@@ -466,6 +560,12 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                                 Icon(Icons.Filled.Add, null); Spacer(Modifier.width(6.dp)); Text("Add effect at playhead")
                             }
                             OutlinedButton(onClick = { addingTrack = true }) { Text("Add track") }
+                        }
+                        if (ClipClipboard.items.isNotEmpty()) {
+                            OutlinedButton(onClick = { paste() }, enabled = seq.tracks.isNotEmpty()) {
+                                Icon(Icons.Filled.ContentPaste, null); Spacer(Modifier.width(6.dp))
+                                Text("Paste ${ClipClipboard.items.size} effect" + (if (ClipClipboard.items.size > 1) "s" else "") + " at playhead")
+                            }
                         }
                     }
                 }
@@ -554,11 +654,13 @@ private fun Timeline(
     scrollX: Float,
     selectedTrack: String?,
     selectedClip: String?,
+    multiSelected: Set<String>,
     onZoom: (Float) -> Unit,
     onScroll: (Float) -> Unit,
     onSeek: (Long) -> Unit,
     onSelectTrack: (String) -> Unit,
     onSelectClip: (String, String) -> Unit,
+    onLongPressClip: (String, String) -> Unit,
     onClipChange: (String, Clip) -> Unit,
     onTrackChange: (Track) -> Unit,
     onTrackDelete: (Track) -> Unit,
@@ -673,6 +775,7 @@ private fun Timeline(
                     TrackHeader(track, map, isSel, onSelect = { onSelectTrack(track.id) }, onChange = onTrackChange, onDelete = { onTrackDelete(track) }, onMove = { onTrackMove(track, it) })
                     val trackState by rememberUpdatedState(track)
                     val select by rememberUpdatedState(onSelectClip)
+                    val longPress by rememberUpdatedState(onLongPressClip)
                     val selectTrack by rememberUpdatedState(onSelectTrack)
                     val change by rememberUpdatedState(onClipChange)
                     Canvas(
@@ -693,6 +796,7 @@ private fun Timeline(
                                     val resize = hit != null && downX >= xOf(hit.endMs) - edge
                                     var dragging = false
                                     var pinched = false
+                                    var lastTime = down.uptimeMillis
                                     val startScroll = s0.scrollX
                                     fun snap(ms: Long, exclude: String): Long {
                                         val candidates = buildList {
@@ -705,6 +809,7 @@ private fun Timeline(
                                     }
                                     while (true) {
                                         val ev = awaitPointerEvent()
+                                        lastTime = ev.changes.maxOf { it.uptimeMillis }
                                         val pressed = ev.changes.filter { it.pressed }
                                         if (pressed.isEmpty()) break
                                         if (pressed.size >= 2) {
@@ -730,19 +835,18 @@ private fun Timeline(
                                             hit != null && resize -> {
                                                 val end = snap(hit.endMs + dMs, hit.id).coerceIn(hit.startMs + 200, s0.seq.durationMs)
                                                 change(t.id, hit.copy(durationMs = end - hit.startMs))
-                                                select(t.id, hit.id)
                                             }
                                             hit != null -> {
                                                 val start = snap(hit.startMs + dMs, hit.id).coerceIn(0, s0.seq.durationMs - hit.durationMs)
                                                 change(t.id, hit.copy(startMs = start))
-                                                select(t.id, hit.id)
                                             }
                                             else -> scroll((startScroll - dx).coerceIn(0f, maxScroll(size.width.toFloat(), s0)))
                                         }
                                     }
                                     if (!dragging && !pinched) {
-                                        if (hit != null) select(t.id, hit.id)
-                                        else {
+                                        if (hit != null) {
+                                            if (lastTime - down.uptimeMillis >= 450) longPress(t.id, hit.id) else select(t.id, hit.id)
+                                        } else {
                                             selectTrack(t.id)
                                             seek(((downX + s0.scrollX) / s0.pps * 1000).roundToLong().coerceIn(0, s0.seq.durationMs))
                                         }
@@ -769,6 +873,12 @@ private fun Timeline(
                                 val brush = if (cols.size > 1) Brush.horizontalGradient(cols, startX = x0, endX = x1) else Brush.horizontalGradient(listOf(cols[0], cols[0]))
                                 drawRoundRect(brush, Offset(x0, pad), Size(w, size.height - pad * 2), CornerRadius(8.dp.toPx()))
                                 val isSelClip = c.id == selectedClip
+                                if (c.id in multiSelected && !isSelClip) {
+                                    drawRoundRect(
+                                        Color.White, Offset(x0, pad), Size(w, size.height - pad * 2), CornerRadius(8.dp.toPx()),
+                                        style = Stroke(2.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 6f))),
+                                    )
+                                }
                                 if (isSelClip) {
                                     drawRoundRect(Color.White, Offset(x0, pad), Size(w, size.height - pad * 2), CornerRadius(8.dp.toPx()), style = Stroke(2.dp.toPx()))
                                     drawRoundRect(Color.White, Offset(x1 - 5.dp.toPx(), size.height / 2 - 10.dp.toPx()), Size(3.dp.toPx(), 20.dp.toPx()), CornerRadius(2.dp.toPx()))
@@ -858,6 +968,7 @@ private fun ClipInspector(
     onDelete: () -> Unit,
     onDuplicate: () -> Unit,
     onClose: () -> Unit,
+    onCopy: () -> Unit,
     modifier: Modifier,
 ) {
     var editingSlot by remember { mutableIntStateOf(-1) }
@@ -872,7 +983,8 @@ private fun ClipInspector(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = onDuplicate) { Icon(Icons.Filled.ContentCopy, "Duplicate after") }
+            IconButton(onClick = onCopy) { Icon(Icons.Filled.ContentCopy, "Copy") }
+            IconButton(onClick = onDuplicate) { Icon(Icons.Filled.AddToPhotos, "Duplicate after") }
             IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, "Delete effect") }
             IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") }
         }
@@ -914,9 +1026,17 @@ private fun ClipInspector(
         }
 
         SectionTitle("Adjust")
-        GradientSlider(clip.speed, { onChange(clip.copy(speed = it)) }, label = "Speed", valueText = "${(clip.speed * 100).toInt()}%", height = 30.dp)
+        GradientSlider(
+            clip.speed, { onChange(clip.copy(speed = it)) },
+            label = if (clip.speedEnd != null) "Speed at start" else "Speed", valueText = "${(clip.speed * 100).toInt()}%", height = 30.dp,
+        )
+        RampRow("Speed ramp", clip.speedEnd, clip.speed, onChange = { onChange(clip.copy(speedEnd = it)) })
         GradientSlider(clip.size, { onChange(clip.copy(size = it)) }, label = "Size", valueText = "${(clip.size * 100).toInt()}%", height = 30.dp)
-        GradientSlider(clip.intensity, { onChange(clip.copy(intensity = it)) }, label = "Brightness", valueText = "${(clip.intensity * 100).toInt()}%", height = 30.dp)
+        GradientSlider(
+            clip.intensity, { onChange(clip.copy(intensity = it)) },
+            label = if (clip.intensityEnd != null) "Brightness at start" else "Brightness", valueText = "${(clip.intensity * 100).toInt()}%", height = 30.dp,
+        )
+        RampRow("Brightness ramp", clip.intensityEnd, clip.intensity, onChange = { onChange(clip.copy(intensityEnd = it)) })
         val maxFade = (clip.durationMs / 2).coerceAtLeast(1)
         GradientSlider(
             clip.fadeInMs.toFloat() / maxFade, { onChange(clip.copy(fadeInMs = (it * maxFade).toLong())) },
@@ -1149,5 +1269,17 @@ internal fun LightsDelaySetting() {
                 FilterChip(selected = local.toInt() == v, onClick = { local = v.toFloat(); save(v) }, label = { Text(l) })
             }
         }
+    }
+}
+
+/** Turns a ramp on (ending at the current value, so nothing jumps) and edits where it ends. */
+@Composable
+private fun RampRow(label: String, end: Float?, start: Float, onChange: (Float?) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+        Switch(checked = end != null, onCheckedChange = { on -> onChange(if (on) start else null) })
+    }
+    if (end != null) {
+        GradientSlider(end, { onChange(it) }, label = "…at the end", valueText = "${(end * 100).toInt()}%", height = 30.dp)
     }
 }

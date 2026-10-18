@@ -7,7 +7,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.put
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -147,6 +149,48 @@ class AppStore(private val context: Context) {
 
     val lightsDelayMs: Flow<Int> = context.dataStore.data.map { it[Keys.LIGHTS_DELAY] ?: 0 }
     suspend fun setLightsDelay(ms: Int) { context.dataStore.edit { it[Keys.LIGHTS_DELAY] = ms } }
+
+    /** Every stored setting as JSON (typed), for backups. */
+    suspend fun exportAll(): kotlinx.serialization.json.JsonObject {
+        val prefs = context.dataStore.data.first()
+        return kotlinx.serialization.json.buildJsonObject {
+            prefs.asMap().forEach { (k, v) ->
+                val typed = when (v) {
+                    is String -> kotlinx.serialization.json.buildJsonObject { put("t", "s"); put("v", v) }
+                    is Boolean -> kotlinx.serialization.json.buildJsonObject { put("t", "b"); put("v", v) }
+                    is Int -> kotlinx.serialization.json.buildJsonObject { put("t", "i"); put("v", v) }
+                    is Long -> kotlinx.serialization.json.buildJsonObject { put("t", "l"); put("v", v) }
+                    is Float -> kotlinx.serialization.json.buildJsonObject { put("t", "f"); put("v", v) }
+                    is Set<*> -> kotlinx.serialization.json.buildJsonObject {
+                        put("t", "ss")
+                        put("v", kotlinx.serialization.json.JsonArray(v.map { kotlinx.serialization.json.JsonPrimitive(it.toString()) }))
+                    }
+                    else -> null
+                }
+                if (typed != null) put(k.name, typed)
+            }
+        }
+    }
+
+    /** Replaces every stored setting with a backup made by [exportAll]. [fixPath] rewrites file paths. */
+    suspend fun importAll(data: kotlinx.serialization.json.JsonObject, fixPath: (String) -> String) {
+        context.dataStore.edit { prefs ->
+            prefs.clear()
+            data.forEach { (name, el) ->
+                val o = el as? kotlinx.serialization.json.JsonObject ?: return@forEach
+                val v = o["v"] ?: return@forEach
+                when (o.str("t")) {
+                    "s" -> prefs[stringPreferencesKey(name)] = fixPath(v.asString() ?: "")
+                    "b" -> prefs[androidx.datastore.preferences.core.booleanPreferencesKey(name)] = v.asBool()
+                    "i" -> prefs[androidx.datastore.preferences.core.intPreferencesKey(name)] = v.asInt()
+                    "l" -> prefs[androidx.datastore.preferences.core.longPreferencesKey(name)] = v.asInt().toLong()
+                    "f" -> prefs[androidx.datastore.preferences.core.floatPreferencesKey(name)] = (v.asString()?.toFloatOrNull() ?: 0f)
+                    "ss" -> prefs[stringSetPreferencesKey(name)] =
+                        (v as? kotlinx.serialization.json.JsonArray)?.mapNotNull { it.asString() }?.toSet() ?: emptySet()
+                }
+            }
+        }
+    }
 
     suspend fun setTileDevice(id: String) {
         context.dataStore.edit { it[Keys.TILE_DEVICE] = id }

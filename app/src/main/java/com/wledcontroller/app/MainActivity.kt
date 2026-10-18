@@ -21,6 +21,7 @@ import com.wledcontroller.app.ui.screens.StandaloneScreen
 import com.wledcontroller.app.ui.screens.LedSetupScreen
 import com.wledcontroller.app.ui.screens.ScheduleScreen
 import com.wledcontroller.app.ui.screens.SequenceEditorScreen
+import com.wledcontroller.app.ui.screens.SettingsScreen
 import com.wledcontroller.app.ui.screens.ShowsScreen
 import com.wledcontroller.app.ui.screens.WebUiScreen
 import com.wledcontroller.app.ui.theme.WledTheme
@@ -45,8 +46,10 @@ class MainActivity : ComponentActivity() {
                                 onOpenGroup = { nav.navigate("group/$it") },
                                 onOpenHouse = { nav.navigate("house") },
                                 onOpenSchedule = { nav.navigate("schedule") },
+                                onOpenSettings = { nav.navigate("settings") },
                             )
                         }
+                        composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
                         composable("house") {
                             HouseScreen(
                                 onBack = { nav.popBackStack() },

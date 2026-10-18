@@ -42,6 +42,7 @@ class AppContainer(context: Context) {
     val sequences = SequenceRepository(context, scope)
     val player = SequencePlayer(store, house, scope)
     val showRunner = ShowRunner(store, api, sequences, house, scope)
+    val backup = com.wledcontroller.app.data.Backup(context, store, sequences)
 
     init {
         scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }

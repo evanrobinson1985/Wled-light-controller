@@ -45,6 +45,10 @@ data class Clip(
     val direction: Direction = Direction.AUTO,
     val fadeInMs: Long = 0,
     val fadeOutMs: Long = 0,
+    /** When set, speed ramps from [speed] at the start to this at the end. */
+    val speedEnd: Float? = null,
+    /** When set, brightness ramps from [intensity] at the start to this at the end. */
+    val intensityEnd: Float? = null,
 ) {
     val endMs get() = startMs + durationMs
 }

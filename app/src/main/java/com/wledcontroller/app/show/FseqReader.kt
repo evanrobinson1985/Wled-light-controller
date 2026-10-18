@@ -211,5 +211,8 @@ class FseqReader private constructor(val path: String) : Closeable {
 
         @Synchronized
         fun forget(path: String) { open.remove(path)?.close() }
+
+        @Synchronized
+        fun forgetAll() { open.values.forEach { runCatching { it.close() } }; open.clear() }
     }
 }

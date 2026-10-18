@@ -19,12 +19,15 @@ class SequenceRepository(context: Context, scope: CoroutineScope) {
     val all: StateFlow<List<Sequence>> = _all.asStateFlow()
 
     init {
-        scope.launch(Dispatchers.IO) {
-            _all.value = dir.listFiles { f -> f.extension == "json" }
-                ?.mapNotNull { f -> runCatching { json.decodeFromString<Sequence>(f.readText()) }.getOrNull() }
-                ?.sortedByDescending { it.modifiedAt }
-                ?: emptyList()
-        }
+        scope.launch(Dispatchers.IO) { reload() }
+    }
+
+    /** Re-reads every show from disk (after a restore). */
+    fun reload() {
+        _all.value = dir.listFiles { f -> f.extension == "json" }
+            ?.mapNotNull { f -> runCatching { json.decodeFromString<Sequence>(f.readText()) }.getOrNull() }
+            ?.sortedByDescending { it.modifiedAt }
+            ?: emptyList()
     }
 
     fun get(id: String): Sequence? = _all.value.firstOrNull { it.id == id }

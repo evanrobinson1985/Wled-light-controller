@@ -77,12 +77,15 @@ object SequenceRenderer {
             if (track.muted) return@forEachIndexed
             val tl = layout.tracks.getOrNull(ti) ?: return@forEachIndexed
             // The latest-starting clip that covers this moment wins within a track.
-            val clip = track.clips.lastOrNull { timeMs >= it.startMs && timeMs < it.endMs } ?: return@forEachIndexed
-            val local = timeMs - clip.startMs
-            val env = envelope(clip, local) * clip.intensity
+            val stored = track.clips.lastOrNull { timeMs >= it.startMs && timeMs < it.endMs } ?: return@forEachIndexed
+            val local = timeMs - stored.startMs
+            val progress = local.toFloat() / stored.durationMs.coerceAtLeast(1)
+            // Ramps: brightness follows the line; speed uses its average so far, so motion stays continuous.
+            val intensity = stored.intensityEnd?.let { stored.intensity + (it - stored.intensity) * progress } ?: stored.intensity
+            val clip = stored.speedEnd?.let { stored.copy(speed = stored.speed + (it - stored.speed) * progress / 2f) } ?: stored
+            val env = envelope(clip, local) * intensity
             if (env <= 0f) return@forEachIndexed
             val t = local / 1000f
-            val progress = local.toFloat() / clip.durationMs.coerceAtLeast(1)
             for (k in tl.ledIndex.indices) {
                 val li = tl.ledIndex[k]
                 val dir = if (clip.direction == Direction.AUTO) tl.natural[k] else clip.direction
