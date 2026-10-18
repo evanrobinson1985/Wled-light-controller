@@ -4,6 +4,7 @@ import com.wledcontroller.app.house.Direction
 import com.wledcontroller.app.house.HouseMap
 import com.wledcontroller.app.house.HouseRenderer
 import com.wledcontroller.app.house.PlacedLed
+import com.wledcontroller.app.house.allSubmodels
 import com.wledcontroller.app.house.placedLeds
 import kotlin.math.PI
 import kotlin.math.abs
@@ -43,6 +44,10 @@ object SequenceRenderer {
         val runs = map.runs
         val runCounts = runs.map { it.count }
         val trackLayouts = tracks.map { track ->
+            val sub = if (track.target.kind == TrackTarget.Kind.SUBMODEL) {
+                val runId = track.target.refId.substringBefore('/'); val name = track.target.refId.substringAfter('/')
+                runs.indexOfFirst { it.id == runId }.takeIf { it >= 0 }?.let { r -> r to runs[r].allSubmodels().firstOrNull { it.name == name } }
+            } else null
             val runIdxs: Set<Int> = when (track.target.kind) {
                 TrackTarget.Kind.HOUSE -> runs.indices.toSet()
                 TrackTarget.Kind.PROP -> runs.indices.filter { runs[it].id == track.target.refId }.toSet()
@@ -50,8 +55,12 @@ object SequenceRenderer {
                     val ids = map.groups.firstOrNull { it.id == track.target.refId }?.runIds?.toSet() ?: emptySet()
                     runs.indices.filter { runs[it].id in ids }.toSet()
                 }
+                TrackTarget.Kind.SUBMODEL -> setOfNotNull(sub?.first)
             }
-            val idx = leds.indices.filter { leds[it].runIndex in runIdxs }.toIntArray()
+            val subModel = sub?.second
+            val idx = leds.indices.filter { leds[it].runIndex in runIdxs && (sub == null || subModel?.contains(leds[it].orderInRun) == true) }
+                .let { list -> if (sub != null) list.sortedBy { leds[it].orderInRun } else list }
+                .toIntArray()
             val xs = FloatArray(idx.size) { leds[idx[it]].x * map.aspect }
             val ys = FloatArray(idx.size) { leds[idx[it]].y }
             val minX = xs.minOrNull() ?: 0f; val maxX = xs.maxOrNull() ?: 1f
@@ -60,6 +69,8 @@ object SequenceRenderer {
             TrackLayout(
                 ledIndex = idx,
                 along = FloatArray(idx.size) {
+                    // A submodel runs along its own LEDs; anything else along its whole prop.
+                    if (sub != null) return@FloatArray if (idx.size <= 1) 0f else it / (idx.size - 1f)
                     val l = leds[idx[it]]
                     val n = runCounts[l.runIndex]
                     if (n <= 1) 0f else l.orderInRun / (n - 1f)

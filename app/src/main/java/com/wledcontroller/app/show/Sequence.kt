@@ -3,11 +3,18 @@ package com.wledcontroller.app.show
 import com.wledcontroller.app.house.Direction
 import kotlinx.serialization.Serializable
 
-/** What a track lights: the whole house, a prop group, or one prop (light run). */
+/**
+ * What a track lights: the whole house, a prop group, one prop (light run), or part of a prop
+ * (a submodel: [refId] is "runId/submodel name").
+ */
 @Serializable
 data class TrackTarget(val kind: Kind, val refId: String = "") {
     @Serializable
-    enum class Kind { HOUSE, GROUP, PROP }
+    enum class Kind { HOUSE, GROUP, PROP, SUBMODEL }
+
+    companion object {
+        fun submodel(runId: String, name: String) = TrackTarget(Kind.SUBMODEL, "$runId/$name")
+    }
 }
 
 @Serializable

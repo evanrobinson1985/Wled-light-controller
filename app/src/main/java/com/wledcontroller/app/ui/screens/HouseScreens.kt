@@ -72,6 +72,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -118,6 +119,12 @@ import com.wledcontroller.app.data.HolidayThemes
 import com.wledcontroller.app.house.HouseEffect
 import com.wledcontroller.app.house.HouseEffectService
 import com.wledcontroller.app.house.HiddenStretch
+import com.wledcontroller.app.house.ModelKind
+import com.wledcontroller.app.house.PropModel
+import com.wledcontroller.app.house.StartCorner
+import com.wledcontroller.app.house.Submodel
+import com.wledcontroller.app.house.formatLedRanges
+import com.wledcontroller.app.house.parseLedRanges
 import com.wledcontroller.app.house.HouseMap
 import com.wledcontroller.app.house.hiddenFlags
 import com.wledcontroller.app.house.HouseRenderer
@@ -507,8 +514,9 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             HouseCanvas(
                 map, photo,
                 onTap = if (drawingRun != null) { { p ->
-                    draft.add(p)
-                    if (nextHidden && draft.size >= 2) {
+                    // A model needs just the two corners of its box.
+                    if (drawingRun.model == null || draft.size < 2) draft.add(p)
+                    if (drawingRun.model == null && nextHidden && draft.size >= 2) {
                         val k = draft.size - 2
                         draftHidden.add(HiddenStretch(k)); askHidden = k; nextHidden = false
                     }
@@ -527,6 +535,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     val positions = map.positions(run)
                     val placed = positions.filterNotNull()
                     if (run.isPlacedPerLed) drawRun(placed, col, stroke, dashed = false)
+                    else if (run.model != null) drawBox(run.points, col.copy(alpha = 0.5f), stroke)
                     else drawTracedRun(run.points, run.hidden.map { it.after }.toSet(), col, stroke)
                     val runGaps = neighbourGaps(positions, map.aspect)
                     val hiddenLed = run.hiddenFlags(map.aspect, map.cmPerHeight)
@@ -543,7 +552,8 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     }
                 }
                 if (drawingRun != null) {
-                    drawTracedRun(draft.toList(), draftHidden.map { it.after }.toSet(), Color.White, stroke)
+                    if (drawingRun.model != null) drawBox(draft.toList(), Color.White, stroke)
+                    else drawTracedRun(draft.toList(), draftHidden.map { it.after }.toSet(), Color.White, stroke)
                     val previewRun = drawingRun.copy(points = draft.toList(), ledPoints = null, hidden = draftHidden.toList())
                     val preview = map.positions(previewRun)
                     val previewHidden = previewRun.hiddenFlags(map.aspect, map.cmPerHeight)
@@ -573,6 +583,24 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             }
 
             ScaleSummary(map, onSet = { scaling = true; scaleDraft.clear() })
+
+            if (drawingRun != null && drawingRun.model != null) {
+                Text(
+                    "Tap two opposite corners of the ${drawingRun.model.kind.label.lowercase()} on the photo. Its ${drawingRun.count} lights are laid out inside from how it's wired.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { draft.clear() }, enabled = draft.isNotEmpty()) { Text("Start again") }
+                    TextButton(onClick = { drawingRunId = null; draft.clear() }) { Text("Cancel") }
+                    Spacer(Modifier.weight(1f))
+                    Button(enabled = draft.size == 2, onClick = {
+                        saveRun(drawingRun.copy(points = draft.toList(), ledPoints = null, hidden = emptyList(), hiddenLeds = emptySet()))
+                        drawingRunId = null; draft.clear()
+                    }) { Text("Done") }
+                }
+                return@Column
+            }
 
             if (drawingRun != null) {
                 Text(
@@ -654,7 +682,13 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                         Row(Modifier.horizontalScroll(rememberScrollState())) {
                             TextButton(enabled = run.placedCount > 0, onClick = { startEditing(run) }) { Text("Edit LEDs") }
                             TextButton(onClick = { startTracing(run.id) }) {
-                                Text(if (run.points.size < 2 && !run.isPlacedPerLed) "Trace" else "Retrace")
+                                Text(
+                                    when {
+                                        run.model != null -> if (run.points.size < 2) "Place" else "Move"
+                                        run.points.size < 2 && !run.isPlacedPerLed -> "Trace"
+                                        else -> "Retrace"
+                                    }
+                                )
                             }
                             TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { saveRun(run.copy(points = run.points.reversed(), hidden = run.hidden.map { it.copy(after = run.points.size - 2 - it.after) })) }) {
                                 Icon(Icons.Filled.SwapHoriz, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Flip start")
@@ -834,6 +868,19 @@ private fun HiddenStretchDialog(stretch: HiddenStretch, onDismiss: () -> Unit, o
     )
 }
 
+/** A model's box, from its two corner points. */
+private fun DrawScope.drawBox(points: List<MapPoint>, color: Color, stroke: Float) {
+    points.forEach { p -> drawCircle(color, 4.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
+    if (points.size < 2) return
+    val a = points[0]; val b = points[1]
+    drawRect(
+        color,
+        topLeft = Offset(minOf(a.x, b.x) * size.width, minOf(a.y, b.y) * size.height),
+        size = androidx.compose.ui.geometry.Size(kotlin.math.abs(b.x - a.x) * size.width, kotlin.math.abs(b.y - a.y) * size.height),
+        style = Stroke(stroke, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))),
+    )
+}
+
 private fun DrawScope.drawRun(points: List<MapPoint>, color: Color, stroke: Float, dashed: Boolean) {
     if (points.size < 2) return
     val path = Path()
@@ -855,6 +902,11 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
     var deviceId by remember { mutableStateOf(run.deviceId) }
     var menu by remember { mutableStateOf(false) }
     var prop by remember { mutableStateOf(run.prop) }
+    // Layout: traced along a line, or a model laid out from its wiring.
+    var modelKind by remember { mutableStateOf(run.model?.kind) }
+    var model by remember { mutableStateOf(run.model ?: PropModel(ModelKind.MATRIX)) }
+    val customSubs = remember { mutableStateListOf(*run.submodels.toTypedArray()) }
+    var addingSub by remember { mutableStateOf(false) }
     val device = devices.firstOrNull { it.id == deviceId }
     val ledCount = device?.snapshot?.value?.info?.ledCount ?: 0
     // Default a new run to the LEDs on this controller that no other run uses yet.
@@ -873,7 +925,8 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
     fun shown(cm: Float, inches: Boolean) = "%.2f".format(if (inches) cm / 2.54f else cm).trimEnd('0').trimEnd('.')
     var spacingText by remember { mutableStateOf(run.spacingCm?.let { shown(it, map.useInches) } ?: "") }
     val spacingCm = spacingText.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }?.let { if (spacingInches) it * 2.54f else it }
-    val valid = name.isNotBlank() && device != null && s != null && c != null && c > 0 && (!fixedSpacing || spacingCm != null)
+    val activeModel = modelKind?.let { model.copy(kind = it) }
+    val valid = name.isNotBlank() && device != null && s != null && (activeModel != null || (c != null && c > 0)) && (!fixedSpacing || spacingCm != null)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -881,6 +934,17 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("Name (e.g. Roofline)") }, singleLine = true)
+                Text("Layout", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = modelKind == null, onClick = { modelKind = null }, label = { Text("Traced line") })
+                    ModelKind.entries.forEach { k ->
+                        FilterChip(selected = modelKind == k, onClick = {
+                            modelKind = k
+                            prop = when (k) { ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR }
+                        }, label = { Text(k.label) })
+                    }
+                }
+                if (activeModel != null) ModelEditor(activeModel) { model = it }
                 Text("Prop type", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     PropType.entries.forEach { p ->
@@ -903,7 +967,8 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
                     )
                     OutlinedTextField(
-                        count, { count = it.filter(Char::isDigit).take(5) }, label = { Text("LED count") }, singleLine = true,
+                        activeModel?.ledCount?.toString() ?: count, { count = it.filter(Char::isDigit).take(5) }, label = { Text("LED count") }, singleLine = true,
+                        enabled = activeModel == null,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
                     )
                 }
@@ -911,45 +976,62 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                     Text("This controller has $ledCount LEDs (0–${ledCount - 1}).", style = MaterialTheme.typography.labelSmall)
                 }
 
-                Text("LED spacing", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(selected = !fixedSpacing, onClick = { fixedSpacing = false }, label = { Text("Spread along line") })
-                    FilterChip(selected = fixedSpacing, onClick = { fixedSpacing = true }, label = { Text("Fixed spacing") })
+                Text("Parts (submodels)", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+                Text(
+                    (activeModel?.submodels()?.let { auto -> "From the model: ${auto.size} (${auto.first().name}…). " } ?: "") +
+                        "Add your own to light part of this run on its own in shows, e.g. the left half of the roofline.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                customSubs.forEach { sm ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${sm.name}: LEDs ${formatLedRanges(sm.ranges)}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        IconButton(onClick = { customSubs.remove(sm) }) { Icon(Icons.Outlined.Delete, "Remove ${sm.name}") }
+                    }
                 }
-                if (fixedSpacing) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            spacingText, { spacingText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }.take(7) },
-                            label = { Text("Centre to centre") }, singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f),
-                        )
-                        FilterChip(selected = spacingInches, onClick = {
-                            if (!spacingInches) { spacingCm?.let { spacingText = shown(it, true) }; spacingInches = true }
-                        }, label = { Text("in") })
-                        FilterChip(selected = !spacingInches, onClick = {
-                            if (spacingInches) { spacingCm?.let { spacingText = shown(it, false) }; spacingInches = false }
-                        }, label = { Text("cm") })
+                TextButton(onClick = { addingSub = true }) { Icon(Icons.Filled.Add, null); Text("Add part") }
+
+                if (activeModel == null) {
+                    Text("LED spacing", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(selected = !fixedSpacing, onClick = { fixedSpacing = false }, label = { Text("Spread along line") })
+                        FilterChip(selected = fixedSpacing, onClick = { fixedSpacing = true }, label = { Text("Fixed spacing") })
                     }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(
-                            "Bullets 4 in" to 10.16f, "C9 12 in" to 30.48f, "Strip 30/m" to 100f / 30f,
-                            "Strip 60/m" to 100f / 60f, "Strip 144/m" to 100f / 144f,
-                        ).forEach { (label, cm) ->
-                            AssistChip(onClick = { spacingText = shown(cm, spacingInches) }, label = { Text(label) })
+                    if (fixedSpacing) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                spacingText, { spacingText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }.take(7) },
+                                label = { Text("Centre to centre") }, singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f),
+                            )
+                            FilterChip(selected = spacingInches, onClick = {
+                                if (!spacingInches) { spacingCm?.let { spacingText = shown(it, true) }; spacingInches = true }
+                            }, label = { Text("in") })
+                            FilterChip(selected = !spacingInches, onClick = {
+                                if (spacingInches) { spacingCm?.let { spacingText = shown(it, false) }; spacingInches = false }
+                            }, label = { Text("cm") })
                         }
-                    }
-                    val scale = map.cmPerHeight
-                    val note = when {
-                        scale == null -> "Set the house scale on the map (the ruler button) so the app knows how big your house is. Until then this run's lights spread along the line."
-                        run.points.size >= 2 && c != null && spacingCm != null -> {
-                            val line = run.tracedLength(map.aspect) * scale
-                            val span = spacingCm * (c - 1).coerceAtLeast(0)
-                            "Traced line: ${formatLength(line, true)}. $c LEDs at this spacing span ${formatLength(span, true)}" +
-                                if (span > line * 1.02f) " — they carry on past the end of the line." else "."
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(
+                                "Bullets 4 in" to 10.16f, "C9 12 in" to 30.48f, "Strip 30/m" to 100f / 30f,
+                                "Strip 60/m" to 100f / 60f, "Strip 144/m" to 100f / 144f,
+                            ).forEach { (label, cm) ->
+                                AssistChip(onClick = { spacingText = shown(cm, spacingInches) }, label = { Text(label) })
+                            }
                         }
-                        else -> "Lights are placed this far apart from the start of the traced line."
+                        val scale = map.cmPerHeight
+                        val note = when {
+                            scale == null -> "Set the house scale on the map (the ruler button) so the app knows how big your house is. Until then this run's lights spread along the line."
+                            run.points.size >= 2 && c != null && spacingCm != null -> {
+                                val line = run.tracedLength(map.aspect) * scale
+                                val span = spacingCm * (c - 1).coerceAtLeast(0)
+                                "Traced line: ${formatLength(line, true)}. $c LEDs at this spacing span ${formatLength(span, true)}" +
+                                    if (span > line * 1.02f) " — they carry on past the end of the line." else "."
+                            }
+                            else -> "Lights are placed this far apart from the start of the traced line."
+                        }
+                        Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 if (hiddenList.isNotEmpty()) {
@@ -971,12 +1053,48 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
             }
         },
         confirmButton = {
-            TextButton(enabled = valid, onClick = { onSave(run.copy(name = name.trim(), deviceId = deviceId, startLed = s!!, count = c!!, prop = prop, spacingCm = if (fixedSpacing) spacingCm else null, hidden = hiddenList.toList())) }) {
+            TextButton(enabled = valid, onClick = { onSave(
+                    run.copy(
+                        name = name.trim(), deviceId = deviceId, startLed = s!!, count = activeModel?.ledCount ?: c!!, prop = prop,
+                        spacingCm = if (fixedSpacing && activeModel == null) spacingCm else null,
+                        hidden = if (activeModel == null) hiddenList.toList() else emptyList(),
+                        model = activeModel,
+                        // Switching to or from a model starts its placement afresh.
+                        points = if ((activeModel == null) != (run.model == null)) emptyList() else run.points,
+                        ledPoints = if (activeModel != null) null else run.ledPoints,
+                        submodels = customSubs.toList(),
+                    )
+                ) }) {
                 Text(if (run.count == 0) "Next: trace it" else "Save")
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+    if (addingSub) {
+        var subName by remember { mutableStateOf("") }
+        var subRanges by remember { mutableStateOf("") }
+        val total = activeModel?.ledCount ?: c ?: 0
+        val parsed = parseLedRanges(subRanges, total)
+        AlertDialog(
+            onDismissRequest = { addingSub = false },
+            title = { Text("New part") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(subName, { subName = it }, label = { Text("Name (e.g. Left half)") }, singleLine = true)
+                    OutlinedTextField(
+                        subRanges, { subRanges = it }, label = { Text("LEDs, e.g. 1-75 or 1-10, 20-30") }, singleLine = true,
+                        supportingText = { Text("Counted along this run, 1 to $total.") },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = subName.isNotBlank() && parsed != null, onClick = {
+                    customSubs.add(Submodel(subName.trim(), parsed!!)); addingSub = false
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { addingSub = false }) { Text("Cancel") } },
+        )
+    }
     editingHidden?.let { h ->
         HiddenStretchDialog(h, onDismiss = { editingHidden = null }) { updated ->
             val i = hiddenList.indexOf(h)
@@ -1448,4 +1566,58 @@ private fun ScaleDialog(inches: Boolean, current: Float?, onDismiss: () -> Unit,
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** The wiring settings for a matrix, mega tree or star. */
+@Composable
+private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
+    @Composable
+    fun number(label: String, value: Int, range: IntRange, modifier: Modifier, set: (Int) -> Unit) {
+        var text by remember(label) { mutableStateOf(value.toString()) }
+        OutlinedTextField(
+            text, { t -> text = t.filter(Char::isDigit).take(4); t.toIntOrNull()?.takeIf { it in range }?.let(set) },
+            label = { Text(label) }, singleLine = true, modifier = modifier,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        when (model.kind) {
+            ModelKind.MATRIX, ModelKind.MEGA_TREE -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                number("Strings", model.strings, 1..512, Modifier.weight(1f)) { onChange(model.copy(strings = it)) }
+                number("LEDs per string", model.nodes, 1..2048, Modifier.weight(1f)) { onChange(model.copy(nodes = it)) }
+            }
+            ModelKind.STAR -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                number("Points", model.points, 3..24, Modifier.weight(1f)) { onChange(model.copy(points = it)) }
+                number("LEDs per point", model.nodes, 2..1000, Modifier.weight(1f)) { onChange(model.copy(nodes = it)) }
+            }
+        }
+        when (model.kind) {
+            ModelKind.MATRIX -> {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = model.vertical, onClick = { onChange(model.copy(vertical = true)) }, label = { Text("Strings run up/down") })
+                    FilterChip(selected = !model.vertical, onClick = { onChange(model.copy(vertical = false)) }, label = { Text("Strings run across") })
+                }
+                Text("First LED is at the", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StartCorner.entries.forEach { c -> FilterChip(selected = model.start == c, onClick = { onChange(model.copy(start = c)) }, label = { Text(c.label) }) }
+                }
+            }
+            ModelKind.MEGA_TREE -> {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(180, 270, 360).forEach { d -> FilterChip(selected = model.degrees == d, onClick = { onChange(model.copy(degrees = d)) }, label = { Text("$d°") }) }
+                    FilterChip(selected = !model.fromBottom, onClick = { onChange(model.copy(fromBottom = false)) }, label = { Text("Strings start at top") })
+                    FilterChip(selected = model.fromBottom, onClick = { onChange(model.copy(fromBottom = true)) }, label = { Text("…at bottom") })
+                }
+            }
+            ModelKind.STAR -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Clockwise from the top point", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                Switch(checked = model.clockwise, onCheckedChange = { onChange(model.copy(clockwise = it)) })
+            }
+        }
+        if (model.kind != ModelKind.STAR) Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Zig-zag (each string runs back the other way)", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            Switch(checked = model.zigzag, onCheckedChange = { onChange(model.copy(zigzag = it)) })
+        }
+        Text("${model.ledCount} LEDs in all.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+    }
 }

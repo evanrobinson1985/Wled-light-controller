@@ -2,6 +2,8 @@
 
 package com.wledcontroller.app.ui.screens
 
+import androidx.compose.material3.AssistChip
+import com.wledcontroller.app.house.allSubmodels
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material.icons.automirrored.filled.ShowChart
@@ -653,6 +655,15 @@ private fun AddTrackDialog(map: HouseMap, onDismiss: () -> Unit, onAdd: (String,
                     Text("Props", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
                     map.runs.forEach { r ->
                         TextButton(onClick = { onAdd(r.name, TrackTarget(TrackTarget.Kind.PROP, r.id)) }) { Text("${r.name} · ${r.prop.label}") }
+                        // Parts of the prop: a tree's strings, a star's points, your own ranges.
+                        val subs = r.allSubmodels()
+                        if (subs.isNotEmpty()) {
+                            Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                subs.forEach { sm ->
+                                    AssistChip(onClick = { onAdd("${r.name} · ${sm.name}", TrackTarget.submodel(r.id, sm.name)) }, label = { Text(sm.name) })
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -956,6 +967,8 @@ private fun TrackHeader(
         TrackTarget.Kind.HOUSE -> "Whole house"
         TrackTarget.Kind.GROUP -> if (map.groups.any { it.id == track.target.refId }) "Group" else "Missing group"
         TrackTarget.Kind.PROP -> map.runs.firstOrNull { it.id == track.target.refId }?.prop?.label ?: "Missing prop"
+        TrackTarget.Kind.SUBMODEL -> map.runs.firstOrNull { it.id == track.target.refId.substringBefore('/') }
+            ?.takeIf { r -> r.allSubmodels().any { it.name == track.target.refId.substringAfter('/') } }?.let { "Part of ${it.name}" } ?: "Missing part"
     }
     Surface(
         onClick = onSelect,

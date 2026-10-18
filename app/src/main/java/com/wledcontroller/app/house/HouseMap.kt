@@ -33,6 +33,10 @@ data class LightRun(
     val hidden: List<HiddenStretch> = emptyList(),
     /** For runs placed LED by LED: LEDs that are out of sight from the photo. */
     val hiddenLeds: Set<Int> = emptySet(),
+    /** A matrix, mega tree or star laid out from its wiring in the box between the first two points. */
+    val model: PropModel? = null,
+    /** Parts of the run shows can light on their own (as well as the model's own). */
+    val submodels: List<Submodel> = emptyList(),
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
@@ -120,6 +124,11 @@ data class PlacedLed(
  */
 fun LightRun.ledPositions(aspect: Float, cmPerHeight: Float? = null): List<MapPoint?> {
     ledPoints?.let { lp -> return List(count) { lp.getOrNull(it) } }
+    model?.let { m ->
+        if (points.size < 2) return List(count) { null }
+        val pos = m.layout(points[0], points[1], aspect)
+        return List(count) { pos.getOrNull(it) }
+    }
     return tracedPositions(aspect, cmPerHeight)
 }
 
@@ -137,7 +146,9 @@ fun LightRun.tracedPositions(aspect: Float, cmPerHeight: Float? = null): List<Ma
 
 /** Which LEDs of the run are out of sight in the photo. */
 fun LightRun.hiddenFlags(aspect: Float, cmPerHeight: Float? = null): BooleanArray =
-    if (ledPoints != null) BooleanArray(count) { it in hiddenLeds } else tracedLayout(aspect, cmPerHeight).second
+    if (ledPoints != null) BooleanArray(count) { it in hiddenLeds }
+    else if (model != null) BooleanArray(count)
+    else tracedLayout(aspect, cmPerHeight).second
 
 private fun LightRun.tracedLayout(aspect: Float, cmPerHeight: Float?): Pair<List<MapPoint>, BooleanArray> {
     if (count <= 0 || points.isEmpty()) return emptyList<MapPoint>() to BooleanArray(0)
