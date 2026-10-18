@@ -47,6 +47,7 @@ class AppStore(private val context: Context) {
         val PLAYLISTS = stringPreferencesKey("playlists")
         val SCHEDULES = stringPreferencesKey("schedules")
         val SCHEDULE_ON = androidx.datastore.preferences.core.booleanPreferencesKey("schedule_on")
+        val LIGHTS_DELAY = androidx.datastore.preferences.core.intPreferencesKey("lights_delay_ms")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -143,6 +144,9 @@ class AppStore(private val context: Context) {
     }
     suspend fun removeSchedule(id: String) = editList<ScheduleEntry>(Keys.SCHEDULES) { list -> list.filterNot { it.id == id } }
     suspend fun setScheduleOn(on: Boolean) { context.dataStore.edit { it[Keys.SCHEDULE_ON] = on } }
+
+    val lightsDelayMs: Flow<Int> = context.dataStore.data.map { it[Keys.LIGHTS_DELAY] ?: 0 }
+    suspend fun setLightsDelay(ms: Int) { context.dataStore.edit { it[Keys.LIGHTS_DELAY] = ms } }
 
     suspend fun setTileDevice(id: String) {
         context.dataStore.edit { it[Keys.TILE_DEVICE] = id }

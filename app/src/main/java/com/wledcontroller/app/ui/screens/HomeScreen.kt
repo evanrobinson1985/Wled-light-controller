@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Search
@@ -74,7 +75,7 @@ import com.wledcontroller.app.ui.components.toComposeColor
 import kotlinx.coroutines.launch
 
 @Composable
-fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, onOpenHouse: () -> Unit) {
+fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, onOpenHouse: () -> Unit, onOpenSchedule: () -> Unit) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val controllers by container.devices.list.collectAsStateWithLifecycle()
@@ -146,6 +147,41 @@ fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, on
                     }
                 }
 
+                item {
+                    val scheduleOn by container.store.scheduleOn.collectAsStateWithLifecycle(false)
+                    val runner by container.showRunner.state.collectAsStateWithLifecycle()
+                    if (scheduleOn || runner.running) {
+                        Card(
+                            onClick = onOpenSchedule,
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                            modifier = Modifier.padding(top = 12.dp),
+                        ) {
+                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Schedule, null, Modifier.size(28.dp))
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        if (runner.nowPlaying != null) "Show playing" else "Show schedule on",
+                                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        when {
+                                            runner.nowPlaying != null -> runner.nowPlaying + (runner.playlistName?.let { " · $it" } ?: "")
+                                            runner.nextStart != null -> "Next show " + runner.nextStart!!.format(
+                                                java.time.format.DateTimeFormatter.ofPattern("EEE h:mm a"),
+                                            )
+                                            else -> "Waiting for a show window"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 item {
                     val houseRunning by container.house.running.collectAsStateWithLifecycle()
                     Card(onClick = onOpenHouse, shape = RoundedCornerShape(24.dp), modifier = Modifier.padding(top = 12.dp)) {

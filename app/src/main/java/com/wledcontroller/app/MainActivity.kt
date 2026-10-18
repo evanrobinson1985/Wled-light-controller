@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenDevice = { nav.navigate("device/$it") },
                                 onOpenGroup = { nav.navigate("group/$it") },
                                 onOpenHouse = { nav.navigate("house") },
+                                onOpenSchedule = { nav.navigate("schedule") },
                             )
                         }
                         composable("house") {

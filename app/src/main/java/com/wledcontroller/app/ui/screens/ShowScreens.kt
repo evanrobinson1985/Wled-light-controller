@@ -1028,6 +1028,10 @@ internal fun MusicSheet(
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
+            if (seq.audioFile != null) {
+                HorizontalDivider()
+                LightsDelaySetting()
+            }
             HorizontalDivider()
             Text("Beats", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
@@ -1113,6 +1117,37 @@ internal fun MusicSheet(
                 }) { Text("Create ${seq.marks.size / every} effects") }
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** App-wide lights delay, so the lights match music on a laggy (e.g. Bluetooth) speaker. */
+@Composable
+internal fun LightsDelaySetting() {
+    val container = LocalAppContainer.current
+    val scope = rememberCoroutineScope()
+    val stored by container.store.lightsDelayMs.collectAsStateWithLifecycle(0)
+    var local by remember(stored) { mutableFloatStateOf(stored.toFloat()) }
+    fun save(v: Int) = scope.launch { container.store.setLightsDelay(v) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Lights delay", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            "If the lights run ahead of the music (common with Bluetooth speakers), delay them. Play a show with a strong beat and adjust until flashes land on the beat.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        GradientSlider(
+            value = (local + 500f) / 1500f,
+            onValueChange = { local = ((it * 1500f - 500f) / 10f).roundToLong() * 10f },
+            onValueChangeFinished = { save(local.toInt()) },
+            label = if (local < 0) "Lights lead by" else "Lights wait",
+            valueText = "${abs(local.toInt())} ms",
+            height = 30.dp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0 to "Phone speaker", 200 to "Bluetooth", 350 to "Slow Bluetooth").forEach { (v, l) ->
+                FilterChip(selected = local.toInt() == v, onClick = { local = v.toFloat(); save(v) }, label = { Text(l) })
+            }
         }
     }
 }

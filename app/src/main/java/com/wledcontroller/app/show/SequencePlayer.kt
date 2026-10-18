@@ -122,10 +122,12 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
                     last = now
                     val lay = layout
                     val fseqPath = seq?.fseqFile
+                    // With a song, shift the lights to line up with what's actually heard.
+                    val renderPos = if (media != null) (_position.value - ShowSettings.lightsDelayMs).coerceAtLeast(0) else _position.value
                     if (_live.value && seq != null && fseqPath != null) {
                         val reader = runCatching { FseqReader.open(fseqPath) }.getOrNull()
                         if (reader != null) {
-                            val frame = reader.frame((_position.value / reader.stepMs).toInt())
+                            val frame = reader.frame((renderPos / reader.stepMs).toInt())
                             withContext(Dispatchers.IO) {
                                 for (m in seq.fseqMap) {
                                     if (!m.enabled || m.ledCount <= 0) continue
@@ -138,7 +140,7 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
                         }
                     } else if (_live.value && seq != null && lay != null && lay.leds.isNotEmpty()) {
                         if (colors.size != lay.leds.size) colors = IntArray(lay.leds.size)
-                        SequenceRenderer.render(seq, lay, _position.value, colors)
+                        SequenceRenderer.render(seq, lay, renderPos, colors)
                         val buffers = HashMap<String, ByteArray>()
                         lay.leds.forEach { l ->
                             val needed = (l.index + 1) * 3

@@ -10,6 +10,8 @@ import com.wledcontroller.app.house.StandaloneSetup
 import com.wledcontroller.app.show.SequencePlayer
 import com.wledcontroller.app.show.SequenceRepository
 import com.wledcontroller.app.show.ShowRunner
+import com.wledcontroller.app.show.ShowSettings
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,4 +42,8 @@ class AppContainer(context: Context) {
     val sequences = SequenceRepository(context, scope)
     val player = SequencePlayer(store, house, scope)
     val showRunner = ShowRunner(store, api, sequences, house, scope)
+
+    init {
+        scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }
+    }
 }

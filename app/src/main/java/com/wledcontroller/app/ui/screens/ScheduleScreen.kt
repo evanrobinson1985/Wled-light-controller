@@ -179,6 +179,8 @@ fun ScheduleScreen(onBack: () -> Unit) {
                 }) { Text("Allow running in the background") }
             }
 
+            LightsDelaySetting()
+
             SectionTitle("Playlists") {
                 TextButton(onClick = { editPlaylist = Playlist(UUID.randomUUID().toString(), "", emptyList()) }, enabled = shows.isNotEmpty()) {
                     Icon(Icons.Filled.Add, null); Text("New")
