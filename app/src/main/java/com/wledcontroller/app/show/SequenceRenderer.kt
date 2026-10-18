@@ -391,11 +391,10 @@ object SequenceRenderer {
                 if (band.mod(3) == 0) 0 else cols[band.mod(cols.size)]
             }
             SeqEffect.GARLANDS -> {
-                // Swags hang between points along the prop.
+                // Swags along the prop: bright where each garland hangs low, dim at its hooks.
                 val swags = 2f + (1f - c.size) * 6f
-                val sag = 0.5f - 0.5f * cos(HouseRenderer.frac(lx * swags + t * rate * 0.1f) * 2f * PI.toFloat())
-                val f = (1f - abs((1f - ly) - 0.2f - sag * 0.6f) / 0.12f).coerceIn(0f, 1f)
-                HouseRenderer.scale(HouseRenderer.palette(cols, lx), f)
+                val sag = 0.5f - 0.5f * cos(HouseRenderer.frac(pos * swags + t * rate * 0.1f) * 2f * PI.toFloat())
+                HouseRenderer.scale(HouseRenderer.palette(cols, pos), 0.15f + 0.85f * sag * sag)
             }
             SeqEffect.SING -> {
                 // On a face: eyes stay lit; the mouth opens with the song. Elsewhere: pulse with it.
