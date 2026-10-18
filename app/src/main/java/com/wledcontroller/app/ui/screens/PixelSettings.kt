@@ -35,7 +35,7 @@ import com.wledcontroller.app.ui.components.pixelRadius
 import kotlinx.coroutines.launch
 
 /**
- * Light size and spacing, used by every preview that draws lights (house map, effects, shows,
+ * Light size, used by every preview that draws lights (house map, effects, shows,
  * xLights previews, camera scan and the simulator). Changes apply live.
  */
 @Composable
@@ -49,11 +49,11 @@ internal fun PixelStyleSetting() {
     val sizeRange = PixelStyle.MAX_SIZE - PixelStyle.MIN_SIZE
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Light size & spacing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text("Light size", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             TextButton(onClick = { set(PixelStyle()) }) { Text("Reset") }
         }
         Text(
-"How lights are drawn on the house map, effect and show previews, the camera scan and the simulator. Spacing is the distance from the centre of one light to the next where the app lays lights out in a row; on the house, lights sit where they're traced, and shrink if needed so neighbours don't run together.",
+"How big lights are drawn on the house map, effect and show previews, the camera scan and the simulator. Where they sit is set per light run on the house map (its LED spacing); lights packed closer than this size are drawn a little smaller so neighbours don't run together.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -62,21 +62,15 @@ internal fun PixelStyleSetting() {
             { set(local.copy(sizeDp = PixelStyle.MIN_SIZE + it * sizeRange)) },
             label = "Light size", valueText = "%.1f dp".format(local.sizeDp), height = 30.dp,
         )
-        val spacingRange = PixelStyle.MAX_SPACING - PixelStyle.MIN_SPACING
-        GradientSlider(
-            (local.spacingDp - PixelStyle.MIN_SPACING) / spacingRange,
-            { set(local.copy(spacingDp = PixelStyle.MIN_SPACING + it * spacingRange)) },
-            label = "Spacing (centre to centre)", valueText = "%.1f dp".format(local.spacingDp), height = 30.dp,
-        )
         PixelSample(local)
     }
 }
 
-/** A row of rainbow lights at the chosen size, their centres the chosen spacing apart. */
+/** A row of rainbow lights at the chosen size. */
 @Composable
 private fun PixelSample(style: PixelStyle) {
     Canvas(Modifier.fillMaxWidth().height(maxOf(28f, style.sizeDp + 12f).dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF070B1C))) {
-        val pitch = style.spacingDp.dp.toPx()
+        val pitch = style.rowPitchDp.dp.toPx()
         val n = (size.width / pitch).toInt().coerceAtLeast(1)
         val r = pixelRadius(style)
         for (i in 0 until n) drawPixel(SimEffects.hsv(i / n.toFloat()), Offset(pitch * (i + 0.5f), size.height / 2), r)

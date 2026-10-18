@@ -114,7 +114,13 @@ object DemoSetup {
         store.setLightProfile(LightProfile.deviceKey(windowDev.id), LightProfile.BULLETS)
         store.setLightProfile(LightProfile.deviceKey(treeDev.id), LightProfile.STRIP)
         store.setLightProfile(LightProfile.deviceKey(yardDev.id), LightProfile.BULLETS)
-        store.updateHouseMap { HouseMap(photoPath = photo, aspect = aspect, runs = runs, groups = groups) }
+        // The front wall is 40 ft wide, which gives the map its scale.
+        store.updateHouseMap {
+            HouseMap(
+                photoPath = photo, aspect = aspect, runs = runs, groups = groups,
+                scaleA = MapPoint(0.26f, 0.76f), scaleB = MapPoint(0.70f, 0.76f), scaleCm = 40 * 30.48f,
+            )
+        }
 
         val show = demoShow()
         sequences.save(show)

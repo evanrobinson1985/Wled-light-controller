@@ -51,7 +51,6 @@ class AppStore(private val context: Context) {
         val SCHEDULE_ON = androidx.datastore.preferences.core.booleanPreferencesKey("schedule_on")
         val LIGHTS_DELAY = androidx.datastore.preferences.core.intPreferencesKey("lights_delay_ms")
         val PIXEL_SIZE = androidx.datastore.preferences.core.floatPreferencesKey("pixel_size_dp")
-        val PIXEL_SPACING = androidx.datastore.preferences.core.floatPreferencesKey("pixel_spacing_dp")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -156,11 +155,10 @@ class AppStore(private val context: Context) {
     val pixelStyle: Flow<com.wledcontroller.app.ui.components.PixelStyle> = context.dataStore.data.map {
         com.wledcontroller.app.ui.components.PixelStyle(
             sizeDp = it[Keys.PIXEL_SIZE] ?: com.wledcontroller.app.ui.components.PixelStyle.DEFAULT_SIZE,
-            spacingDp = it[Keys.PIXEL_SPACING] ?: com.wledcontroller.app.ui.components.PixelStyle.DEFAULT_SPACING,
         )
     }
     suspend fun setPixelStyle(style: com.wledcontroller.app.ui.components.PixelStyle) {
-        context.dataStore.edit { it[Keys.PIXEL_SIZE] = style.sizeDp; it[Keys.PIXEL_SPACING] = style.spacingDp }
+        context.dataStore.edit { it[Keys.PIXEL_SIZE] = style.sizeDp }
     }
 
     /** Every stored setting as JSON (typed), for backups. */

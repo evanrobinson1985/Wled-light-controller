@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Lightbulb
@@ -66,6 +67,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -123,6 +125,8 @@ import com.wledcontroller.app.house.PropType
 import com.wledcontroller.app.house.StandalonePlan
 import com.wledcontroller.app.house.ledPositions
 import com.wledcontroller.app.house.fillGaps
+import com.wledcontroller.app.house.formatLength
+import com.wledcontroller.app.house.tracedLength
 import com.wledcontroller.app.house.placedLeds
 import com.wledcontroller.app.ui.components.GradientSlider
 import com.wledcontroller.app.ui.components.SectionTitle
@@ -343,6 +347,11 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     var editGroup by remember { mutableStateOf<PropGroup?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
 
+    // Setting the scale: tap two points a known distance apart.
+    var scaling by remember { mutableStateOf(false) }
+    val scaleDraft = remember { mutableStateListOf<MapPoint>() }
+    var askScale by remember { mutableStateOf(false) }
+
     // Per-LED editing state.
     var editingRunId by remember { mutableStateOf<String?>(null) }
     val editPoints = remember { mutableStateListOf<MapPoint?>() }
@@ -369,7 +378,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
 
     fun startEditing(run: LightRun) {
         editPoints.clear()
-        editPoints.addAll(run.ledPositions(map.aspect).let { pos -> List(run.count) { pos.getOrNull(it) } })
+        editPoints.addAll(map.positions(run).let { pos -> List(run.count) { pos.getOrNull(it) } })
         selectedLed = null; placingLed = null
         editingRunId = run.id
     }
@@ -388,6 +397,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     Text(
                         when {
                             drawingRun != null -> "Trace ${drawingRun.name}"
+                            scaling -> "Set the scale"
                             editingRun != null -> "Edit ${editingRun.name}"
                             else -> "House map"
                         }
@@ -395,7 +405,8 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
-                    if (drawingRun == null && editingRun == null) {
+                    if (drawingRun == null && editingRun == null && !scaling) {
+                        IconButton(onClick = { scaling = true; scaleDraft.clear() }) { Icon(Icons.Filled.Straighten, "Set house scale") }
                         IconButton(onClick = onScan) { Icon(Icons.Filled.PhotoCamera, "Scan with camera") }
                         IconButton(onClick = { pickPhoto() }) { Icon(Icons.Filled.Image, "Choose photo") }
                     }
@@ -457,13 +468,19 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             val pixel = LocalPixelStyle.current
             HouseCanvas(
                 map, photo,
-                onTap = if (drawingRun != null) { { p -> draft.add(p) } } else null,
+                onTap = if (drawingRun != null) { { p -> draft.add(p) } }
+                else if (scaling) { { p -> if (scaleDraft.size < 2) scaleDraft.add(p); if (scaleDraft.size == 2) askScale = true } }
+                else null,
             ) {
                 val stroke = 2.dp.toPx()
+                // The scale: a dashed yellow line between the two measured points.
+                val scalePts = if (scaling) scaleDraft.toList() else listOfNotNull(map.scaleA, map.scaleB)
+                if (scalePts.size == 2) drawRun(scalePts, Color(0xFFFFE06B), stroke * 0.8f, dashed = true)
+                scalePts.forEach { p -> drawCircle(Color(0xFFFFE06B), 4.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
                 map.runs.forEachIndexed { r, run ->
                     if (run.id == drawingRunId) return@forEachIndexed
                     val col = RunColors[r % RunColors.size]
-                    val positions = run.ledPositions(map.aspect)
+                    val positions = map.positions(run)
                     val placed = positions.filterNotNull()
                     drawRun(if (run.isPlacedPerLed) placed else run.points, col, stroke, dashed = false)
                     val runGaps = neighbourGaps(positions, map.aspect)
@@ -476,7 +493,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 }
                 if (drawingRun != null) {
                     drawRun(draft, Color.White, stroke, dashed = true)
-                    val preview = drawingRun.copy(points = draft.toList()).ledPositions(map.aspect)
+                    val preview = map.positions(drawingRun.copy(points = draft.toList()))
                     val previewGaps = neighbourGaps(preview, map.aspect)
                     preview.forEachIndexed { i, p ->
                         if (p != null) drawCircle(Color.White, pixelRadius(pixel, previewGaps[i]), Offset(p.x * size.width, p.y * size.height))
@@ -484,6 +501,21 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     draft.firstOrNull()?.let { s -> drawCircle(Color.Red, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height)) }
                 }
             }
+
+            if (scaling) {
+                Text(
+                    "Tap two points on the photo that you know the real distance between — the two ends of a wall, the garage door or a window. Longer distances give a more accurate scale.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { scaleDraft.clear() }, enabled = scaleDraft.isNotEmpty()) { Text("Start again") }
+                    TextButton(onClick = { scaling = false; scaleDraft.clear() }) { Text("Cancel") }
+                }
+                return@Column
+            }
+
+            ScaleSummary(map, onSet = { scaling = true; scaleDraft.clear() })
 
             if (drawingRun != null) {
                 Text(
@@ -536,7 +568,8 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                                             run.isPlacedPerLed -> " · ${run.placedCount} of ${run.count} placed"
                                             run.points.size < 2 -> " · not traced yet"
                                             else -> ""
-                                        },
+                                        } +
+                                        (run.spacingCm?.takeIf { !run.isPlacedPerLed }?.let { " · ${formatLength(it, map.useInches)} apart" } ?: ""),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -607,6 +640,17 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             if (isNew) { drawingRunId = updated.id; draft.clear() }
         }
     }
+    if (askScale && scaleDraft.size == 2) {
+        ScaleDialog(
+            inches = map.useInches,
+            current = map.scaleCm,
+            onDismiss = { askScale = false; scaleDraft.clear() },
+        ) { cm, inches ->
+            val a = scaleDraft[0]; val b = scaleDraft[1]
+            scope.launch { container.store.updateHouseMap { it.copy(scaleA = a, scaleB = b, scaleCm = cm, useInches = inches) } }
+            askScale = false; scaling = false; scaleDraft.clear()
+        }
+    }
     editGroup?.let { g ->
         GroupDialog(
             group = g, runs = map.runs, onDismiss = { editGroup = null },
@@ -668,7 +712,14 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
         mutableStateOf(if (run.count > 0 && deviceId == run.deviceId) run.count.toString() else (ledCount - usedEnd).coerceAtLeast(1).toString())
     }
     val s = start.toIntOrNull(); val c = count.toIntOrNull()
-    val valid = name.isNotBlank() && device != null && s != null && c != null && c > 0
+
+    // LED spacing: spread along the traced line, or a fixed real distance apart.
+    var fixedSpacing by remember { mutableStateOf(run.spacingCm != null) }
+    var spacingInches by remember { mutableStateOf(map.useInches) }
+    fun shown(cm: Float, inches: Boolean) = "%.2f".format(if (inches) cm / 2.54f else cm).trimEnd('0').trimEnd('.')
+    var spacingText by remember { mutableStateOf(run.spacingCm?.let { shown(it, map.useInches) } ?: "") }
+    val spacingCm = spacingText.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }?.let { if (spacingInches) it * 2.54f else it }
+    val valid = name.isNotBlank() && device != null && s != null && c != null && c > 0 && (!fixedSpacing || spacingCm != null)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -705,10 +756,51 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                 if (ledCount > 0) {
                     Text("This controller has $ledCount LEDs (0–${ledCount - 1}).", style = MaterialTheme.typography.labelSmall)
                 }
+
+                Text("LED spacing", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = !fixedSpacing, onClick = { fixedSpacing = false }, label = { Text("Spread along line") })
+                    FilterChip(selected = fixedSpacing, onClick = { fixedSpacing = true }, label = { Text("Fixed spacing") })
+                }
+                if (fixedSpacing) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            spacingText, { spacingText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }.take(7) },
+                            label = { Text("Centre to centre") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f),
+                        )
+                        FilterChip(selected = spacingInches, onClick = {
+                            if (!spacingInches) { spacingCm?.let { spacingText = shown(it, true) }; spacingInches = true }
+                        }, label = { Text("in") })
+                        FilterChip(selected = !spacingInches, onClick = {
+                            if (spacingInches) { spacingCm?.let { spacingText = shown(it, false) }; spacingInches = false }
+                        }, label = { Text("cm") })
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            "Bullets 4 in" to 10.16f, "C9 12 in" to 30.48f, "Strip 30/m" to 100f / 30f,
+                            "Strip 60/m" to 100f / 60f, "Strip 144/m" to 100f / 144f,
+                        ).forEach { (label, cm) ->
+                            AssistChip(onClick = { spacingText = shown(cm, spacingInches) }, label = { Text(label) })
+                        }
+                    }
+                    val scale = map.cmPerHeight
+                    val note = when {
+                        scale == null -> "Set the house scale on the map (the ruler button) so the app knows how big your house is. Until then this run's lights spread along the line."
+                        run.points.size >= 2 && c != null && spacingCm != null -> {
+                            val line = run.tracedLength(map.aspect) * scale
+                            val span = spacingCm * (c - 1).coerceAtLeast(0)
+                            "Traced line: ${formatLength(line, spacingInches)}. $c LEDs at this spacing span ${formatLength(span, spacingInches)}" +
+                                if (span > line * 1.02f) " — they carry on past the end of the line." else "."
+                        }
+                        else -> "Lights are placed this far apart from the start of the traced line."
+                    }
+                    Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         },
         confirmButton = {
-            TextButton(enabled = valid, onClick = { onSave(run.copy(name = name.trim(), deviceId = deviceId, startLed = s!!, count = c!!, prop = prop)) }) {
+            TextButton(enabled = valid, onClick = { onSave(run.copy(name = name.trim(), deviceId = deviceId, startLed = s!!, count = c!!, prop = prop, spacingCm = if (fixedSpacing) spacingCm else null)) }) {
                 Text(if (run.count == 0) "Next: trace it" else "Save")
             }
         },
@@ -893,7 +985,7 @@ private fun LedEditCanvas(
     val moveLed by rememberUpdatedState(onMoveLed)
     val currentPoints by rememberUpdatedState(points)
     val others = remember(map, editingRunId) {
-        map.runs.filter { it.id != editingRunId }.flatMap { it.ledPositions(map.aspect).filterNotNull() }
+        map.runs.filter { it.id != editingRunId }.flatMap { map.positions(it).filterNotNull() }
     }
     val pixel = LocalPixelStyle.current
     val gaps = remember(points, map.aspect) { neighbourGaps(points, map.aspect) }
@@ -1105,6 +1197,53 @@ private fun GroupDialog(
             TextButton(enabled = name.isNotBlank() && chosen.isNotEmpty(), onClick = {
                 onSave(group.copy(name = name.trim(), runIds = runs.map { it.id }.filter { it in chosen }))
             }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** The map's scale, or a prompt to set one. */
+@Composable
+private fun ScaleSummary(map: HouseMap, onSet: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.Straighten, null, Modifier.size(18.dp), tint = Color(0xFFFFE06B))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            map.scaleCm?.takeIf { map.cmPerHeight != null }?.let { "Scale: ${formatLength(it, map.useInches)} between the yellow marks" }
+                ?: "No scale yet — set one so runs can use their real LED spacing.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onSet) { Text(if (map.cmPerHeight != null) "Change" else "Set scale") }
+    }
+}
+
+/** Asks for the real distance between the two points just tapped. */
+@Composable
+private fun ScaleDialog(inches: Boolean, current: Float?, onDismiss: () -> Unit, onSave: (cm: Float, inches: Boolean) -> Unit) {
+    val units = listOf("ft" to 30.48f, "in" to 2.54f, "m" to 100f, "cm" to 1f)
+    var unit by remember { mutableStateOf(if (inches) "ft" else "m") }
+    val perUnit = units.first { it.first == unit }.second
+    var text by remember { mutableStateOf(current?.let { "%.2f".format(it / perUnit).trimEnd('0').trimEnd('.') } ?: "") }
+    val value = text.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("How far apart are those points?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    text, { text = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }.take(8) },
+                    label = { Text("Real distance") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    units.forEach { (u, _) -> FilterChip(selected = unit == u, onClick = { unit = u }, label = { Text(u) }) }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = value != null, onClick = { onSave(value!! * perUnit, unit == "ft" || unit == "in") }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

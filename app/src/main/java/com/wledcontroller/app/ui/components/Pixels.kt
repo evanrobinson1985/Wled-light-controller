@@ -11,18 +11,18 @@ import com.wledcontroller.app.house.PlacedLed
 import kotlin.math.hypot
 
 /**
- * How lights are drawn everywhere the app shows pixels: [sizeDp] is a light's diameter and
- * [spacingDp] the distance from one light's centre to the next wherever the app lays lights
- * out itself (strips on the bench, samples). On the house, centres come from the map.
+ * How lights are drawn everywhere the app shows pixels: [sizeDp] is a light's diameter. Where
+ * lights sit comes from the house map (each run's own spacing); rows the app lays out itself
+ * use [rowPitchDp].
  */
-data class PixelStyle(val sizeDp: Float = DEFAULT_SIZE, val spacingDp: Float = DEFAULT_SPACING) {
+data class PixelStyle(val sizeDp: Float = DEFAULT_SIZE) {
+    /** Centre-to-centre distance for lights laid out in a row on screen. */
+    val rowPitchDp get() = maxOf(sizeDp * 1.6f, sizeDp + 2f)
+
     companion object {
         const val DEFAULT_SIZE = 4f
-        const val DEFAULT_SPACING = 6f
         const val MIN_SIZE = 1f
         const val MAX_SIZE = 16f
-        const val MIN_SPACING = 1f
-        const val MAX_SPACING = 32f
     }
 }
 

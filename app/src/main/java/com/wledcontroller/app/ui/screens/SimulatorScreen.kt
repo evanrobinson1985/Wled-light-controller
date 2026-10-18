@@ -200,7 +200,7 @@ fun SimHouseView(modifier: Modifier = Modifier, bulbSize: Float = 1f, onTapDevic
 }
 
 /**
- * One controller's LEDs laid out on the bench, at the chosen light size and spacing; long
+ * One controller's LEDs laid out on the bench, at the chosen light size; long
  * strips wrap onto more rows.
  */
 @Composable
@@ -208,7 +208,7 @@ private fun SimStrip(device: SimDevice, modifier: Modifier = Modifier) {
     val now = rememberNow()
     val pixel = LocalPixelStyle.current
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val pitchDp = pixel.spacingDp
+        val pitchDp = pixel.rowPitchDp
         val perRow = (maxWidth.value / pitchDp).toInt().coerceAtLeast(1)
         val n = device.localLeds
         val rows = ((n + perRow - 1) / perRow).coerceAtLeast(1)
@@ -301,7 +301,7 @@ fun SimulatorScreen(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
                     if (active) {
-                        IconButton(onClick = { tuning = true }) { Icon(Icons.Filled.Tune, "Light size and spacing") }
+                        IconButton(onClick = { tuning = true }) { Icon(Icons.Filled.Tune, "Light size") }
                         IconButton(onClick = { sim.setMiniView(!miniView) }) {
                             Icon(
                                 Icons.Filled.PictureInPicture, if (miniView) "Hide floating live view" else "Show floating live view",
