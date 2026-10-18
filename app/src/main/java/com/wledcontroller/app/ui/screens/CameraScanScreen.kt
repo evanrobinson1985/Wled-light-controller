@@ -2,6 +2,10 @@
 
 package com.wledcontroller.app.ui.screens
 
+import com.wledcontroller.app.ui.components.LocalPixelStyle
+import com.wledcontroller.app.ui.components.drawPixel
+import com.wledcontroller.app.ui.components.neighbourGaps
+import com.wledcontroller.app.ui.components.pixelRadius
 import android.Manifest
 import android.app.Activity
 import android.content.pm.ActivityInfo
@@ -371,17 +375,20 @@ private fun CameraPreview(scanner: LedScanner, onCamera: (Camera) -> Unit, modif
 @Composable
 private fun FoundOverlay(found: List<List<MapPoint?>>, frameAspect: Float, modifier: Modifier) {
     val colors = listOf(Color(0xFF6BFF8A), Color(0xFF6BC8FF), Color(0xFFFFB86B), Color(0xFFFF7BA8))
+    val pixel = LocalPixelStyle.current
     Canvas(modifier) {
         val viewAspect = size.width / size.height
         val (cw, ch) = if (viewAspect > frameAspect) size.height * frameAspect to size.height else size.width to size.width / frameAspect
         val ox = (size.width - cw) / 2; val oy = (size.height - ch) / 2
         found.forEachIndexed { t, list ->
             val col = colors[t % colors.size]
-            list.forEach { p ->
+            val gaps = neighbourGaps(list, frameAspect)
+            list.forEachIndexed { i, p ->
                 if (p != null) {
                     val o = Offset(ox + p.x * cw, oy + p.y * ch)
-                    drawCircle(col, 3.dp.toPx(), o)
-                    drawCircle(Color.Black.copy(alpha = 0.6f), 4.5.dp.toPx(), o, style = Stroke(1.dp.toPx()))
+                    val r = pixelRadius(pixel, gaps[i], pictureHeight = ch)
+                    drawCircle(col, r, o)
+                    drawCircle(Color.Black.copy(alpha = 0.6f), r + 1.5.dp.toPx(), o, style = Stroke(1.dp.toPx()))
                 }
             }
         }

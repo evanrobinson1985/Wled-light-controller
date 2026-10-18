@@ -120,6 +120,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Column(Modifier.padding(16.dp)) { LightsDelaySetting() }
             }
 
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Column(Modifier.padding(16.dp)) { PixelStyleSetting() }
+            }
+
             val version = runCatching {
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName
             }.getOrNull() ?: "?"

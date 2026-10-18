@@ -2,6 +2,10 @@
 
 package com.wledcontroller.app.ui.screens
 
+import com.wledcontroller.app.ui.components.LocalPixelStyle
+import com.wledcontroller.app.ui.components.drawPixel
+import com.wledcontroller.app.ui.components.neighbourGaps
+import com.wledcontroller.app.ui.components.pixelRadius
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -454,13 +458,11 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
             val preview: @Composable (Modifier) -> Unit = { m ->
                 Box(m, contentAlignment = Alignment.Center) {
                     val colors = remember(pos, seq, layout) { SequenceRenderer.render(seq, layout, pos) }
+                    val pixel = LocalPixelStyle.current
+                    val gaps = remember(layout, map.aspect) { neighbourGaps(layout.leds, map.aspect) }
                     HouseCanvas(map, photo, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp)) {
-                        val r = 3.dp.toPx()
                         layout.leds.forEachIndexed { i, l ->
-                            val c = Color(colors[i] or (0xFF shl 24))
-                            val o = Offset(l.x * size.width, l.y * size.height)
-                            if (colors[i] != 0) drawCircle(c.copy(alpha = 0.35f), r * 2.2f, o)
-                            drawCircle(if (colors[i] == 0) Color.White.copy(alpha = 0.12f) else c, r, o)
+                            drawPixel(colors[i], Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
                         }
                     }
                 }

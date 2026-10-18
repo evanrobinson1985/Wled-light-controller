@@ -2,6 +2,10 @@
 
 package com.wledcontroller.app.ui.screens
 
+import com.wledcontroller.app.ui.components.LocalPixelStyle
+import com.wledcontroller.app.ui.components.drawPixel
+import com.wledcontroller.app.ui.components.neighbourGaps
+import com.wledcontroller.app.ui.components.pixelRadius
 import android.Manifest
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -181,6 +185,8 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
     val params by container.house.params.collectAsStateWithLifecycle()
     val photo = rememberPhoto(map.photoPath)
     val leds = remember(map) { map.placedLeds() }
+    val gaps = remember(leds, map.aspect) { neighbourGaps(leds, map.aspect) }
+    val pixel = LocalPixelStyle.current
     val themes = remember { HolidayThemes.forToday() }
 
     var t by remember { mutableFloatStateOf(0f) }
@@ -239,12 +245,9 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             }
 
             HouseCanvas(map, photo) {
-                val r = 3.5.dp.toPx()
                 leds.forEachIndexed { i, led ->
-                    val c = Color(HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun) or (0xFF shl 24))
                     val o = Offset(led.x * size.width, led.y * size.height)
-                    drawCircle(c.copy(alpha = 0.35f), r * 2.2f, o)
-                    drawCircle(c, r, o)
+                    drawPixel(HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun), o, pixelRadius(pixel, gaps[i]))
                 }
             }
             Text(
@@ -451,6 +454,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 return@Column
             }
 
+            val pixel = LocalPixelStyle.current
             HouseCanvas(
                 map, photo,
                 onTap = if (drawingRun != null) { { p -> draft.add(p) } } else null,
@@ -459,9 +463,13 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 map.runs.forEachIndexed { r, run ->
                     if (run.id == drawingRunId) return@forEachIndexed
                     val col = RunColors[r % RunColors.size]
-                    val placed = run.ledPositions(map.aspect).filterNotNull()
+                    val positions = run.ledPositions(map.aspect)
+                    val placed = positions.filterNotNull()
                     drawRun(if (run.isPlacedPerLed) placed else run.points, col, stroke, dashed = false)
-                    placed.forEach { p -> drawCircle(col, 2.5.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
+                    val runGaps = neighbourGaps(positions, map.aspect)
+                    positions.forEachIndexed { i, p ->
+                        if (p != null) drawCircle(col, pixelRadius(pixel, runGaps[i]), Offset(p.x * size.width, p.y * size.height))
+                    }
                     placed.firstOrNull()?.let { s ->
                         drawCircle(Color.White, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height), style = Stroke(stroke))
                     }
@@ -469,7 +477,10 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 if (drawingRun != null) {
                     drawRun(draft, Color.White, stroke, dashed = true)
                     val preview = drawingRun.copy(points = draft.toList()).ledPositions(map.aspect)
-                    preview.filterNotNull().forEach { p -> drawCircle(Color.White, 2.5.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
+                    val previewGaps = neighbourGaps(preview, map.aspect)
+                    preview.forEachIndexed { i, p ->
+                        if (p != null) drawCircle(Color.White, pixelRadius(pixel, previewGaps[i]), Offset(p.x * size.width, p.y * size.height))
+                    }
                     draft.firstOrNull()?.let { s -> drawCircle(Color.Red, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height)) }
                 }
             }
@@ -884,6 +895,8 @@ private fun LedEditCanvas(
     val others = remember(map, editingRunId) {
         map.runs.filter { it.id != editingRunId }.flatMap { it.ledPositions(map.aspect).filterNotNull() }
     }
+    val pixel = LocalPixelStyle.current
+    val gaps = remember(points, map.aspect) { neighbourGaps(points, map.aspect) }
 
     Box(
         Modifier
@@ -903,7 +916,7 @@ private fun LedEditCanvas(
         ) {
             if (photo != null) Image(photo, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds, alpha = 0.75f)
             Canvas(Modifier.fillMaxSize()) {
-                val r = 3.dp.toPx() / scale
+                val r = pixelRadius(pixel, scale = 1f / scale)
                 others.forEach { p -> drawCircle(Color.White.copy(alpha = 0.25f), r * 0.8f, Offset(p.x * size.width, p.y * size.height)) }
                 // Thin line through the run in LED order makes misplaced LEDs obvious.
                 val placed = points.withIndex().filter { it.value != null }
@@ -922,8 +935,9 @@ private fun LedEditCanvas(
                         i == 0 -> Color.Red
                         else -> Color(0xFFFFB86B)
                     }
-                    drawCircle(col, if (i == selected) r * 1.6f else r, o)
-                    if (i == selected) drawCircle(Color.White, r * 3f, o, style = Stroke(1.5.dp.toPx() / scale))
+                    val ri = pixelRadius(pixel, gaps.getOrElse(i) { com.wledcontroller.app.ui.components.NO_NEIGHBOUR }, scale = 1f / scale)
+                    drawCircle(col, if (i == selected) ri * 1.6f else ri, o)
+                    if (i == selected) drawCircle(Color.White, maxOf(ri * 3f, 6.dp.toPx() / scale), o, style = Stroke(1.5.dp.toPx() / scale))
                 }
             }
         }

@@ -43,7 +43,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            CompositionLocalProvider(LocalAppContainer provides container) {
+            val pixelStyle by container.store.pixelStyle.collectAsStateWithLifecycle(com.wledcontroller.app.ui.components.PixelStyle())
+            CompositionLocalProvider(
+                LocalAppContainer provides container,
+                com.wledcontroller.app.ui.components.LocalPixelStyle provides pixelStyle,
+            ) {
                 WledTheme {
                     val nav = rememberNavController()
                     val idArg = listOf(navArgument("id") { type = NavType.StringType })

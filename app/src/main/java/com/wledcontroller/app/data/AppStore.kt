@@ -50,6 +50,8 @@ class AppStore(private val context: Context) {
         val SCHEDULES = stringPreferencesKey("schedules")
         val SCHEDULE_ON = androidx.datastore.preferences.core.booleanPreferencesKey("schedule_on")
         val LIGHTS_DELAY = androidx.datastore.preferences.core.intPreferencesKey("lights_delay_ms")
+        val PIXEL_SIZE = androidx.datastore.preferences.core.floatPreferencesKey("pixel_size_dp")
+        val PIXEL_GAP = androidx.datastore.preferences.core.floatPreferencesKey("pixel_gap_dp")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -149,6 +151,17 @@ class AppStore(private val context: Context) {
 
     val lightsDelayMs: Flow<Int> = context.dataStore.data.map { it[Keys.LIGHTS_DELAY] ?: 0 }
     suspend fun setLightsDelay(ms: Int) { context.dataStore.edit { it[Keys.LIGHTS_DELAY] = ms } }
+
+    /** How lights are drawn in previews, the house map and the simulator. */
+    val pixelStyle: Flow<com.wledcontroller.app.ui.components.PixelStyle> = context.dataStore.data.map {
+        com.wledcontroller.app.ui.components.PixelStyle(
+            sizeDp = it[Keys.PIXEL_SIZE] ?: com.wledcontroller.app.ui.components.PixelStyle.DEFAULT_SIZE,
+            gapDp = it[Keys.PIXEL_GAP] ?: com.wledcontroller.app.ui.components.PixelStyle.DEFAULT_GAP,
+        )
+    }
+    suspend fun setPixelStyle(style: com.wledcontroller.app.ui.components.PixelStyle) {
+        context.dataStore.edit { it[Keys.PIXEL_SIZE] = style.sizeDp; it[Keys.PIXEL_GAP] = style.gapDp }
+    }
 
     /** Every stored setting as JSON (typed), for backups. */
     suspend fun exportAll(): kotlinx.serialization.json.JsonObject {

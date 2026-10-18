@@ -2,6 +2,10 @@
 
 package com.wledcontroller.app.ui.screens
 
+import com.wledcontroller.app.ui.components.LocalPixelStyle
+import com.wledcontroller.app.ui.components.drawPixel
+import com.wledcontroller.app.ui.components.neighbourGaps
+import com.wledcontroller.app.ui.components.pixelRadius
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -118,6 +122,8 @@ internal fun FseqShowEditor(initial: Sequence, onBack: () -> Unit) {
 
     // House preview: each mapped LED takes its colour from the current frame.
     val leds = remember(map) { map.placedLeds() }
+    val gaps = remember(leds, map.aspect) { neighbourGaps(leds, map.aspect) }
+    val pixel = LocalPixelStyle.current
     val frameIndex = reader?.let { (pos / it.stepMs).toInt() } ?: 0
     val colors by produceState(IntArray(0), frameIndex, reader, seq.fseqMap, leds) {
         val r = reader ?: return@produceState
@@ -214,12 +220,8 @@ internal fun FseqShowEditor(initial: Sequence, onBack: () -> Unit) {
 
                     if (leds.isNotEmpty()) {
                         HouseCanvas(map, photo, Modifier.heightIn(max = 220.dp)) {
-                            val r = 3.dp.toPx()
                             leds.forEachIndexed { i, l ->
-                                val c = colors.getOrElse(i) { 0 }
-                                val o = Offset(l.x * size.width, l.y * size.height)
-                                if (c != 0) drawCircle(Color(c or (0xFF shl 24)).copy(alpha = 0.35f), r * 2.2f, o)
-                                drawCircle(if (c == 0) Color.White.copy(alpha = 0.12f) else Color(c or (0xFF shl 24)), r, o)
+                                drawPixel(colors.getOrElse(i) { 0 }, Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
                             }
                         }
                     } else {

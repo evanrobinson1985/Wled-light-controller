@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Workspaces
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.AlertDialog
@@ -56,6 +58,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -100,6 +103,10 @@ import com.wledcontroller.app.house.HouseMap
 import com.wledcontroller.app.house.placedLeds
 import com.wledcontroller.app.sim.SimDevice
 import com.wledcontroller.app.sim.SimHub
+import com.wledcontroller.app.ui.components.LocalPixelStyle
+import com.wledcontroller.app.ui.components.drawPixel
+import com.wledcontroller.app.ui.components.neighbourGaps
+import com.wledcontroller.app.ui.components.pixelRadius
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -111,7 +118,7 @@ private fun rememberNow(): Long {
     return now
 }
 
-private class SimLed(val device: SimDevice, val deviceId: String, val index: Int, val x: Float, val y: Float, val bullet: Boolean)
+private class SimLed(val device: SimDevice, val deviceId: String, val index: Int, val x: Float, val y: Float, val bullet: Boolean, val gap: Float)
 
 /** Every mapped LED of a simulated controller, with what it looks like. */
 @Composable
@@ -122,10 +129,12 @@ private fun rememberSimLeds(map: HouseMap): List<SimLed> {
     val profiles by container.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
     return remember(map, saved, sims, profiles) {
         val hostOf = saved.associate { it.id to it.host }
-        map.placedLeds().mapNotNull { l ->
+        val placed = map.placedLeds()
+        val gaps = neighbourGaps(placed, map.aspect)
+        placed.mapIndexedNotNull { i, l ->
             SimHub.find(hostOf[l.deviceId])?.let { d ->
                 val bullet = LightProfile.parse(profiles[LightProfile.deviceKey(l.deviceId)]) == LightProfile.BULLETS
-                SimLed(d, l.deviceId, l.index, l.x, l.y, bullet)
+                SimLed(d, l.deviceId, l.index, l.x, l.y, bullet, gaps[i])
             }
         }
     }
@@ -138,8 +147,8 @@ private fun DrawScope.glow(color: Int, center: Offset, radius: Float, bullet: Bo
         return
     }
     val c = Color(color or (0xFF shl 24))
-    drawCircle(c.copy(alpha = if (bullet) 0.30f else 0.22f), radius * (if (bullet) 4f else 3f), center, blendMode = BlendMode.Plus)
-    drawCircle(c.copy(alpha = 0.55f), radius * 1.8f, center, blendMode = BlendMode.Plus)
+    drawCircle(c.copy(alpha = if (bullet) 0.26f else 0.20f), radius * (if (bullet) 3f else 2.5f), center, blendMode = BlendMode.Plus)
+    drawCircle(c.copy(alpha = 0.5f), radius * 1.5f, center, blendMode = BlendMode.Plus)
     drawCircle(c, radius, center)
 }
 
@@ -152,6 +161,7 @@ fun SimHouseView(modifier: Modifier = Modifier, bulbSize: Float = 1f, onTapDevic
     val leds = rememberSimLeds(map)
     val now = rememberNow()
     val tap by rememberUpdatedState(onTapDevice)
+    val pixel = LocalPixelStyle.current
     Box(
         modifier
             .fillMaxWidth()
@@ -173,11 +183,10 @@ fun SimHouseView(modifier: Modifier = Modifier, bulbSize: Float = 1f, onTapDevic
             }
         ) {
             val frames = HashMap<SimDevice, IntArray>()
-            // Half the old size: closer to real bulbs at house scale.
-            val r = (size.width / 800f).coerceIn(0.6f, 2f) * bulbSize
             for (l in leds) {
                 val f = frames.getOrPut(l.device) { l.device.frame(now) }
-                glow(f.getOrElse(l.index) { 0 }, Offset(l.x * size.width, l.y * size.height), if (l.bullet) r * 1.4f else r, l.bullet)
+                val r = pixelRadius(pixel, l.gap, scale = bulbSize)
+                glow(f.getOrElse(l.index) { 0 }, Offset(l.x * size.width, l.y * size.height), r, l.bullet)
             }
         }
         if (leds.isEmpty()) {
@@ -190,22 +199,29 @@ fun SimHouseView(modifier: Modifier = Modifier, bulbSize: Float = 1f, onTapDevic
     }
 }
 
-/** One controller's LEDs in a row, like a strip laid out on the bench. */
+/**
+ * One controller's LEDs laid out on the bench, at the chosen light size and spacing; long
+ * strips wrap onto more rows.
+ */
 @Composable
 private fun SimStrip(device: SimDevice, modifier: Modifier = Modifier) {
     val now = rememberNow()
-    Canvas(modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xFF0B0D14))) {
-        val f = device.frame(now)
-        val n = device.localLeds.coerceAtMost(f.size)
-        if (n <= 0) return@Canvas
-        val w = size.width / n
-        for (i in 0 until n) {
-            val c = f[i]
-            val x = i * w + w / 2
-            if (c and 0xFFFFFF != 0) {
-                drawCircle(Color(c or (0xFF shl 24)).copy(alpha = 0.4f), (w * 0.8f).coerceAtMost(size.height / 2), Offset(x, size.height / 2), blendMode = BlendMode.Plus)
+    val pixel = LocalPixelStyle.current
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val pitchDp = pixel.sizeDp + pixel.gapDp.coerceAtLeast(0.5f)
+        val perRow = (maxWidth.value / pitchDp).toInt().coerceAtLeast(1)
+        val n = device.localLeds
+        val rows = ((n + perRow - 1) / perRow).coerceAtLeast(1)
+        val rowDp = maxOf(pitchDp, 4f)
+        Canvas(Modifier.fillMaxWidth().height((rows * rowDp + 6).dp).clip(RoundedCornerShape(7.dp)).background(Color(0xFF0B0D14))) {
+            val f = device.frame(now)
+            val count = n.coerceAtMost(f.size)
+            val pitch = pitchDp.dp.toPx(); val rowH = rowDp.dp.toPx(); val top = 3.dp.toPx()
+            val r = pixel.sizeDp.dp.toPx() / 2f
+            for (i in 0 until count) {
+                val o = Offset((i % perRow) * pitch + pitch / 2, top + (i / perRow) * rowH + rowH / 2)
+                drawPixel(f[i], o, r, glow = 0.6f)
             }
-            drawCircle(if (c and 0xFFFFFF == 0) Color.White.copy(alpha = 0.08f) else Color(c or (0xFF shl 24)), (w * 0.225f).coerceIn(0.3f, size.height / 6), Offset(x, size.height / 2))
         }
     }
 }
@@ -233,7 +249,7 @@ fun BoxScope.SimMiniView(onOpen: () -> Unit, onClose: () -> Unit) {
             },
     ) {
         Box {
-            SimHouseView(bulbSize = 0.8f)
+            SimHouseView(bulbSize = 0.6f)
             Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures { onOpen() } })
             Box(
                 Modifier.align(Alignment.TopEnd).padding(4.dp).size(22.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f))
@@ -264,6 +280,7 @@ fun SimulatorScreen(
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
+    var tuning by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<SavedDevice?>(null) }
@@ -284,6 +301,7 @@ fun SimulatorScreen(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
                     if (active) {
+                        IconButton(onClick = { tuning = true }) { Icon(Icons.Filled.Tune, "Light size and spacing") }
                         IconButton(onClick = { sim.setMiniView(!miniView) }) {
                             Icon(
                                 Icons.Filled.PictureInPicture, if (miniView) "Hide floating live view" else "Show floating live view",
@@ -329,6 +347,12 @@ fun SimulatorScreen(
         }
     }
 
+    if (tuning) {
+        // No scrim, so the house above stays bright while you adjust.
+        ModalBottomSheet(onDismissRequest = { tuning = false }, scrimColor = Color.Transparent) {
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) { PixelStyleSetting() }
+        }
+    }
     if (confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
