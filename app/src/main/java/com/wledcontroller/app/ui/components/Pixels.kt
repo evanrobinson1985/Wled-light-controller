@@ -48,6 +48,7 @@ fun neighbourGaps(leds: List<PlacedLed>, aspect: Float): FloatArray {
 }
 
 /** The same for one run's LEDs in order (null = not placed). */
+@JvmName("neighbourGapsOfPoints")
 fun neighbourGaps(points: List<MapPoint?>, aspect: Float): FloatArray {
     val out = FloatArray(points.size) { NO_NEIGHBOUR }
     for (k in 0 until points.size - 1) {
