@@ -208,11 +208,11 @@ private fun SimStrip(device: SimDevice, modifier: Modifier = Modifier) {
     val now = rememberNow()
     val pixel = LocalPixelStyle.current
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val pitchDp = pixel.sizeDp + pixel.gapDp.coerceAtLeast(0.5f)
+        val pitchDp = pixel.spacingDp
         val perRow = (maxWidth.value / pitchDp).toInt().coerceAtLeast(1)
         val n = device.localLeds
         val rows = ((n + perRow - 1) / perRow).coerceAtLeast(1)
-        val rowDp = maxOf(pitchDp, 4f)
+        val rowDp = maxOf(pitchDp, pixel.sizeDp, 4f)
         Canvas(Modifier.fillMaxWidth().height((rows * rowDp + 6).dp).clip(RoundedCornerShape(7.dp)).background(Color(0xFF0B0D14))) {
             val f = device.frame(now)
             val count = n.coerceAtMost(f.size)

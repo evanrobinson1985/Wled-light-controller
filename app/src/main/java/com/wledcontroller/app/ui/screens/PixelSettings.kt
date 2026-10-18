@@ -53,7 +53,7 @@ internal fun PixelStyleSetting() {
             TextButton(onClick = { set(PixelStyle()) }) { Text("Reset") }
         }
         Text(
-            "How lights are drawn on the house map, effect and show previews, the camera scan and the simulator. Lights shrink where they're packed closely, so they always keep the spacing apart.",
+"How lights are drawn on the house map, effect and show previews, the camera scan and the simulator. Spacing is the distance from the centre of one light to the next where the app lays lights out in a row; on the house, lights sit where they're traced, and shrink if needed so neighbours don't run together.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -62,27 +62,23 @@ internal fun PixelStyleSetting() {
             { set(local.copy(sizeDp = PixelStyle.MIN_SIZE + it * sizeRange)) },
             label = "Light size", valueText = "%.1f dp".format(local.sizeDp), height = 30.dp,
         )
+        val spacingRange = PixelStyle.MAX_SPACING - PixelStyle.MIN_SPACING
         GradientSlider(
-            local.gapDp / PixelStyle.MAX_GAP,
-            { set(local.copy(gapDp = it * PixelStyle.MAX_GAP)) },
-            label = "Spacing between lights", valueText = "%.1f dp".format(local.gapDp), height = 30.dp,
+            (local.spacingDp - PixelStyle.MIN_SPACING) / spacingRange,
+            { set(local.copy(spacingDp = PixelStyle.MIN_SPACING + it * spacingRange)) },
+            label = "Spacing (centre to centre)", valueText = "%.1f dp".format(local.spacingDp), height = 30.dp,
         )
-        PixelSample("Dense strip (60 per metre)", local, pitchDp = 5f)
-        PixelSample("Bullet string", local, pitchDp = 16f)
+        PixelSample(local)
     }
 }
 
-/** A row of rainbow lights [pitchDp] apart, drawn with [style]. */
+/** A row of rainbow lights at the chosen size, their centres the chosen spacing apart. */
 @Composable
-private fun PixelSample(label: String, style: PixelStyle, pitchDp: Float) {
-    Column {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Canvas(Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF070B1C))) {
-            val pitch = pitchDp.dp.toPx()
-            val n = (size.width / pitch).toInt()
-            // Neighbour distance in "picture heights" for pixelRadius.
-            val r = pixelRadius(style, neighbour = pitch / size.height)
-            for (i in 0 until n) drawPixel(SimEffects.hsv(i / n.toFloat()), Offset(pitch * (i + 0.5f), size.height / 2), r)
-        }
+private fun PixelSample(style: PixelStyle) {
+    Canvas(Modifier.fillMaxWidth().height(maxOf(28f, style.sizeDp + 12f).dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF070B1C))) {
+        val pitch = style.spacingDp.dp.toPx()
+        val n = (size.width / pitch).toInt().coerceAtLeast(1)
+        val r = pixelRadius(style)
+        for (i in 0 until n) drawPixel(SimEffects.hsv(i / n.toFloat()), Offset(pitch * (i + 0.5f), size.height / 2), r)
     }
 }

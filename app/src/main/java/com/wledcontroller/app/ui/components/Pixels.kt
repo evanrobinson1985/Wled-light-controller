@@ -12,15 +12,17 @@ import kotlin.math.hypot
 
 /**
  * How lights are drawn everywhere the app shows pixels: [sizeDp] is a light's diameter and
- * [gapDp] the least space kept between neighbouring lights (lights shrink to keep it).
+ * [spacingDp] the distance from one light's centre to the next wherever the app lays lights
+ * out itself (strips on the bench, samples). On the house, centres come from the map.
  */
-data class PixelStyle(val sizeDp: Float = DEFAULT_SIZE, val gapDp: Float = DEFAULT_GAP) {
+data class PixelStyle(val sizeDp: Float = DEFAULT_SIZE, val spacingDp: Float = DEFAULT_SPACING) {
     companion object {
         const val DEFAULT_SIZE = 4f
-        const val DEFAULT_GAP = 1f
+        const val DEFAULT_SPACING = 6f
         const val MIN_SIZE = 1f
         const val MAX_SIZE = 16f
-        const val MAX_GAP = 8f
+        const val MIN_SPACING = 1f
+        const val MAX_SPACING = 32f
     }
 }
 
@@ -62,14 +64,16 @@ fun neighbourGaps(points: List<MapPoint?>, aspect: Float): FloatArray {
 }
 
 /**
- * A light's radius in pixels: the chosen size, made smaller when needed so it keeps the chosen
- * gap to its nearest neighbour ([neighbour] in picture heights, [pictureHeight] in pixels).
- * [scale] shrinks everything, e.g. for a zoomed-in canvas or a thumbnail.
+ * A light's radius in pixels: the chosen size, made smaller where lights sit closer together
+ * on the map so neighbours never run into each other ([neighbour] is the centre-to-centre
+ * distance in picture heights, [pictureHeight] in pixels). [scale] shrinks everything, e.g.
+ * for a zoomed-in canvas or a thumbnail.
  */
 fun DrawScope.pixelRadius(style: PixelStyle, neighbour: Float = NO_NEIGHBOUR, pictureHeight: Float = size.height, scale: Float = 1f): Float {
     val want = style.sizeDp.dp.toPx() / 2f * scale
     if (neighbour == NO_NEIGHBOUR) return want
-    val room = (neighbour * pictureHeight - style.gapDp.dp.toPx() * scale) / 2f
+    // A little short of touching, so each light still reads as its own dot.
+    val room = neighbour * pictureHeight * 0.45f
     return minOf(want, room).coerceAtLeast(0.5f * scale)
 }
 
