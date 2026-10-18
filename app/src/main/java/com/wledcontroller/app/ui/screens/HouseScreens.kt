@@ -790,7 +790,7 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                         run.points.size >= 2 && c != null && spacingCm != null -> {
                             val line = run.tracedLength(map.aspect) * scale
                             val span = spacingCm * (c - 1).coerceAtLeast(0)
-                            "Traced line: ${formatLength(line, spacingInches)}. $c LEDs at this spacing span ${formatLength(span, spacingInches)}" +
+                            "Traced line: ${formatLength(line, true)}. $c LEDs at this spacing span ${formatLength(span, true)}" +
                                 if (span > line * 1.02f) " — they carry on past the end of the line." else "."
                         }
                         else -> "Lights are placed this far apart from the start of the traced line."
@@ -1209,7 +1209,7 @@ private fun ScaleSummary(map: HouseMap, onSet: () -> Unit) {
         Icon(Icons.Filled.Straighten, null, Modifier.size(18.dp), tint = Color(0xFFFFE06B))
         Spacer(Modifier.width(8.dp))
         Text(
-            map.scaleCm?.takeIf { map.cmPerHeight != null }?.let { "Scale: ${formatLength(it, map.useInches)} between the yellow marks" }
+            map.scaleCm?.takeIf { map.cmPerHeight != null }?.let { "Scale: ${formatLength(it, true)} between the yellow marks" }
                 ?: "No scale yet — set one so runs can use their real LED spacing.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1219,31 +1219,34 @@ private fun ScaleSummary(map: HouseMap, onSet: () -> Unit) {
     }
 }
 
-/** Asks for the real distance between the two points just tapped. */
+/** Asks for the real distance between the two points just tapped, in feet and inches. */
 @Composable
 private fun ScaleDialog(inches: Boolean, current: Float?, onDismiss: () -> Unit, onSave: (cm: Float, inches: Boolean) -> Unit) {
-    val units = listOf("ft" to 30.48f, "in" to 2.54f, "m" to 100f, "cm" to 1f)
-    var unit by remember { mutableStateOf(if (inches) "ft" else "m") }
-    val perUnit = units.first { it.first == unit }.second
-    var text by remember { mutableStateOf(current?.let { "%.2f".format(it / perUnit).trimEnd('0').trimEnd('.') } ?: "") }
-    val value = text.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }
+    val currentIn = current?.let { Math.round(it / 2.54f) }
+    var feet by remember { mutableStateOf(currentIn?.let { (it / 12).toString() } ?: "") }
+    var extraIn by remember { mutableStateOf(currentIn?.let { (it % 12).takeIf { r -> r > 0 }?.toString() } ?: "") }
+    val ft = feet.toIntOrNull() ?: 0
+    val inch = extraIn.replace(',', '.').toFloatOrNull() ?: 0f
+    val totalIn = ft * 12 + inch
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("How far apart are those points?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    text, { text = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }.take(8) },
-                    label = { Text("Real distance") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    feet, { feet = it.filter(Char::isDigit).take(4) },
+                    label = { Text("Feet") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    units.forEach { (u, _) -> FilterChip(selected = unit == u, onClick = { unit = u }, label = { Text(u) }) }
-                }
+                OutlinedTextField(
+                    extraIn, { extraIn = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }.take(5) },
+                    label = { Text("Inches") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f),
+                )
             }
         },
         confirmButton = {
-            TextButton(enabled = value != null, onClick = { onSave(value!! * perUnit, unit == "ft" || unit == "in") }) { Text("Save") }
+            TextButton(enabled = totalIn > 0f, onClick = { onSave(totalIn * 2.54f, true) }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

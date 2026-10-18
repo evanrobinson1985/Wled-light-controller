@@ -66,6 +66,7 @@ class HouseMapTest {
         assertEquals("4 in", formatLength(10.16f, inches = true))
         assertEquals("40 ft", formatLength(40 * 30.48f, inches = true))
         assertEquals("3 ft 6 in", formatLength(42 * 2.54f, inches = true))
+        assertEquals("1 ft 6 in", formatLength(18 * 2.54f, inches = true))
         assertEquals("1.67 m", formatLength(166.7f, inches = false))
     }
 }

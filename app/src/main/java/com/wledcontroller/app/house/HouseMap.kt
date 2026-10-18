@@ -151,7 +151,7 @@ private fun LightRun.spacedPositions(aspect: Float, step: Float): List<MapPoint>
 fun formatLength(cm: Float, inches: Boolean): String {
     if (!inches) return if (cm >= 100f) "%.2f m".format(cm / 100f) else "%.1f cm".format(cm).replace(".0 ", " ")
     val totalIn = cm / 2.54f
-    if (totalIn < 24f) return (if (totalIn < 10f) "%.1f in".format(totalIn) else "%.0f in".format(totalIn)).replace(".0 ", " ")
+    if (totalIn < 12f) return (if (totalIn < 10f) "%.1f in".format(totalIn) else "%.0f in".format(totalIn)).replace(".0 ", " ")
     val ft = (totalIn / 12f).toInt()
     val rest = Math.round(totalIn - ft * 12f)
     return if (rest == 0) "$ft ft" else if (rest == 12) "${ft + 1} ft" else "$ft ft $rest in"
