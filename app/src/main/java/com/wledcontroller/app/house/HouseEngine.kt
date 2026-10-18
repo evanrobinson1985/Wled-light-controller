@@ -52,7 +52,7 @@ class HouseEngine(private val context: Context, private val store: AppStore, pri
 
     private suspend fun streamLoop() {
         val map = store.houseMap.first()
-        val hosts = store.devices.first().associate { it.id to it.host }
+        val hosts = store.streamTargets()
         val leds = map.placedLeds().filter { it.deviceId in hosts }
         if (leds.isEmpty()) return
         // One buffer per device, sized to its highest mapped LED.

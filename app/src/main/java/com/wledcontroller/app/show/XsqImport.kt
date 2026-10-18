@@ -102,16 +102,25 @@ object XsqImport {
     /** The nearest effect here to an xLights effect, or null to skip it. */
     fun effectFor(xlights: String): SeqEffect? = when (xlights.lowercase()) {
         "on", "color wash", "colorwash", "fill" -> SeqEffect.ON
-        "bars", "garlands" -> SeqEffect.BARS
-        "butterfly", "plasma", "liquid", "kaleidoscope" -> SeqEffect.BUTTERFLY
-        "chase", "single strand", "singlestrand", "marquee" -> SeqEffect.CHASE
+        "bars" -> SeqEffect.BARS
+        "garlands" -> SeqEffect.GARLANDS
+        "butterfly", "liquid", "kaleidoscope" -> SeqEffect.BUTTERFLY
+        "plasma" -> SeqEffect.PLASMA
+        "chase", "single strand", "singlestrand" -> SeqEffect.CHASE
+        "marquee" -> SeqEffect.MARQUEE
         "wave", "color wave", "colorwave" -> SeqEffect.COLOR_WAVE
-        "curtain", "wipe" -> SeqEffect.WIPE
-        "fire", "candle", "shimmer" -> SeqEffect.SHIMMER
-        "fireworks", "shockwave", "ripple", "circles" -> SeqEffect.FIREWORKS
+        "wipe" -> SeqEffect.WIPE
+        "curtain" -> SeqEffect.CURTAIN
+        "fire", "candle" -> SeqEffect.FIRE
+        "shimmer" -> SeqEffect.SHIMMER
+        "fireworks" -> SeqEffect.FIREWORKS
+        "shockwave" -> SeqEffect.SHOCKWAVE
+        "ripple", "circles" -> SeqEffect.RIPPLE
         "meteors" -> SeqEffect.METEORS
         "morph", "lightning" -> SeqEffect.COMET
-        "spirals", "pinwheel", "galaxy", "fan", "spirograph" -> SeqEffect.SPIRALS
+        "spirals", "spirograph" -> SeqEffect.SPIRALS
+        "pinwheel", "fan" -> SeqEffect.PINWHEEL
+        "galaxy" -> SeqEffect.GALAXY
         "snowflakes", "snowstorm" -> SeqEffect.SNOW
         "strobe" -> SeqEffect.STROBE
         "text" -> SeqEffect.TEXT
@@ -119,6 +128,7 @@ object XsqImport {
         "sparkle", "glediator" -> SeqEffect.SPARKLE
         "vu meter", "vumeter" -> SeqEffect.VU_METER
         "music" -> SeqEffect.MUSIC_PULSE
+        "faces" -> SeqEffect.SING
         "pictures", "video" -> SeqEffect.PICTURE
         "rainbow" -> SeqEffect.RAINBOW
         "pulse" -> SeqEffect.PULSE

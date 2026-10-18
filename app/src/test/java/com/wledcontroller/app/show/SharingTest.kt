@@ -85,7 +85,7 @@ class SharingTest {
     <Element type="timing" name="Beats"><EffectLayer><Effect label="" startTime="0" endTime="500"/><Effect label="" startTime="500" endTime="1000"/></EffectLayer></Element>
     <Element type="model" name="Roofline">
       <EffectLayer><Effect ref="1" name="Text" startTime="2000" endTime="6000" palette="0"/></EffectLayer>
-      <EffectLayer><Effect ref="0" name="Bars" startTime="0" endTime="4000" palette="0"/><Effect name="Faces" startTime="4000" endTime="5000" palette="0"/></EffectLayer>
+      <EffectLayer><Effect ref="0" name="Bars" startTime="0" endTime="4000" palette="0"/><Effect name="DMX" startTime="4000" endTime="5000" palette="0"/></EffectLayer>
     </Element>
     <Element type="model" name="Mega Tree"><EffectLayer/><SubModelEffectLayer name="String 1"><Effect name="Twinkle" startTime="0" endTime="3000" palette="0"/></SubModelEffectLayer></Element>
     <Element type="model" name="Arches"><EffectLayer><Effect name="On" startTime="0" endTime="1000" palette="0"/></EffectLayer></Element>
@@ -112,7 +112,7 @@ class SharingTest {
         assertEquals(TrackTarget(TrackTarget.Kind.GROUP, "g"), targets["Arches"])
 
         val (seq, skipped) = XsqImport.toSequence(x, "Carol", targets)
-        assertEquals(1, skipped) // Faces has no match yet
+        assertEquals(1, skipped) // DMX has no match here
         assertEquals(listOf("Roofline · layer 1", "Roofline · layer 2", "Mega Tree / String 1", "Arches"), seq.tracks.map { it.name })
         assertEquals(BlendMode.NORMAL, seq.tracks[0].blend)
         val text = seq.tracks[0].clips.single()

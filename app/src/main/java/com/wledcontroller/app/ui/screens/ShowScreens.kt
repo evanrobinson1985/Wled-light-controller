@@ -218,7 +218,7 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                         else {
                             val layout = SequenceRenderer.prepare(map, s.tracks)
                             val env = s.audioFile?.let { runCatching { AudioAnalyzer.envelope(it) }.getOrNull() }
-                            com.wledcontroller.app.show.FseqExport.export(s, layout, container.store.devices.first(), env, out)
+                            com.wledcontroller.app.show.FseqExport.export(s, layout, container.store.devices.first(), env, out, container.store.outputs.first())
                         }
                     }
                 }

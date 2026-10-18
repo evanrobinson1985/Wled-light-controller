@@ -11,6 +11,7 @@ enum class ModelKind(val label: String) {
     MATRIX("Matrix"),
     MEGA_TREE("Mega tree"),
     STAR("Star"),
+    FACE("Singing face"),
 }
 
 @Serializable
@@ -41,7 +42,11 @@ data class PropModel(
     val ledCount: Int get() = when (kind) {
         ModelKind.MATRIX, ModelKind.MEGA_TREE -> strings.coerceAtLeast(1) * nodes.coerceAtLeast(1)
         ModelKind.STAR -> points.coerceAtLeast(3) * nodes.coerceAtLeast(2)
+        ModelKind.FACE -> FACE_PARTS.size * nodes.coerceAtLeast(2)
     }
+
+    /** For a singing face: which part LED [i] is (0 eyes, 1 mouth closed, 2 open, 3 wide); else null. */
+    fun facePart(i: Int): Int? = if (kind != ModelKind.FACE) null else (i / nodes.coerceAtLeast(2)).coerceAtMost(FACE_PARTS.lastIndex)
 
     /** LED positions inside a box (corners [a] and [b], normalised photo coordinates), in wiring order. */
     fun layout(a: MapPoint, b: MapPoint, aspect: Float): List<MapPoint> {
@@ -111,6 +116,23 @@ data class PropModel(
                     at(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)
                 }
             }
+            ModelKind.FACE -> {
+                val n = nodes.coerceAtLeast(2)
+                // Eyes (half each), then three mouth shapes: closed line, open "O", wide open.
+                fun ring(cx: Float, cy: Float, rx: Float, ry: Float, k: Int, of: Int): MapPoint {
+                    val a = (k / of.toFloat()) * 2f * PI.toFloat()
+                    return at(cx + rx * cos(a), cy + ry * sin(a))
+                }
+                List(FACE_PARTS.size * n) { i ->
+                    val k = i % n
+                    when (i / n) {
+                        0 -> if (k < n / 2) ring(0.32f, 0.33f, 0.08f, 0.08f, k, n / 2) else ring(0.68f, 0.33f, 0.08f, 0.08f, k - n / 2, n - n / 2)
+                        1 -> at(0.3f + 0.4f * k / (n - 1f), 0.7f)
+                        2 -> ring(0.5f, 0.7f, 0.12f, 0.07f, k, n)
+                        else -> ring(0.5f, 0.72f, 0.22f, 0.14f, k, n)
+                    }
+                }
+            }
         }
     }
 
@@ -128,6 +150,14 @@ data class PropModel(
             val p = points.coerceAtLeast(3); val n = nodes.coerceAtLeast(2)
             List(p) { pt -> Submodel("Point ${pt + 1}", listOf(pt * n until (pt + 1) * n)) }
         }
+        ModelKind.FACE -> {
+            val n = nodes.coerceAtLeast(2)
+            FACE_PARTS.mapIndexed { i, name -> Submodel(name, listOf(i * n until (i + 1) * n)) }
+        }
+    }
+
+    companion object {
+        val FACE_PARTS = listOf("Eyes", "Mouth closed", "Mouth open", "Mouth wide")
     }
 }
 

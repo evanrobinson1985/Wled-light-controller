@@ -41,10 +41,20 @@ enum class SeqEffect(val label: String) {
     VU_METER("VU meter (music)"),
     MUSIC_PULSE("Music pulse"),
     BEAT_FLASH("Beat flash"),
+    FIRE("Fire"),
+    RIPPLE("Ripple"),
+    SHOCKWAVE("Shockwave"),
+    CURTAIN("Curtain"),
+    PINWHEEL("Pinwheel"),
+    GALAXY("Galaxy"),
+    PLASMA("Plasma"),
+    MARQUEE("Marquee"),
+    GARLANDS("Garlands"),
+    SING("Sing (faces)"),
     ;
 
     /** Effects that follow the song's loudness (need a song on the show). */
-    val musical get() = this == VU_METER || this == MUSIC_PULSE || this == BEAT_FLASH
+    val musical get() = this == VU_METER || this == MUSIC_PULSE || this == BEAT_FLASH || this == SING
 }
 
 /** How a track mixes with the tracks below it in the list. */

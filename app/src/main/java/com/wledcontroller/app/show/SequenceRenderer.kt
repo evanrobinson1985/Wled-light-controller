@@ -8,6 +8,8 @@ import com.wledcontroller.app.house.allSubmodels
 import com.wledcontroller.app.house.placedLeds
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -35,6 +37,8 @@ class TrackLayout(
     val natural: Array<Direction>,
     /** Width / height of the area the track covers, in real proportions (for text and pictures). */
     val aspect: Float = 1f,
+    /** For singing faces: which part each LED is (see [PropModel.facePart]), or -1. */
+    val part: IntArray = IntArray(0),
 )
 
 object SequenceRenderer {
@@ -80,6 +84,10 @@ object SequenceRenderer {
                 ly = FloatArray(idx.size) { i -> sy?.let { 1f - (ys[i] - minY) / it } ?: 0.5f },
                 natural = Array(idx.size) { runs[leds[idx[it]].runIndex].prop.natural },
                 aspect = if (sx != null && sy != null) sx / sy else if (sx != null) 8f else 1f,
+                part = IntArray(idx.size) { i ->
+                    val l = leds[idx[i]]
+                    runs[l.runIndex].model?.facePart(l.orderInRun) ?: -1
+                },
             )
         }
         return PreparedLayout(leds, trackLayouts)
@@ -120,11 +128,40 @@ object SequenceRenderer {
                 val pos = position(dir, tl.along[k], tl.lx[k], tl.ly[k])
                 val reveal = transition(clip, local, pos, tl.lx[k], tl.ly[k], li)
                 val c = if (reveal <= 0f) 0
-                else HouseRenderer.scale(effectColor(clip, pos, tl.lx[k], tl.ly[k], t, progress, li, tl.aspect, level, beat), intensity * reveal)
+                else HouseRenderer.scale(
+                    effectColor(clip, pos, tl.lx[k], tl.ly[k], t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 }),
+                    intensity * reveal,
+                )
                 out[li] = mix(track.blend, out[li], c)
             }
         }
         return out
+    }
+
+    private const val FACE_EYES = 0
+    private const val FACE_CLOSED = 1
+    private const val FACE_OPEN = 2
+    private const val FACE_WIDE = 3
+
+    /** Smooth 2D value noise, 0..1. */
+    private fun noise(x: Float, y: Float): Float {
+        val ix = floor(x).toInt(); val iy = floor(y).toInt()
+        val fx = x - ix; val fy = y - iy
+        fun s(v: Float) = v * v * (3 - 2 * v)
+        fun h(a: Int, b: Int) = HouseRenderer.hash(a * 73856093 xor b * 19349663, 31)
+        val top = h(ix, iy) + (h(ix + 1, iy) - h(ix, iy)) * s(fx)
+        val bottom = h(ix, iy + 1) + (h(ix + 1, iy + 1) - h(ix, iy + 1)) * s(fx)
+        return top + (bottom - top) * s(fy)
+    }
+
+    /** Black → red → orange → yellow → white. */
+    private fun fireColor(h: Float): Int {
+        val v = h.coerceIn(0f, 1f) * 3f
+        return when {
+            v < 1f -> ((v * 255).toInt() shl 16)
+            v < 2f -> (255 shl 16) or (((v - 1f) * 200).toInt() shl 8)
+            else -> (255 shl 16) or ((200 + (v - 2f) * 55).toInt() shl 8) or ((v - 2f) * 160).toInt()
+        }
     }
 
     /** Mean of a curve from the start to [progress] (16-step trapezoid). */
@@ -203,7 +240,7 @@ object SequenceRenderer {
 
     private fun effectColor(
         c: Clip, pos: Float, lx: Float, ly: Float, t: Float, progress: Float, id: Int,
-        aspect: Float = 1f, level: Float = 0f, beat: Float = 0f,
+        aspect: Float = 1f, level: Float = 0f, beat: Float = 0f, part: Int = -1,
     ): Int {
         val cols = c.colors.ifEmpty { listOf(0xFFFFFF) }
         val rate = 0.1f + c.speed * 2.9f         // cycles per second-ish
@@ -305,6 +342,71 @@ object SequenceRenderer {
             }
             SeqEffect.MUSIC_PULSE -> HouseRenderer.scale(HouseRenderer.palette(cols, pos * count * 0.2f + t * 0.05f), level)
             SeqEffect.BEAT_FLASH -> HouseRenderer.scale(cols[floor(t * 2f).toInt().mod(cols.size)], beat)
+            SeqEffect.FIRE -> {
+                // Flames rise from the bottom; size sets how tall they reach.
+                val heat = (noise(lx * aspect * 9f, ly * 3f - t * (1f + rate * 2f)) * (1.25f - ly * (1.6f - c.size))).coerceIn(0f, 1f)
+                if (c.colors.size >= 2) HouseRenderer.palette(cols, heat * 0.999f) else fireColor(heat)
+            }
+            SeqEffect.RIPPLE -> {
+                val d = hypot((lx - 0.5f) * aspect, ly - 0.5f)
+                val wave = 0.5f + 0.5f * sin((d * count * 4f - t * rate * 3f) * 2f * PI.toFloat())
+                HouseRenderer.scale(HouseRenderer.palette(cols, d), wave * wave)
+            }
+            SeqEffect.SHOCKWAVE -> {
+                // One ring per beat of the effect, bursting out from the middle.
+                val period = 0.4f + (1f - c.speed) * 2f
+                val age = HouseRenderer.frac(t / period)
+                val d = hypot((lx - 0.5f) * aspect, ly - 0.5f) / (0.5f * maxOf(aspect, 1f) * 1.4142f)
+                val ring = exp(-((d - age) * (d - age)) / (0.002f + c.size * 0.01f)) * (1f - age)
+                HouseRenderer.scale(cols[floor(t / period).toInt().mod(cols.size)], ring)
+            }
+            SeqEffect.CURTAIN -> {
+                // Opens from the middle over the effect; the edge is soft.
+                val open = progress * 1.1f
+                val d = abs(lx - 0.5f) * 2f
+                val f = ((open - d) / 0.1f).coerceIn(0f, 1f)
+                HouseRenderer.scale(HouseRenderer.palette(cols, ly), f)
+            }
+            SeqEffect.PINWHEEL -> {
+                val arms = 2 + ((1f - c.size) * 6).toInt()
+                val a = atan2(ly - 0.5f, (lx - 0.5f) * aspect) / (2f * PI.toFloat())
+                val v = HouseRenderer.frac(a * arms + t * rate * 0.4f)
+                cols[(v * cols.size).toInt().coerceAtMost(cols.size - 1)]
+            }
+            SeqEffect.GALAXY -> {
+                val dx = (lx - 0.5f) * aspect; val dy = ly - 0.5f
+                val r = hypot(dx, dy)
+                val a = atan2(dy, dx) / (2f * PI.toFloat())
+                val v = HouseRenderer.frac(a * 2f + r * (2f + c.size * 6f) - t * rate * 0.3f)
+                HouseRenderer.scale(HouseRenderer.palette(cols, r * 1.5f), (1f - abs(v * 2f - 1f)).let { it * it })
+            }
+            SeqEffect.PLASMA -> {
+                val v = sin(lx * aspect * 6f + t * rate) + sin(ly * 6f + t * rate * 0.8f) +
+                    sin(hypot(lx * aspect * 6f - 3f, ly * 6f - 3f) - t * rate * 1.3f)
+                HouseRenderer.palette(cols, v / 6f + 0.5f)
+            }
+            SeqEffect.MARQUEE -> {
+                val w = 2f + c.size * 6f
+                val band = floor(pos * 60f / w - t * rate * 4f).toInt()
+                if (band.mod(3) == 0) 0 else cols[band.mod(cols.size)]
+            }
+            SeqEffect.GARLANDS -> {
+                // Swags hang between points along the prop.
+                val swags = 2f + (1f - c.size) * 6f
+                val sag = 0.5f - 0.5f * cos(HouseRenderer.frac(lx * swags + t * rate * 0.1f) * 2f * PI.toFloat())
+                val f = (1f - abs((1f - ly) - 0.2f - sag * 0.6f) / 0.12f).coerceIn(0f, 1f)
+                HouseRenderer.scale(HouseRenderer.palette(cols, lx), f)
+            }
+            SeqEffect.SING -> {
+                // On a face: eyes stay lit; the mouth opens with the song. Elsewhere: pulse with it.
+                when (part) {
+                    FACE_EYES -> cols[0]
+                    FACE_CLOSED -> if (level < 0.15f) cols.getOrElse(1) { cols[0] } else 0
+                    FACE_OPEN -> if (level in 0.15f..0.45f) cols.getOrElse(1) { cols[0] } else 0
+                    FACE_WIDE -> if (level > 0.45f) cols.getOrElse(1) { cols[0] } else 0
+                    else -> HouseRenderer.scale(cols[0], level)
+                }
+            }
         }
     }
 }

@@ -52,6 +52,7 @@ class AppStore(private val context: Context) {
         val LIGHTS_DELAY = androidx.datastore.preferences.core.intPreferencesKey("lights_delay_ms")
         val PIXEL_SIZE = androidx.datastore.preferences.core.floatPreferencesKey("pixel_size_dp")
         val LOCATION = stringPreferencesKey("location")
+        val OUTPUTS = stringPreferencesKey("outputs")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -151,6 +152,17 @@ class AppStore(private val context: Context) {
 
     val lightsDelayMs: Flow<Int> = context.dataStore.data.map { it[Keys.LIGHTS_DELAY] ?: 0 }
     suspend fun setLightsDelay(ms: Int) { context.dataStore.edit { it[Keys.LIGHTS_DELAY] = ms } }
+
+    /** Non-WLED pixel controllers that shows and whole-house effects stream to. */
+    val outputs: Flow<List<PixelOutput>> = listFlow(Keys.OUTPUTS)
+    suspend fun upsertOutput(o: PixelOutput) = editList<PixelOutput>(Keys.OUTPUTS) { list ->
+        if (list.any { it.id == o.id }) list.map { if (it.id == o.id) o else it } else list + o
+    }
+    suspend fun removeOutput(id: String) = editList<PixelOutput>(Keys.OUTPUTS) { list -> list.filterNot { it.id == id } }
+
+    /** Where to stream each light run's controller: WLED hosts and other controllers' addresses. */
+    suspend fun streamTargets(): Map<String, String> =
+        devices.first().associate { it.id to it.host } + outputs.first().associate { it.id to it.address }
 
     /** Where the show is, for sunset and dusk schedule times. */
     val location: Flow<com.wledcontroller.app.show.GeoPoint?> = context.dataStore.data.map { prefs ->

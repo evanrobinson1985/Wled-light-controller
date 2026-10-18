@@ -1,5 +1,6 @@
 package com.wledcontroller.app.show
 
+import com.wledcontroller.app.data.PixelOutput
 import com.wledcontroller.app.data.SavedDevice
 import java.io.OutputStream
 
@@ -13,9 +14,10 @@ object FseqExport {
     const val STEP_MS = 25
 
     /** Each controller with lights on the map gets a block of channels, in the app's controller order. */
-    fun channelMap(layout: PreparedLayout, devices: List<SavedDevice>): List<ChannelRange> {
+    fun channelMap(layout: PreparedLayout, devices: List<SavedDevice>, outputs: List<PixelOutput> = emptyList()): List<ChannelRange> {
         var next = 1
-        return devices.mapNotNull { d ->
+        val all = devices.map { it.id to it.name } + outputs.map { it.id to it.name }
+        return all.map { (id, name) -> SavedDevice(id, name, "") }.mapNotNull { d ->
             val leds = (layout.leds.filter { it.deviceId == d.id }.maxOfOrNull { it.index } ?: return@mapNotNull null) + 1
             ChannelRange(d.id, d.name, next, leds).also { next += leds * 3 }
         }
@@ -27,8 +29,9 @@ object FseqExport {
         devices: List<SavedDevice>,
         audio: AudioEnvelope?,
         out: OutputStream,
+        outputs: List<PixelOutput> = emptyList(),
     ): List<ChannelRange> {
-        val ranges = channelMap(layout, devices)
+        val ranges = channelMap(layout, devices, outputs)
         require(ranges.isNotEmpty()) { "None of this show's lights are on the house map." }
         val channels = ranges.last().endChannel
         val startOf = ranges.associate { it.deviceId to it.startChannel - 1 }

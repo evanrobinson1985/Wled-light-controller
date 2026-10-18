@@ -349,6 +349,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     val scope = rememberCoroutineScope()
     val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
     val devices by container.devices.list.collectAsStateWithLifecycle()
+    val targets = rememberLightTargets()
     val photo = rememberPhoto(map.photoPath)
 
     var drawingRunId by remember { mutableStateOf<String?>(null) }
@@ -408,7 +409,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
         ?: (0 until from.coerceAtMost(editPoints.size)).firstOrNull { isMissing(it) }
     fun lightLed(i: Int) {
         val run = editingRun ?: return
-        val host = devices.firstOrNull { it.id == run.deviceId }?.device?.host ?: return
+        val host = targets.firstOrNull { it.id == run.deviceId }?.address ?: return
         container.house.identifyLed(host, run.startLed + i)
     }
 
@@ -640,8 +641,8 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
 
             SectionTitle("Light runs") {
                 TextButton(onClick = {
-                    editRun = LightRun(UUID.randomUUID().toString(), "Run ${map.runs.size + 1}", devices.firstOrNull()?.id ?: "", 0, 0)
-                }, enabled = devices.isNotEmpty()) { Icon(Icons.Filled.Add, null); Text("Add") }
+                    editRun = LightRun(UUID.randomUUID().toString(), "Run ${map.runs.size + 1}", targets.firstOrNull()?.id ?: "", 0, 0)
+                }, enabled = targets.isNotEmpty()) { Icon(Icons.Filled.Add, null); Text("Add") }
             }
             if (map.runs.isEmpty()) {
                 Text(
@@ -651,7 +652,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 )
             }
             map.runs.forEachIndexed { r, run ->
-                val device = devices.firstOrNull { it.id == run.deviceId }
+                val device = targets.firstOrNull { it.id == run.deviceId }
                 Card(
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -664,7 +665,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(run.name, fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    "${run.prop.label} · ${device?.device?.name ?: "Missing device"} · LEDs ${run.startLed}–${run.endLed - 1}" +
+                                    "${run.prop.label} · ${device?.name ?: "Missing device"} · LEDs ${run.startLed}–${run.endLed - 1}" +
                                         when {
                                             run.isPlacedPerLed -> " · ${run.placedCount} of ${run.count} placed"
                                             run.points.size < 2 -> " · not traced yet"
@@ -693,7 +694,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                             TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { saveRun(run.copy(points = run.points.reversed(), hidden = run.hidden.map { it.copy(after = run.points.size - 2 - it.after) })) }) {
                                 Icon(Icons.Filled.SwapHoriz, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Flip start")
                             }
-                            TextButton(enabled = device != null, onClick = { device?.let { container.house.identify(run, it.device.host) } }) {
+                            TextButton(enabled = device != null, onClick = { device?.let { container.house.identify(run, it.address) } }) {
                                 Icon(Icons.Outlined.Lightbulb, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Identify")
                             }
                         }
@@ -907,8 +908,9 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
     var model by remember { mutableStateOf(run.model ?: PropModel(ModelKind.MATRIX)) }
     val customSubs = remember { mutableStateListOf(*run.submodels.toTypedArray()) }
     var addingSub by remember { mutableStateOf(false) }
-    val device = devices.firstOrNull { it.id == deviceId }
-    val ledCount = device?.snapshot?.value?.info?.ledCount ?: 0
+    val targets = rememberLightTargets()
+    val device = targets.firstOrNull { it.id == deviceId }
+    val ledCount = device?.ledCount ?: 0
     // Default a new run to the LEDs on this controller that no other run uses yet.
     val usedEnd = map.runs.filter { it.deviceId == deviceId && it.id != run.id }.maxOfOrNull { it.endLed } ?: 0
     var start by remember(deviceId) { mutableStateOf(if (run.count > 0 && deviceId == run.deviceId) run.startLed.toString() else usedEnd.toString()) }
@@ -940,7 +942,7 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                     ModelKind.entries.forEach { k ->
                         FilterChip(selected = modelKind == k, onClick = {
                             modelKind = k
-                            prop = when (k) { ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR }
+                            prop = when (k) { ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR; ModelKind.FACE -> PropType.BUSH }
                         }, label = { Text(k.label) })
                     }
                 }
@@ -953,11 +955,11 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                 }
                 Box {
                     OutlinedButton(onClick = { menu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(device?.device?.name ?: "Choose controller", Modifier.weight(1f)); Icon(Icons.Filled.ArrowDropDown, null)
+                        Text(device?.name ?: "Choose controller", Modifier.weight(1f)); Icon(Icons.Filled.ArrowDropDown, null)
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        devices.forEach { d ->
-                            DropdownMenuItem(text = { Text(d.device.name) }, onClick = { deviceId = d.id; menu = false })
+                        targets.forEach { d ->
+                            DropdownMenuItem(text = { Text(d.name + (d.kind?.let { " · $it" } ?: "")) }, onClick = { deviceId = d.id; menu = false })
                         }
                     }
                 }
@@ -1590,6 +1592,14 @@ private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
                 number("Points", model.points, 3..24, Modifier.weight(1f)) { onChange(model.copy(points = it)) }
                 number("LEDs per point", model.nodes, 2..1000, Modifier.weight(1f)) { onChange(model.copy(nodes = it)) }
             }
+            ModelKind.FACE -> {
+                number("LEDs per part", model.nodes, 2..500, Modifier.fillMaxWidth()) { onChange(model.copy(nodes = it)) }
+                Text(
+                    "Wired in this order: eyes, closed mouth, open mouth, wide-open mouth — the same number of LEDs each. Use the Sing effect to make it sing along to the song.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         when (model.kind) {
             ModelKind.MATRIX -> {
@@ -1613,11 +1623,26 @@ private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
                 Text("Clockwise from the top point", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 Switch(checked = model.clockwise, onCheckedChange = { onChange(model.copy(clockwise = it)) })
             }
+            ModelKind.FACE -> Unit
         }
-        if (model.kind != ModelKind.STAR) Row(verticalAlignment = Alignment.CenterVertically) {
+        if (model.kind == ModelKind.MATRIX || model.kind == ModelKind.MEGA_TREE) Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Zig-zag (each string runs back the other way)", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             Switch(checked = model.zigzag, onCheckedChange = { onChange(model.copy(zigzag = it)) })
         }
         Text("${model.ledCount} LEDs in all.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/** Something a light run can be on: a WLED controller or another pixel controller (E1.31 …). */
+internal data class LightTarget(val id: String, val name: String, val address: String, val ledCount: Int, val kind: String?)
+
+@Composable
+internal fun rememberLightTargets(): List<LightTarget> {
+    val container = LocalAppContainer.current
+    val devices by container.devices.list.collectAsStateWithLifecycle()
+    val outputs by container.store.outputs.collectAsStateWithLifecycle(emptyList())
+    return remember(devices, outputs) {
+        devices.map { LightTarget(it.id, it.device.name, it.device.host, it.snapshot.value.info?.ledCount ?: 0, null) } +
+            outputs.map { LightTarget(it.id, it.name, it.address, it.ledCount, it.protocol.label) }
     }
 }

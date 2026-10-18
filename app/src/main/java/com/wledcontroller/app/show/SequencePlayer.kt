@@ -108,7 +108,7 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
     private fun ensureLoop() {
         if (loop?.isActive == true) return
         loop = scope.launch(Dispatchers.Default) {
-            val hosts = store.devices.first().associate { it.id to it.host }
+            val hosts = store.streamTargets()
             DdpSender().use { ddp ->
                 var last = SystemClock.elapsedRealtime()
                 var colors = IntArray(0)

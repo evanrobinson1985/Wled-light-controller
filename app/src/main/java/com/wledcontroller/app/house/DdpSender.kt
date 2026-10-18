@@ -17,6 +17,8 @@ class DdpSender : AutoCloseable {
     /** [rgb] holds 3 bytes per LED starting at LED 0. Blocking: call off the main thread. */
     fun send(host: String, rgb: ByteArray) {
         if (com.wledcontroller.app.sim.SimHub.deliverDdp(host, rgb)) return
+        // Non-WLED controllers come as "e131://", "artnet://" or "ddp://" addresses.
+        if (host.contains("://")) { sendOther(host, rgb); return }
         val addr = addresses.getOrPut(host) {
             InetAddress.getByName(WledApi.normalizeHost(host).substringBefore(':'))
         }
@@ -40,6 +42,27 @@ class DdpSender : AutoCloseable {
             System.arraycopy(rgb, offset, packet, HEADER, len)
             socket.send(DatagramPacket(packet, packet.size, addr, PORT))
             offset += len
+        }
+    }
+
+    private val universeSeq = HashMap<String, Int>()
+
+    private fun sendOther(address: String, rgb: ByteArray) {
+        val scheme = address.substringBefore("://")
+        val rest = address.substringAfter("://")
+        val host = rest.substringBefore('?')
+        if (scheme == "ddp") { send(host, rgb); return }
+        val params = rest.substringAfter('?', "").split('&').mapNotNull { p -> p.split('=').takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap()
+        val start = params["u"]?.toIntOrNull() ?: 1
+        val per = params["c"]?.toIntOrNull() ?: 510
+        val addr = addresses.getOrPut(host) { InetAddress.getByName(host) }
+        val seq = (universeSeq[address] ?: 0).let { (it + 1) and 0xFF }.also { universeSeq[address] = it }
+        for ((universe, data) in com.wledcontroller.app.data.PixelPackets.split(rgb, start, per)) {
+            val (packet, port) = when (scheme) {
+                "artnet" -> com.wledcontroller.app.data.PixelPackets.artnet(universe, seq, data) to com.wledcontroller.app.data.PixelPackets.ARTNET_PORT
+                else -> com.wledcontroller.app.data.PixelPackets.e131(universe, seq, data) to com.wledcontroller.app.data.PixelPackets.E131_PORT
+            }
+            socket.send(DatagramPacket(packet, packet.size, addr, port))
         }
     }
 

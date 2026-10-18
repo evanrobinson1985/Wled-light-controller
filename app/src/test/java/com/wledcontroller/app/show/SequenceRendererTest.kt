@@ -136,10 +136,28 @@ class SequenceRendererTest {
 
     @Test
     fun newEffectsDrawSomething() {
-        for (fx in listOf(SeqEffect.SPIRALS, SeqEffect.BUTTERFLY, SeqEffect.METEORS)) {
+        for (fx in listOf(
+            SeqEffect.SPIRALS, SeqEffect.BUTTERFLY, SeqEffect.METEORS, SeqEffect.FIRE, SeqEffect.RIPPLE, SeqEffect.SHOCKWAVE,
+            SeqEffect.CURTAIN, SeqEffect.PINWHEEL, SeqEffect.GALAXY, SeqEffect.PLASMA, SeqEffect.MARQUEE, SeqEffect.GARLANDS,
+        )) {
             val clip = Clip("e", 0, 10_000, fx, colors = listOf(0xFF0000, 0x00FF00, 0x0000FF))
             val lit = (0 until 40).sumOf { k -> render(seq(house(clip)), k * 250L).count { it != 0 } }
             assertTrue("$fx stayed dark", lit > 0)
         }
+    }
+
+    @Test
+    fun faceSingsWithTheSong() {
+        val face = LightRun("f", "Face", "d", 0, 8, points = listOf(MapPoint(0f, 0f), MapPoint(1f, 1f)),
+            model = com.wledcontroller.app.house.PropModel(com.wledcontroller.app.house.ModelKind.FACE, nodes = 2))
+        val faceMap = HouseMap(aspect = 1f, runs = listOf(face))
+        val clip = Clip("s", 0, 5000, SeqEffect.SING, colors = listOf(0x00FF00, 0xFF0000))
+        val tracks = listOf(Track("t", "Face", TrackTarget(TrackTarget.Kind.PROP, "f"), listOf(clip)))
+        val layout = SequenceRenderer.prepare(faceMap, tracks)
+        // Quiet: eyes and the closed mouth. Loud: eyes and the wide mouth.
+        val quiet = SequenceRenderer.render(Sequence("q", "Q", 5000, tracks), layout, 1000, audio = AudioEnvelope(FloatArray(500) { 0.05f }))
+        assertEquals(listOf(0x00FF00, 0x00FF00, 0xFF0000, 0xFF0000, 0, 0, 0, 0), quiet.toList())
+        val loud = SequenceRenderer.render(Sequence("q", "Q", 5000, tracks), layout, 1000, audio = AudioEnvelope(FloatArray(500) { 0.8f }))
+        assertEquals(listOf(0x00FF00, 0x00FF00, 0, 0, 0, 0, 0xFF0000, 0xFF0000), loud.toList())
     }
 }
