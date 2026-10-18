@@ -49,6 +49,7 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
@@ -385,6 +386,37 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     }
     fun pickPhoto() = picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
 
+    // Importing props from xLights: one model (.xmodel) or a whole layout (xlights_rgbeffects.xml).
+    val context = LocalContext.current
+    var importMenu by remember { mutableStateOf(false) }
+    var layoutPending by remember { mutableStateOf<com.wledcontroller.app.house.XlLayout?>(null) }
+    var importNote by remember { mutableStateOf<String?>(null) }
+    val xmodelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            importError = null
+            runCatching {
+                withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { com.wledcontroller.app.house.XlightsModels.parseXmodel(it) } }
+            }.onSuccess { m ->
+                val target = targets.firstOrNull()
+                val usedEnd = map.runs.filter { it.deviceId == target?.id }.maxOfOrNull { it.endLed } ?: 0
+                // Open it in the run editor to choose the controller, then place it.
+                editRun = LightRun(
+                    UUID.randomUUID().toString(), m.name, target?.id ?: "", usedEnd, m.ledCount,
+                    prop = m.prop, model = m.model, submodels = m.submodels,
+                )
+            }.onFailure { importError = it.message ?: "Couldn't read that model." }
+        }
+    }
+    val layoutPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            importError = null
+            runCatching {
+                withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { com.wledcontroller.app.house.XlightsModels.parseLayout(it) } }
+            }.onSuccess { l -> if (l.models.isEmpty()) importError = "No props found in that layout." else layoutPending = l }
+                .onFailure { importError = it.message ?: "Couldn't read that layout." }
+        }
+    }
+
     fun saveRun(run: LightRun) = scope.launch {
         container.store.updateHouseMap { m ->
             m.copy(runs = if (m.runs.any { it.id == run.id }) m.runs.map { if (it.id == run.id) run else it } else m.runs + run)
@@ -429,6 +461,19 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
                     if (drawingRun == null && editingRun == null && !scaling) {
+                        Box {
+                            IconButton(onClick = { importMenu = true }, enabled = targets.isNotEmpty()) { Icon(Icons.Filled.FileOpen, "Import from xLights") }
+                            DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Column { Text("xLights layout"); Text("xlights_rgbeffects.xml — all your props", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = { importMenu = false; layoutPicker.launch(arrayOf("*/*")) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Column { Text("Prop model"); Text(".xmodel from xLights or a prop maker", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = { importMenu = false; xmodelPicker.launch(arrayOf("*/*")) },
+                                )
+                            }
+                        }
                         IconButton(onClick = { scaling = true; scaleDraft.clear() }) { Icon(Icons.Filled.Straighten, "Set house scale") }
                         IconButton(onClick = onScan) { Icon(Icons.Filled.PhotoCamera, "Scan with camera") }
                         IconButton(onClick = { pickPhoto() }) { Icon(Icons.Filled.Image, "Choose photo") }
@@ -455,6 +500,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 }
             }
             importError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            importNote?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
 
             if (editingRun != null) {
                 LedEditCanvas(
@@ -749,6 +795,13 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             if (isNew) startTracing(updated.id)
         }
     }
+    layoutPending?.let { l ->
+        LayoutImportDialog(l, map, targets, onDismiss = { layoutPending = null }) { updated, n ->
+            scope.launch { container.store.updateHouseMap { updated } }
+            layoutPending = null
+            importNote = "Imported $n props. Use Trace or Place on each to put it on your photo."
+        }
+    }
     val askingAbout = draftHidden.firstOrNull { it.after == askHidden }
     if (askingAbout != null) {
         HiddenStretchDialog(askingAbout, onDismiss = { askHidden = null }) { updated ->
@@ -939,10 +992,10 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                 Text("Layout", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(selected = modelKind == null, onClick = { modelKind = null }, label = { Text("Traced line") })
-                    ModelKind.entries.forEach { k ->
+                    ModelKind.entries.filter { it != ModelKind.CUSTOM || run.model?.kind == ModelKind.CUSTOM }.forEach { k ->
                         FilterChip(selected = modelKind == k, onClick = {
                             modelKind = k
-                            prop = when (k) { ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR; ModelKind.FACE -> PropType.BUSH }
+                            prop = when (k) { ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR; ModelKind.FACE -> PropType.BUSH; ModelKind.CUSTOM -> PropType.MATRIX }
                         }, label = { Text(k.label) })
                     }
                 }
@@ -1592,6 +1645,10 @@ private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
                 number("Points", model.points, 3..24, Modifier.weight(1f)) { onChange(model.copy(points = it)) }
                 number("LEDs per point", model.nodes, 2..1000, Modifier.weight(1f)) { onChange(model.copy(nodes = it)) }
             }
+            ModelKind.CUSTOM -> Text(
+                "Imported from xLights: ${model.customW} × ${model.customH} grid, ${model.ledCount} LEDs. Import it again to change it.",
+                style = MaterialTheme.typography.bodySmall,
+            )
             ModelKind.FACE -> {
                 number("LEDs per part", model.nodes, 2..500, Modifier.fillMaxWidth()) { onChange(model.copy(nodes = it)) }
                 Text(
@@ -1623,7 +1680,7 @@ private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
                 Text("Clockwise from the top point", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 Switch(checked = model.clockwise, onCheckedChange = { onChange(model.copy(clockwise = it)) })
             }
-            ModelKind.FACE -> Unit
+            ModelKind.FACE, ModelKind.CUSTOM -> Unit
         }
         if (model.kind == ModelKind.MATRIX || model.kind == ModelKind.MEGA_TREE) Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Zig-zag (each string runs back the other way)", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)

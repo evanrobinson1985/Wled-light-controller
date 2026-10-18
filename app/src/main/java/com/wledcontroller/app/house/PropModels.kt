@@ -12,6 +12,7 @@ enum class ModelKind(val label: String) {
     MEGA_TREE("Mega tree"),
     STAR("Star"),
     FACE("Singing face"),
+    CUSTOM("Custom (xLights)"),
 }
 
 @Serializable
@@ -38,11 +39,16 @@ data class PropModel(
     val clockwise: Boolean = true,
     /** Star: inner radius as a fraction of the outer. */
     val innerRatio: Float = 0.45f,
+    /** Custom: a [customW] × [customH] grid; [customCells] gives each LED's cell (row * width + column). */
+    val customW: Int = 0,
+    val customH: Int = 0,
+    val customCells: List<Int> = emptyList(),
 ) {
     val ledCount: Int get() = when (kind) {
         ModelKind.MATRIX, ModelKind.MEGA_TREE -> strings.coerceAtLeast(1) * nodes.coerceAtLeast(1)
         ModelKind.STAR -> points.coerceAtLeast(3) * nodes.coerceAtLeast(2)
         ModelKind.FACE -> FACE_PARTS.size * nodes.coerceAtLeast(2)
+        ModelKind.CUSTOM -> customCells.size
     }
 
     /** For a singing face: which part LED [i] is (0 eyes, 1 mouth closed, 2 open, 3 wide); else null. */
@@ -116,6 +122,13 @@ data class PropModel(
                     at(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)
                 }
             }
+            ModelKind.CUSTOM -> {
+                val w = customW.coerceAtLeast(1); val h = customH.coerceAtLeast(1)
+                customCells.map { cell ->
+                    if (cell < 0) at(0.5f, 0.5f)
+                    else at(((cell % w) + 0.5f) / w, ((cell / w) + 0.5f) / h)
+                }
+            }
             ModelKind.FACE -> {
                 val n = nodes.coerceAtLeast(2)
                 // Eyes (half each), then three mouth shapes: closed line, open "O", wide open.
@@ -150,6 +163,7 @@ data class PropModel(
             val p = points.coerceAtLeast(3); val n = nodes.coerceAtLeast(2)
             List(p) { pt -> Submodel("Point ${pt + 1}", listOf(pt * n until (pt + 1) * n)) }
         }
+        ModelKind.CUSTOM -> emptyList() // An imported model brings its own parts as the run's submodels.
         ModelKind.FACE -> {
             val n = nodes.coerceAtLeast(2)
             FACE_PARTS.mapIndexed { i, name -> Submodel(name, listOf(i * n until (i + 1) * n)) }
