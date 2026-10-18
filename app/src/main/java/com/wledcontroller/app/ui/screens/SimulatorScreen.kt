@@ -123,9 +123,10 @@ private fun rememberSimLeds(map: HouseMap): List<SimLed> {
     return remember(map, saved, sims, profiles) {
         val hostOf = saved.associate { it.id to it.host }
         map.placedLeds().mapNotNull { l ->
-            val d = SimHub.find(hostOf[l.deviceId]) ?: return@mapNotNull null
-            val bullet = LightProfile.parse(profiles[LightProfile.deviceKey(l.deviceId)]) == LightProfile.BULLETS
-            SimLed(d, l.deviceId, l.index, l.x, l.y, bullet)
+            SimHub.find(hostOf[l.deviceId])?.let { d ->
+                val bullet = LightProfile.parse(profiles[LightProfile.deviceKey(l.deviceId)]) == LightProfile.BULLETS
+                SimLed(d, l.deviceId, l.index, l.x, l.y, bullet)
+            }
         }
     }
 }
