@@ -462,7 +462,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                     val gaps = remember(layout, map.aspect) { neighbourGaps(layout.leds, map.aspect) }
                     HouseCanvas(map, photo, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp)) {
                         layout.leds.forEachIndexed { i, l ->
-                            drawPixel(colors[i], Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
+                            if (!l.hidden) drawPixel(colors[i], Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
                         }
                     }
                 }

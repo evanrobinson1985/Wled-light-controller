@@ -132,7 +132,8 @@ private fun rememberSimLeds(map: HouseMap): List<SimLed> {
         val placed = map.placedLeds()
         val gaps = neighbourGaps(placed, map.aspect)
         placed.mapIndexedNotNull { i, l ->
-            SimHub.find(hostOf[l.deviceId])?.let { d ->
+            // Lights out of sight in the photo aren't drawn (their controller still runs them).
+            if (l.hidden) null else SimHub.find(hostOf[l.deviceId])?.let { d ->
                 val bullet = LightProfile.parse(profiles[LightProfile.deviceKey(l.deviceId)]) == LightProfile.BULLETS
                 SimLed(d, l.deviceId, l.index, l.x, l.y, bullet, gaps[i])
             }

@@ -29,11 +29,23 @@ data class LightRun(
      * placed this far apart from the start of the traced line instead of spread along it.
      */
     val spacingCm: Float? = null,
+    /** Stretches of the traced line the photo can't show (round a corner, behind a post …). */
+    val hidden: List<HiddenStretch> = emptyList(),
+    /** For runs placed LED by LED: LEDs that are out of sight from the photo. */
+    val hiddenLeds: Set<Int> = emptySet(),
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
     val placedCount get() = ledPoints?.count { it != null } ?: if (points.size >= 2) count else 0
 }
+
+/**
+ * Part of a traced run that can't be seen in the photo, between traced points [after] and
+ * [after] + 1: how long it really is ([lengthCm]) and/or how many LEDs it holds ([leds]). With
+ * neither, the straight line between the two points stands in for it.
+ */
+@Serializable
+data class HiddenStretch(val after: Int, val leds: Int? = null, val lengthCm: Float? = null)
 
 @Serializable
 data class HouseMap(
@@ -92,8 +104,15 @@ enum class PropType(val label: String, val natural: Direction) {
     BUSH("Bush / cluster", Direction.CENTER_OUT),
 }
 
-/** A placed LED: which device and physical index, where it is, and its order within its run. */
-data class PlacedLed(val deviceId: String, val index: Int, val x: Float, val y: Float, val runIndex: Int, val orderInRun: Int)
+/**
+ * A placed LED: which device and physical index, where it is, and its order within its run.
+ * [hidden] LEDs are out of sight in the photo: effects still use their estimated position, but
+ * previews don't draw them.
+ */
+data class PlacedLed(
+    val deviceId: String, val index: Int, val x: Float, val y: Float, val runIndex: Int, val orderInRun: Int,
+    val hidden: Boolean = false,
+)
 
 /**
  * Position of every LED in the run (index = order in run); null where an LED isn't placed.
@@ -111,40 +130,80 @@ fun LightRun.tracedLength(aspect: Float): Float =
 /**
  * LEDs along the traced line: one every [LightRun.spacingCm] from the start when the run has a
  * spacing and the map a scale (continuing straight on past the end if the line is too short),
- * otherwise [LightRun.count] LEDs spread evenly from end to end.
+ * otherwise [LightRun.count] LEDs spread evenly from end to end. Hidden stretches hold their
+ * LEDs on the straight line between their two points.
  */
-fun LightRun.tracedPositions(aspect: Float, cmPerHeight: Float? = null): List<MapPoint> {
-    if (count <= 0 || points.isEmpty()) return emptyList()
-    val spacing = spacingCm
-    if (spacing != null && spacing > 0f && cmPerHeight != null && cmPerHeight > 0f && points.size >= 2) {
-        return spacedPositions(aspect, spacing / cmPerHeight)
-    }
-    if (points.size == 1 || count == 1) return List(count) { points.first() }
-    // Measure in a space where x and y have the same scale so diagonal runs aren't distorted.
-    val seg = points.zipWithNext { a, b -> hypot(((b.x - a.x) * aspect).toDouble(), (b.y - a.y).toDouble()) }
-    val total = seg.sum().takeIf { it > 0 } ?: return List(count) { points.first() }
-    return List(count) { i ->
-        var d = total * i / (count - 1)
-        var k = 0
-        while (k < seg.size - 1 && d > seg[k]) { d -= seg[k]; k++ }
-        val f = if (seg[k] > 0) (d / seg[k]).toFloat().coerceIn(0f, 1f) else 0f
-        val a = points[k]; val b = points[k + 1]
-        MapPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
-    }
-}
+fun LightRun.tracedPositions(aspect: Float, cmPerHeight: Float? = null): List<MapPoint> = tracedLayout(aspect, cmPerHeight).first
 
-/** [LightRun.count] LEDs [step] picture heights apart, starting at the first traced point. */
-private fun LightRun.spacedPositions(aspect: Float, step: Float): List<MapPoint> {
+/** Which LEDs of the run are out of sight in the photo. */
+fun LightRun.hiddenFlags(aspect: Float, cmPerHeight: Float? = null): BooleanArray =
+    if (ledPoints != null) BooleanArray(count) { it in hiddenLeds } else tracedLayout(aspect, cmPerHeight).second
+
+private fun LightRun.tracedLayout(aspect: Float, cmPerHeight: Float?): Pair<List<MapPoint>, BooleanArray> {
+    if (count <= 0 || points.isEmpty()) return emptyList<MapPoint>() to BooleanArray(0)
+    if (points.size == 1 || count == 1) return List(count) { points.first() } to BooleanArray(count)
     val segs = points.zipWithNext { a, b -> hypot((b.x - a.x) * aspect, b.y - a.y) }
-    return List(count) { i ->
-        var d = step * i
-        var k = 0
-        while (k < segs.size - 1 && d > segs[k]) { d -= segs[k]; k++ }
+    val hiddenAt = hidden.filter { it.after in segs.indices }.associateBy { it.after }
+    fun at(k: Int, f: Float): MapPoint {
         val a = points[k]; val b = points[k + 1]
-        // Past the end of the last segment the line carries straight on.
-        val f = if (segs[k] > 0) d / segs[k] else 0f
-        MapPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
+        return MapPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
     }
+
+    val spacing = spacingCm
+    if (spacing != null && spacing > 0f && cmPerHeight != null && cmPerHeight > 0f) {
+        // Walk the real length of each piece; a hidden stretch is as long as it really is.
+        val step = spacing / cmPerHeight
+        val lens = segs.mapIndexed { k, len ->
+            val h = hiddenAt[k] ?: return@mapIndexed len
+            h.lengthCm?.let { it / cmPerHeight } ?: h.leds?.let { it * step } ?: len
+        }
+        val pos = ArrayList<MapPoint>(count)
+        val flags = BooleanArray(count)
+        for (i in 0 until count) {
+            var d = step * i
+            var k = 0
+            while (k < lens.size - 1 && d > lens[k]) { d -= lens[k]; k++ }
+            // Past the end of the last piece the line carries straight on.
+            val f = if (lens[k] > 0) d / lens[k] else 0f
+            pos += at(k, f)
+            flags[i] = hiddenAt.containsKey(k) && f <= 1f
+        }
+        return pos to flags
+    }
+
+    // Spread evenly: hidden stretches take their LEDs, the rest share the visible line.
+    val visibleLen = segs.filterIndexed { k, _ -> !hiddenAt.containsKey(k) }.sum()
+    val hiddenCounts = IntArray(segs.size) { k ->
+        val h = hiddenAt[k]
+        if (h == null) 0
+        else h.leds ?: h.lengthCm?.let { cm ->
+            // Only a length: estimate how many LEDs fit at the visible spacing.
+            val perLedCm = cmPerHeight?.let { visibleLen * it / (count - 1).coerceAtLeast(1) }
+            if (perLedCm != null && perLedCm > 0f) Math.round(cm / perLedCm) else null
+        } ?: 0
+    }
+    val visibleCount = (count - hiddenCounts.sum()).coerceAtLeast(1)
+    fun target(j: Int) = if (visibleCount <= 1) 0f else visibleLen * j / (visibleCount - 1)
+    val pos = ArrayList<MapPoint>(count)
+    val flags = ArrayList<Boolean>(count)
+    var j = 0
+    var c = 0f
+    for (k in segs.indices) {
+        if (hiddenAt.containsKey(k)) {
+            val hc = hiddenCounts[k]
+            for (m in 0 until hc) { pos += at(k, (m + 1f) / (hc + 1f)); flags += true }
+            continue
+        }
+        val end = c + segs[k]
+        val lastVisible = (k + 1 until segs.size).all { hiddenAt.containsKey(it) }
+        while (j < visibleCount && (lastVisible || target(j) <= end + 1e-5f)) {
+            val f = if (segs[k] > 0) ((target(j) - c) / segs[k]).coerceIn(0f, 1f) else 0f
+            pos += at(k, f); flags += false; j++
+        }
+        c = end
+    }
+    while (pos.size < count) { pos += points.last(); flags += false }
+    return pos.take(count) to flags.take(count).toBooleanArray()
 }
 
 /** A length for people: feet and inches, or centimetres and metres. */
@@ -158,7 +217,14 @@ fun formatLength(cm: Float, inches: Boolean): String {
 }
 
 fun HouseMap.placedLeds(): List<PlacedLed> = runs.flatMapIndexed { r, run ->
-    positions(run).mapIndexedNotNull { i, p -> p?.let { PlacedLed(run.deviceId, run.startLed + i, it.x, it.y, r, i) } }
+    val flags = run.hiddenFlags(aspect, cmPerHeight)
+    var pos = positions(run)
+    // Hidden LEDs placed one by one have no spot: estimate one between their neighbours.
+    if (run.ledPoints != null && run.hiddenLeds.isNotEmpty()) {
+        val filled = pos.fillGaps()
+        pos = pos.mapIndexed { i, p -> p ?: if (i in run.hiddenLeds) filled[i] else null }
+    }
+    pos.mapIndexedNotNull { i, p -> p?.let { PlacedLed(run.deviceId, run.startLed + i, it.x, it.y, r, i, flags.getOrElse(i) { false }) } }
 }
 
 /** Fills unplaced LEDs by interpolating between the nearest placed LEDs on either side. */

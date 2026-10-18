@@ -221,7 +221,7 @@ internal fun FseqShowEditor(initial: Sequence, onBack: () -> Unit) {
                     if (leds.isNotEmpty()) {
                         HouseCanvas(map, photo, Modifier.heightIn(max = 220.dp)) {
                             leds.forEachIndexed { i, l ->
-                                drawPixel(colors.getOrElse(i) { 0 }, Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
+                                if (!l.hidden) drawPixel(colors.getOrElse(i) { 0 }, Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
                             }
                         }
                     } else {

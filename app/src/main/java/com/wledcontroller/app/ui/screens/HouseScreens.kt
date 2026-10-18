@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Lightbulb
@@ -116,7 +117,9 @@ import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.HolidayThemes
 import com.wledcontroller.app.house.HouseEffect
 import com.wledcontroller.app.house.HouseEffectService
+import com.wledcontroller.app.house.HiddenStretch
 import com.wledcontroller.app.house.HouseMap
+import com.wledcontroller.app.house.hiddenFlags
 import com.wledcontroller.app.house.HouseRenderer
 import com.wledcontroller.app.house.LightRun
 import com.wledcontroller.app.house.MapPoint
@@ -250,6 +253,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
 
             HouseCanvas(map, photo) {
                 leds.forEachIndexed { i, led ->
+                    if (led.hidden) return@forEachIndexed // Out of sight in the photo.
                     val o = Offset(led.x * size.width, led.y * size.height)
                     drawPixel(HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun), o, pixelRadius(pixel, gaps[i]))
                 }
@@ -342,6 +346,11 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
 
     var drawingRunId by remember { mutableStateOf<String?>(null) }
     val draft = remember { mutableStateListOf<MapPoint>() }
+    // Hidden stretches while tracing: the next tapped point ends one when [nextHidden] is on.
+    val draftHidden = remember { mutableStateListOf<HiddenStretch>() }
+    var nextHidden by remember { mutableStateOf(false) }
+    var askHidden by remember { mutableStateOf<Int?>(null) }
+    fun startTracing(id: String) { drawingRunId = id; draft.clear(); draftHidden.clear(); nextHidden = false }
     var editRun by remember { mutableStateOf<LightRun?>(null) }
     var deleteRun by remember { mutableStateOf<LightRun?>(null) }
     var editGroup by remember { mutableStateOf<PropGroup?>(null) }
@@ -355,6 +364,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     // Per-LED editing state.
     var editingRunId by remember { mutableStateOf<String?>(null) }
     val editPoints = remember { mutableStateListOf<MapPoint?>() }
+    val editHidden = remember { mutableStateListOf<Int>() }
     var selectedLed by remember { mutableStateOf<Int?>(null) }
     var placingLed by remember { mutableStateOf<Int?>(null) }
 
@@ -379,11 +389,16 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     fun startEditing(run: LightRun) {
         editPoints.clear()
         editPoints.addAll(map.positions(run).let { pos -> List(run.count) { pos.getOrNull(it) } })
+        editHidden.clear()
+        editHidden.addAll(if (run.ledPoints != null) run.hiddenLeds else run.hiddenFlags(map.aspect, map.cmPerHeight).withIndex().filter { it.value }.map { it.index })
+        // Hidden LEDs have no spot to drag in the photo.
+        editHidden.forEach { if (it in editPoints.indices) editPoints[it] = null }
         selectedLed = null; placingLed = null
         editingRunId = run.id
     }
-    fun nextMissing(from: Int = 0): Int? = (from until editPoints.size).firstOrNull { editPoints[it] == null }
-        ?: (0 until from.coerceAtMost(editPoints.size)).firstOrNull { editPoints[it] == null }
+    fun isMissing(i: Int) = editPoints[i] == null && i !in editHidden
+    fun nextMissing(from: Int = 0): Int? = (from until editPoints.size).firstOrNull { isMissing(it) }
+        ?: (0 until from.coerceAtMost(editPoints.size)).firstOrNull { isMissing(it) }
     fun lightLed(i: Int) {
         val run = editingRun ?: return
         val host = devices.firstOrNull { it.id == run.deviceId }?.device?.host ?: return
@@ -448,17 +463,40 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     onMoveLed = { i, p -> editPoints[i] = p; selectedLed = i },
                 )
                 LedEditControls(
-                    points = editPoints, selected = selectedLed, placing = placingLed,
+                    points = editPoints, hidden = editHidden.toSet(), selected = selectedLed, placing = placingLed,
                     onRemove = { i -> editPoints[i] = null; selectedLed = null },
-                    onFillGaps = { val filled = editPoints.toList().fillGaps(); editPoints.clear(); editPoints.addAll(filled) },
+                    onHide = { i ->
+                        editPoints[i] = null
+                        if (i !in editHidden) editHidden.add(i)
+                        selectedLed = null
+                        if (placingLed == i) { placingLed = nextMissing(i + 1)?.takeIf { it != i }; placingLed?.let { lightLed(it) } }
+                    },
+                    onUnhide = { i -> editHidden.remove(i); placingLed = i; selectedLed = null; lightLed(i) },
+                    onFillGaps = {
+                        // Never guess across a hidden stretch: fill each visible part on its own.
+                        val out = editPoints.toMutableList()
+                        var from = 0
+                        for (i in 0..out.size) {
+                            if (i == out.size || i in editHidden) {
+                                editPoints.subList(from, i).toList().fillGaps().forEachIndexed { k, p -> out[from + k] = p }
+                                from = i + 1
+                            }
+                        }
+                        editPoints.clear(); editPoints.addAll(out)
+                    },
                     onPlaceMissing = { placingLed = nextMissing(); selectedLed = null; placingLed?.let { lightLed(it) } },
                     onStopPlacing = { placingLed = null },
                     onSkip = { i -> placingLed = nextMissing(i + 1)?.takeIf { it != i }; placingLed?.let { lightLed(it) } },
                     onAddAtEnd = { editPoints.add(null); placingLed = editPoints.lastIndex; selectedLed = null; lightLed(editPoints.lastIndex) },
-                    onRemoveLast = { if (editPoints.size > 1) { editPoints.removeAt(editPoints.lastIndex); selectedLed = null; placingLed = null } },
+                    onRemoveLast = {
+                        if (editPoints.size > 1) {
+                            editPoints.removeAt(editPoints.lastIndex); editHidden.removeAll { it >= editPoints.size }
+                            selectedLed = null; placingLed = null
+                        }
+                    },
                     onCancel = { editingRunId = null },
                     onDone = {
-                        saveRun(editingRun.copy(count = editPoints.size, ledPoints = editPoints.toList()))
+                        saveRun(editingRun.copy(count = editPoints.size, ledPoints = editPoints.toList(), hiddenLeds = editHidden.toSet(), hidden = emptyList()))
                         editingRunId = null
                     },
                 )
@@ -468,7 +506,13 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             val pixel = LocalPixelStyle.current
             HouseCanvas(
                 map, photo,
-                onTap = if (drawingRun != null) { { p -> draft.add(p) } }
+                onTap = if (drawingRun != null) { { p ->
+                    draft.add(p)
+                    if (nextHidden && draft.size >= 2) {
+                        val k = draft.size - 2
+                        draftHidden.add(HiddenStretch(k)); askHidden = k; nextHidden = false
+                    }
+                } }
                 else if (scaling) { { p -> if (scaleDraft.size < 2) scaleDraft.add(p); if (scaleDraft.size == 2) askScale = true } }
                 else null,
             ) {
@@ -482,21 +526,34 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     val col = RunColors[r % RunColors.size]
                     val positions = map.positions(run)
                     val placed = positions.filterNotNull()
-                    drawRun(if (run.isPlacedPerLed) placed else run.points, col, stroke, dashed = false)
+                    if (run.isPlacedPerLed) drawRun(placed, col, stroke, dashed = false)
+                    else drawTracedRun(run.points, run.hidden.map { it.after }.toSet(), col, stroke)
                     val runGaps = neighbourGaps(positions, map.aspect)
+                    val hiddenLed = run.hiddenFlags(map.aspect, map.cmPerHeight)
                     positions.forEachIndexed { i, p ->
-                        if (p != null) drawCircle(col, pixelRadius(pixel, runGaps[i]), Offset(p.x * size.width, p.y * size.height))
+                        if (p == null) return@forEachIndexed
+                        val o = Offset(p.x * size.width, p.y * size.height)
+                        val r = pixelRadius(pixel, runGaps[i])
+                        // Out-of-sight lights: hollow rings.
+                        if (hiddenLed.getOrElse(i) { false }) drawCircle(col.copy(alpha = 0.7f), r, o, style = Stroke(1.dp.toPx()))
+                        else drawCircle(col, r, o)
                     }
                     placed.firstOrNull()?.let { s ->
                         drawCircle(Color.White, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height), style = Stroke(stroke))
                     }
                 }
                 if (drawingRun != null) {
-                    drawRun(draft, Color.White, stroke, dashed = true)
-                    val preview = map.positions(drawingRun.copy(points = draft.toList()))
+                    drawTracedRun(draft.toList(), draftHidden.map { it.after }.toSet(), Color.White, stroke)
+                    val previewRun = drawingRun.copy(points = draft.toList(), ledPoints = null, hidden = draftHidden.toList())
+                    val preview = map.positions(previewRun)
+                    val previewHidden = previewRun.hiddenFlags(map.aspect, map.cmPerHeight)
                     val previewGaps = neighbourGaps(preview, map.aspect)
                     preview.forEachIndexed { i, p ->
-                        if (p != null) drawCircle(Color.White, pixelRadius(pixel, previewGaps[i]), Offset(p.x * size.width, p.y * size.height))
+                        if (p == null) return@forEachIndexed
+                        val o = Offset(p.x * size.width, p.y * size.height)
+                        val r = pixelRadius(pixel, previewGaps[i])
+                        if (previewHidden.getOrElse(i) { false }) drawCircle(Color.White.copy(alpha = 0.6f), r, o, style = Stroke(1.dp.toPx()))
+                        else drawCircle(Color.White, r, o)
                     }
                     draft.firstOrNull()?.let { s -> drawCircle(Color.Red, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height)) }
                 }
@@ -523,15 +580,31 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(vertical = 8.dp),
                 )
+                FilterChip(
+                    selected = nextHidden,
+                    enabled = draft.isNotEmpty(),
+                    onClick = { nextHidden = !nextHidden },
+                    label = { Text(if (nextHidden) "Tap where the lights come back into view" else "Lights go out of sight here") },
+                    leadingIcon = { Icon(Icons.Filled.VisibilityOff, null, Modifier.size(18.dp)) },
+                )
+                Text(
+                    "Lights wrap round a corner or go behind something? Tap the last point you can see, turn this on, then tap where they reappear. You'll be asked how long the hidden part is.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { if (draft.isNotEmpty()) draft.removeAt(draft.lastIndex) }, enabled = draft.isNotEmpty()) {
+                    OutlinedButton(onClick = {
+                        if (draft.isNotEmpty()) draft.removeAt(draft.lastIndex)
+                        draftHidden.removeAll { it.after >= draft.size - 1 }
+                    }, enabled = draft.isNotEmpty()) {
                         Icon(Icons.AutoMirrored.Filled.Undo, null); Spacer(Modifier.width(6.dp)); Text("Undo")
                     }
-                    TextButton(onClick = { drawingRunId = null; draft.clear() }) { Text("Cancel") }
+                    TextButton(onClick = { drawingRunId = null; draft.clear(); draftHidden.clear() }) { Text("Cancel") }
                     Spacer(Modifier.weight(1f))
                     Button(enabled = draft.size >= 2, onClick = {
-                        saveRun(drawingRun.copy(points = draft.toList(), ledPoints = null))
-                        drawingRunId = null; draft.clear()
+                        saveRun(drawingRun.copy(points = draft.toList(), ledPoints = null, hidden = draftHidden.toList(), hiddenLeds = emptySet()))
+                        drawingRunId = null; draft.clear(); draftHidden.clear()
                     }) { Text("Done") }
                 }
                 return@Column
@@ -569,7 +642,8 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                                             run.points.size < 2 -> " · not traced yet"
                                             else -> ""
                                         } +
-                                        (run.spacingCm?.takeIf { !run.isPlacedPerLed }?.let { " · ${formatLength(it, map.useInches)} apart" } ?: ""),
+                                        (run.spacingCm?.takeIf { !run.isPlacedPerLed }?.let { " · ${formatLength(it, map.useInches)} apart" } ?: "") +
+                                        run.hiddenSummary(map),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -579,10 +653,10 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                         }
                         Row(Modifier.horizontalScroll(rememberScrollState())) {
                             TextButton(enabled = run.placedCount > 0, onClick = { startEditing(run) }) { Text("Edit LEDs") }
-                            TextButton(onClick = { drawingRunId = run.id; draft.clear() }) {
+                            TextButton(onClick = { startTracing(run.id) }) {
                                 Text(if (run.points.size < 2 && !run.isPlacedPerLed) "Trace" else "Retrace")
                             }
-                            TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { saveRun(run.copy(points = run.points.reversed())) }) {
+                            TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { saveRun(run.copy(points = run.points.reversed(), hidden = run.hidden.map { it.copy(after = run.points.size - 2 - it.after) })) }) {
                                 Icon(Icons.Filled.SwapHoriz, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Flip start")
                             }
                             TextButton(enabled = device != null, onClick = { device?.let { container.house.identify(run, it.device.host) } }) {
@@ -637,7 +711,15 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             val isNew = map.runs.none { it.id == updated.id }
             saveRun(updated)
             editRun = null
-            if (isNew) { drawingRunId = updated.id; draft.clear() }
+            if (isNew) startTracing(updated.id)
+        }
+    }
+    val askingAbout = draftHidden.firstOrNull { it.after == askHidden }
+    if (askingAbout != null) {
+        HiddenStretchDialog(askingAbout, onDismiss = { askHidden = null }) { updated ->
+            val i = draftHidden.indexOf(askingAbout)
+            if (i >= 0) draftHidden[i] = updated
+            askHidden = null
         }
     }
     if (askScale && scaleDraft.size == 2) {
@@ -682,6 +764,76 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     }
 }
 
+/** A traced run: solid where the lights can be seen, a faint dashed line across hidden stretches. */
+private fun DrawScope.drawTracedRun(points: List<MapPoint>, hiddenAfter: Set<Int>, color: Color, stroke: Float) {
+    points.zipWithNext().forEachIndexed { k, (a, b) ->
+        val hidden = k in hiddenAfter
+        drawLine(
+            color.copy(alpha = if (hidden) 0.45f else 0.8f),
+            Offset(a.x * size.width, a.y * size.height), Offset(b.x * size.width, b.y * size.height),
+            strokeWidth = stroke,
+            pathEffect = if (hidden) PathEffect.dashPathEffect(floatArrayOf(6f, 10f)) else null,
+        )
+    }
+}
+
+/** " · 6 ft hidden" etc. for the run list. */
+private fun LightRun.hiddenSummary(map: HouseMap): String {
+    if (ledPoints != null) return if (hiddenLeds.isEmpty()) "" else " · ${hiddenLeds.size} hidden"
+    if (hidden.isEmpty()) return ""
+    val parts = hidden.map { h ->
+        h.lengthCm?.let { formatLength(it, true) } ?: h.leds?.let { "$it LEDs" } ?: "?"
+    }
+    return " · hidden: " + parts.joinToString(", ")
+}
+
+/** How much of the run is out of sight: a length in feet and inches, a number of LEDs, or both. */
+@Composable
+private fun HiddenStretchDialog(stretch: HiddenStretch, onDismiss: () -> Unit, onSave: (HiddenStretch) -> Unit) {
+    val totalIn = stretch.lengthCm?.let { Math.round(it / 2.54f) }
+    var feet by remember { mutableStateOf(totalIn?.let { (it / 12).toString() } ?: "") }
+    var inches by remember { mutableStateOf(totalIn?.let { (it % 12).takeIf { r -> r > 0 }?.toString() } ?: "") }
+    var leds by remember { mutableStateOf(stretch.leds?.toString() ?: "") }
+    val lengthIn = (feet.toIntOrNull() ?: 0) * 12 + (inches.replace(',', '.').toFloatOrNull() ?: 0f)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Hidden stretch") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "How long is the part you can't see in the photo (e.g. round the porch)? Measure along the lights. Or, if you know it, how many LEDs are hidden.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        feet, { feet = it.filter(Char::isDigit).take(4) }, label = { Text("Feet") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        inches, { inches = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }.take(5) }, label = { Text("Inches") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f),
+                    )
+                }
+                OutlinedTextField(
+                    leds, { leds = it.filter(Char::isDigit).take(5) }, label = { Text("Hidden LEDs (optional)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Text(
+                    "Leave both empty and the straight line on the photo is used as a guess.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onSave(stretch.copy(lengthCm = if (lengthIn > 0f) lengthIn * 2.54f else null, leds = leds.toIntOrNull()?.takeIf { it > 0 }))
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 private fun DrawScope.drawRun(points: List<MapPoint>, color: Color, stroke: Float, dashed: Boolean) {
     if (points.size < 2) return
     val path = Path()
@@ -715,6 +867,8 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
 
     // LED spacing: spread along the traced line, or a fixed real distance apart.
     var fixedSpacing by remember { mutableStateOf(run.spacingCm != null) }
+    val hiddenList = remember { mutableStateListOf(*run.hidden.toTypedArray()) }
+    var editingHidden by remember { mutableStateOf<HiddenStretch?>(null) }
     var spacingInches by remember { mutableStateOf(map.useInches) }
     fun shown(cm: Float, inches: Boolean) = "%.2f".format(if (inches) cm / 2.54f else cm).trimEnd('0').trimEnd('.')
     var spacingText by remember { mutableStateOf(run.spacingCm?.let { shown(it, map.useInches) } ?: "") }
@@ -797,15 +951,39 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                     }
                     Text(note, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+
+                if (hiddenList.isNotEmpty()) {
+                    Text("Hidden stretches", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
+                    hiddenList.forEach { h ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Between points ${h.after + 1} and ${h.after + 2}: " + listOfNotNull(
+                                    h.lengthCm?.let { formatLength(it, true) }, h.leds?.let { "$it LEDs" },
+                                ).ifEmpty { listOf("straight-line guess") }.joinToString(", "),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = { editingHidden = h }) { Icon(Icons.Filled.Edit, "Edit hidden stretch") }
+                            IconButton(onClick = { hiddenList.remove(h) }) { Icon(Icons.Outlined.Delete, "Show this stretch") }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(enabled = valid, onClick = { onSave(run.copy(name = name.trim(), deviceId = deviceId, startLed = s!!, count = c!!, prop = prop, spacingCm = if (fixedSpacing) spacingCm else null)) }) {
+            TextButton(enabled = valid, onClick = { onSave(run.copy(name = name.trim(), deviceId = deviceId, startLed = s!!, count = c!!, prop = prop, spacingCm = if (fixedSpacing) spacingCm else null, hidden = hiddenList.toList())) }) {
                 Text(if (run.count == 0) "Next: trace it" else "Save")
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+    editingHidden?.let { h ->
+        HiddenStretchDialog(h, onDismiss = { editingHidden = null }) { updated ->
+            val i = hiddenList.indexOf(h)
+            if (i >= 0) hiddenList[i] = updated
+            editingHidden = null
+        }
+    }
 }
 
 // ================================================================== standalone
@@ -1096,9 +1274,12 @@ private fun LedEditCanvas(
 @Composable
 private fun LedEditControls(
     points: List<MapPoint?>,
+    hidden: Set<Int>,
     selected: Int?,
     placing: Int?,
     onRemove: (Int) -> Unit,
+    onHide: (Int) -> Unit,
+    onUnhide: (Int) -> Unit,
     onFillGaps: () -> Unit,
     onPlaceMissing: () -> Unit,
     onStopPlacing: () -> Unit,
@@ -1109,10 +1290,11 @@ private fun LedEditControls(
     onDone: () -> Unit,
 ) {
     val placed = points.count { it != null }
-    val missing = points.size - placed
+    val hiddenCount = hidden.count { it in points.indices }
+    val missing = points.size - placed - hiddenCount
     Column(Modifier.padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            "$placed of ${points.size} LEDs placed" + if (missing > 0) " · $missing missing" else "",
+            "$placed of ${points.size} LEDs placed" + (if (hiddenCount > 0) " · $hiddenCount hidden" else "") + if (missing > 0) " · $missing missing" else "",
             style = MaterialTheme.typography.titleSmall,
         )
         when {
@@ -1120,8 +1302,9 @@ private fun LedEditControls(
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                     Column(Modifier.padding(12.dp)) {
                         Text("Tap where LED ${placing + 1} is", fontWeight = FontWeight.SemiBold)
-                        Text("It's lit up on your house now.", style = MaterialTheme.typography.bodySmall)
+                        Text("It's lit up on your house now. Out of sight from the photo? Mark it hidden.", style = MaterialTheme.typography.bodySmall)
                         Row {
+                            TextButton(onClick = { onHide(placing) }) { Text("Hidden") }
                             TextButton(onClick = { onSkip(placing) }) { Text("Skip") }
                             TextButton(onClick = onStopPlacing) { Text("Stop placing") }
                         }
@@ -1132,6 +1315,7 @@ private fun LedEditControls(
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                     Row(Modifier.padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("LED ${selected + 1} — drag it to move, or", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { onHide(selected) }) { Text("Hidden") }
                         TextButton(onClick = { onRemove(selected) }) {
                             Icon(Icons.Outlined.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Remove")
                         }
@@ -1149,6 +1333,20 @@ private fun LedEditControls(
             OutlinedButton(onClick = onPlaceMissing, enabled = missing > 0 && placing == null) { Text("Place missing") }
             OutlinedButton(onClick = onAddAtEnd) { Icon(Icons.Filled.Add, null, Modifier.size(18.dp)); Text("Add LED") }
             OutlinedButton(onClick = onRemoveLast, enabled = points.size > 1) { Text("Remove last LED") }
+        }
+        if (hiddenCount > 0) {
+            val ranges = hidden.filter { it in points.indices }.sorted().fold(mutableListOf<IntRange>()) { acc, i ->
+                val last = acc.lastOrNull()
+                if (last != null && last.last == i - 1) acc[acc.lastIndex] = last.first..i else acc += i..i
+                acc
+            }
+            Text(
+                "Hidden: " + ranges.joinToString { r -> if (r.first == r.last) "LED ${r.first + 1}" else "LEDs ${r.first + 1}–${r.last + 1}" } +
+                    ". They're not shown on the photo, but effects still flow through them.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = { hidden.filter { it in points.indices }.minOrNull()?.let(onUnhide) }) { Text("Place a hidden LED after all") }
         }
         Text(
             "Fill gaps guesses missed lights between found ones. Place missing walks you through each one. Add / Remove last LED changes how many lights this run has.",
