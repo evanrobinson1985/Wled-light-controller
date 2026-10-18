@@ -173,7 +173,8 @@ fun SimHouseView(modifier: Modifier = Modifier, bulbSize: Float = 1f, onTapDevic
             }
         ) {
             val frames = HashMap<SimDevice, IntArray>()
-            val r = (size.width / 400f).coerceIn(1.2f, 4f) * bulbSize
+            // Half the old size: closer to real bulbs at house scale.
+            val r = (size.width / 800f).coerceIn(0.6f, 2f) * bulbSize
             for (l in leds) {
                 val f = frames.getOrPut(l.device) { l.device.frame(now) }
                 glow(f.getOrElse(l.index) { 0 }, Offset(l.x * size.width, l.y * size.height), if (l.bullet) r * 1.4f else r, l.bullet)
@@ -202,9 +203,9 @@ private fun SimStrip(device: SimDevice, modifier: Modifier = Modifier) {
             val c = f[i]
             val x = i * w + w / 2
             if (c and 0xFFFFFF != 0) {
-                drawCircle(Color(c or (0xFF shl 24)).copy(alpha = 0.4f), (w * 1.6f).coerceAtMost(size.height), Offset(x, size.height / 2), blendMode = BlendMode.Plus)
+                drawCircle(Color(c or (0xFF shl 24)).copy(alpha = 0.4f), (w * 0.8f).coerceAtMost(size.height / 2), Offset(x, size.height / 2), blendMode = BlendMode.Plus)
             }
-            drawCircle(if (c and 0xFFFFFF == 0) Color.White.copy(alpha = 0.08f) else Color(c or (0xFF shl 24)), (w * 0.45f).coerceIn(0.6f, size.height / 3), Offset(x, size.height / 2))
+            drawCircle(if (c and 0xFFFFFF == 0) Color.White.copy(alpha = 0.08f) else Color(c or (0xFF shl 24)), (w * 0.225f).coerceIn(0.3f, size.height / 6), Offset(x, size.height / 2))
         }
     }
 }
