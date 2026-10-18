@@ -36,6 +36,7 @@ class SequenceRepository(context: Context, scope: CoroutineScope) {
         val stamped = seq.copy(modifiedAt = System.currentTimeMillis())
         _all.value = (listOf(stamped) + _all.value.filterNot { it.id == seq.id })
         withContext(Dispatchers.IO) {
+            dir.mkdirs() // A restore may have removed the folder.
             val tmp = File(dir, "${seq.id}.tmp")
             tmp.writeText(json.encodeToString(Sequence.serializer(), stamped))
             tmp.renameTo(File(dir, "${seq.id}.json"))

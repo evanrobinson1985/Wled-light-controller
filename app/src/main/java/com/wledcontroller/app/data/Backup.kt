@@ -30,15 +30,35 @@ class Backup(private val context: Context, private val store: AppStore, private 
     private val filesDir get() = context.filesDir
     private val json = Json { ignoreUnknownKeys = true }
 
+    private fun looseFiles() = filesDir.listFiles { f -> f.isFile && (f.name.startsWith("house_") || f.name.startsWith("standalone_backup_")) }
+        ?.toList() ?: emptyList()
+
     /** Everything in app storage that belongs in a backup. */
     private fun backupFiles(): List<File> {
-        val dirs = listOf("sequences", "audio", "fseq").map { File(filesDir, it) }
-        val loose = filesDir.listFiles { f -> f.isFile && (f.name.startsWith("house_") || f.name.startsWith("standalone_backup_")) }
-            ?.toList() ?: emptyList()
-        return dirs.flatMap { d -> d.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.toList() } + loose
+        val dirs = DIRS.map { File(filesDir, it) }
+        return dirs.flatMap { d -> d.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.toList() } + looseFiles()
     }
 
-    suspend fun export(uri: Uri): BackupSummary = withContext(Dispatchers.IO) {
+    suspend fun export(uri: Uri): BackupSummary =
+        export(context.contentResolver.openOutputStream(uri) ?: throw IllegalStateException("Couldn't write the backup file"))
+
+    suspend fun export(file: File): BackupSummary = export(file.outputStream())
+
+    suspend fun restore(uri: Uri): BackupSummary =
+        restore(context.contentResolver.openInputStream(uri) ?: throw IllegalStateException("Couldn't open that file"))
+
+    suspend fun restore(file: File): BackupSummary = restore(file.inputStream())
+
+    /** Removes all app data: controllers, settings, house map, shows and their files. */
+    suspend fun clearAll() = withContext(Dispatchers.IO) {
+        DIRS.forEach { File(filesDir, it).deleteRecursively() }
+        looseFiles().forEach { it.delete() }
+        store.importAll(JsonObject(emptyMap())) { it }
+        FseqReader.forgetAll()
+        sequences.reload()
+    }
+
+    private suspend fun export(stream: java.io.OutputStream): BackupSummary = withContext(Dispatchers.IO) {
         val prefs = store.exportAll()
         val files = backupFiles()
         val manifest = buildJsonObject {
@@ -48,7 +68,7 @@ class Backup(private val context: Context, private val store: AppStore, private 
             put("filesDir", filesDir.absolutePath)
         }
         var bytes = 0L
-        context.contentResolver.openOutputStream(uri)?.use { out ->
+        stream.use { out ->
             ZipOutputStream(out.buffered()).use { zip ->
                 zip.putNextEntry(ZipEntry("manifest.json")); zip.write(manifest.toString().toByteArray()); zip.closeEntry()
                 zip.putNextEntry(ZipEntry("settings.json")); zip.write(prefs.toString().toByteArray()); zip.closeEntry()
@@ -59,19 +79,19 @@ class Backup(private val context: Context, private val store: AppStore, private 
                     bytes += f.length()
                 }
             }
-        } ?: throw IllegalStateException("Couldn't write the backup file")
+        }
         val deviceCount = store.devices.first().size
         BackupSummary(deviceCount, sequences.all.value.size, files.size, bytes)
     }
 
-    suspend fun restore(uri: Uri): BackupSummary = withContext(Dispatchers.IO) {
+    private suspend fun restore(stream: java.io.InputStream): BackupSummary = withContext(Dispatchers.IO) {
         // Unpack to a staging folder first, so a bad file can't leave the app half-restored.
         val staging = File(context.cacheDir, "restore").apply { deleteRecursively(); mkdirs() }
         var manifest: JsonObject? = null
         var settings: JsonObject? = null
         var fileCount = 0
         var bytes = 0L
-        context.contentResolver.openInputStream(uri)?.use { input ->
+        stream.use { input ->
             ZipInputStream(input.buffered()).use { zip ->
                 while (true) {
                     val e = zip.nextEntry ?: break
@@ -92,7 +112,7 @@ class Backup(private val context: Context, private val store: AppStore, private 
                     zip.closeEntry()
                 }
             }
-        } ?: throw IllegalStateException("Couldn't open that file")
+        }
         val m = manifest ?: throw IllegalArgumentException("That isn't a WLED Controller backup")
         if (m.str("app") != "wled-controller") throw IllegalArgumentException("That isn't a WLED Controller backup")
         if ((m["format"]?.jsonPrimitive?.int ?: 0) > 1) throw IllegalArgumentException("This backup is from a newer version of the app")
@@ -101,8 +121,8 @@ class Backup(private val context: Context, private val store: AppStore, private 
         fun fixPath(s: String) = if (oldDir == newDir) s else s.replace(oldDir, newDir)
 
         // Swap in the restored files.
-        listOf("sequences", "audio", "fseq").forEach { File(filesDir, it).deleteRecursively() }
-        filesDir.listFiles { f -> f.isFile && (f.name.startsWith("house_") || f.name.startsWith("standalone_backup_")) }?.forEach { it.delete() }
+        DIRS.forEach { File(filesDir, it).deleteRecursively() }
+        looseFiles().forEach { it.delete() }
         staging.walkTopDown().filter { it.isFile }.forEach { f ->
             val dest = File(filesDir, f.relativeTo(staging).path)
             dest.parentFile?.mkdirs()
@@ -114,5 +134,10 @@ class Backup(private val context: Context, private val store: AppStore, private 
         FseqReader.forgetAll()
         sequences.reload()
         BackupSummary(store.devices.first().size, sequences.all.value.size, fileCount, bytes)
+    }
+
+    private companion object {
+        /** Folders of app data; "simulator" holds the simulated controllers. */
+        val DIRS = listOf("sequences", "audio", "fseq", "simulator")
     }
 }

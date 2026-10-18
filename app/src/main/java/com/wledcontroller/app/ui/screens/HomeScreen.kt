@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -48,6 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -76,12 +78,20 @@ import com.wledcontroller.app.ui.components.toComposeColor
 import kotlinx.coroutines.launch
 
 @Composable
-fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, onOpenHouse: () -> Unit, onOpenSchedule: () -> Unit, onOpenSettings: () -> Unit) {
+fun HomeScreen(
+    onOpenDevice: (String) -> Unit,
+    onOpenGroup: (String) -> Unit,
+    onOpenHouse: () -> Unit,
+    onOpenSchedule: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenSimulator: () -> Unit,
+) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val controllers by container.devices.list.collectAsStateWithLifecycle()
     val groups by container.store.groups.collectAsStateWithLifecycle(emptyList())
     val scenes by container.store.scenes.collectAsStateWithLifecycle(emptyList())
+    val simActive by container.simulator.active.collectAsStateWithLifecycle()
 
     var showAdd by remember { mutableStateOf(false) }
     var editGroup by remember { mutableStateOf<DeviceGroup?>(null) }
@@ -94,12 +104,15 @@ fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, on
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             LargeTopAppBar(
-                title = { Text("Lights") },
+                title = { Text(if (simActive) "Lights · simulator" else "Lights") },
                 actions = {
                     IconButton(onClick = { controllers.forEach { it.setPower(false) } }, enabled = controllers.isNotEmpty()) {
                         Icon(Icons.Filled.PowerSettingsNew, "All off")
                     }
                     IconButton(onClick = { showAdd = true }) { Icon(Icons.Filled.Search, "Find devices") }
+                    IconButton(onClick = onOpenSimulator) {
+                        Icon(Icons.Filled.Science, "Light show simulator", tint = if (simActive) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                    }
                     IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
                 },
                 scrollBehavior = scrollBehavior,
@@ -114,7 +127,7 @@ fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, on
         },
     ) { padding ->
         if (controllers.isEmpty()) {
-            EmptyHome(Modifier.padding(padding), onAdd = { showAdd = true })
+            EmptyHome(Modifier.padding(padding), onAdd = { showAdd = true }, onTrySimulator = onOpenSimulator)
         } else {
             LazyColumn(
                 contentPadding = PaddingValues(
@@ -124,6 +137,26 @@ fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, on
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (simActive) item {
+                    Card(
+                        onClick = onOpenSimulator,
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                        modifier = Modifier.padding(top = 12.dp),
+                    ) {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Science, null, Modifier.size(28.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Simulator on", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "These are virtual lights on a virtual house. Your real setup comes back when you leave.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
                 item {
                     SectionTitle("Scenes") {
                         TextButton(onClick = { showSaveScene = true }) { Text("Save current") }
@@ -245,7 +278,7 @@ fun HomeScreen(onOpenDevice: (String) -> Unit, onOpenGroup: (String) -> Unit, on
 }
 
 @Composable
-private fun EmptyHome(modifier: Modifier, onAdd: () -> Unit) {
+private fun EmptyHome(modifier: Modifier, onAdd: () -> Unit, onTrySimulator: () -> Unit) {
     Column(
         modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -265,6 +298,12 @@ private fun EmptyHome(modifier: Modifier, onAdd: () -> Unit) {
             Icon(Icons.Filled.Search, null)
             Spacer(Modifier.width(8.dp))
             Text("Find devices")
+        }
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onTrySimulator) {
+            Icon(Icons.Filled.Science, null)
+            Spacer(Modifier.width(8.dp))
+            Text("No lights to hand? Try the simulator")
         }
     }
 }

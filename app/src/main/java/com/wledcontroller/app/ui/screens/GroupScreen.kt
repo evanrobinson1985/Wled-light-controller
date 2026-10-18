@@ -249,6 +249,10 @@ fun WebUiScreen(deviceId: String, onBack: () -> Unit) {
     ) { padding ->
         if (url == null) {
             Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) { Text("Device not found") }
+        } else if (com.wledcontroller.app.sim.SimHub.isSimulated(controller?.device?.host)) {
+            Box(Modifier.padding(padding).fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Text("This is a simulated controller, so it has no WLED web page. Everything it does is in the app's own screens.")
+            }
         } else {
             AndroidView(
                 factory = { ctx ->

@@ -142,7 +142,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                         ShowRunnerService.stop(context)
                         container.player.stopAll()
                         container.house.stop()
-                        runCatching { container.backup.restore(uri) }
+                        runCatching {
+                            container.backup.restore(uri).also {
+                                // In the simulator, the restored data becomes the virtual house.
+                                if (container.simulator.active.value) com.wledcontroller.app.sim.SimHub.load(container.simulator.simFile)
+                            }
+                        }
                             .onSuccess { s -> message = "Restored ${s.devices} controllers and ${s.shows} shows (${s.files} files)." }
                             .onFailure { message = "Restore failed: ${it.message}" }
                         busy = null

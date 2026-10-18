@@ -4,7 +4,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -23,6 +29,8 @@ import com.wledcontroller.app.ui.screens.ScheduleScreen
 import com.wledcontroller.app.ui.screens.SequenceEditorScreen
 import com.wledcontroller.app.ui.screens.SettingsScreen
 import com.wledcontroller.app.ui.screens.ShowsScreen
+import com.wledcontroller.app.ui.screens.SimMiniView
+import com.wledcontroller.app.ui.screens.SimulatorScreen
 import com.wledcontroller.app.ui.screens.WebUiScreen
 import com.wledcontroller.app.ui.theme.WledTheme
 
@@ -39,6 +47,10 @@ class MainActivity : ComponentActivity() {
                 WledTheme {
                     val nav = rememberNavController()
                     val idArg = listOf(navArgument("id") { type = NavType.StringType })
+                    val simActive by container.simulator.active.collectAsStateWithLifecycle()
+                    val miniView by container.simulator.miniView.collectAsStateWithLifecycle()
+                    val route = nav.currentBackStackEntryAsState().value?.destination?.route
+                    Box(Modifier.fillMaxSize()) {
                     NavHost(navController = nav, startDestination = "home") {
                         composable("home") {
                             HomeScreen(
@@ -47,6 +59,19 @@ class MainActivity : ComponentActivity() {
                                 onOpenHouse = { nav.navigate("house") },
                                 onOpenSchedule = { nav.navigate("schedule") },
                                 onOpenSettings = { nav.navigate("settings") },
+                                onOpenSimulator = { nav.navigate("sim") },
+                            )
+                        }
+                        composable("sim") {
+                            SimulatorScreen(
+                                onBack = { nav.popBackStack() },
+                                onOpenDevice = { nav.navigate("device/$it") },
+                                onOpenGroup = { nav.navigate("group/$it") },
+                                onOpenHouse = { nav.navigate("house") },
+                                onOpenShows = { nav.navigate("shows") },
+                                onOpenShow = { nav.navigate("shows/$it") },
+                                onOpenSchedule = { nav.navigate("schedule") },
+                                onOpenMap = { nav.navigate("house/map") },
                             )
                         }
                         composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
@@ -113,6 +138,14 @@ class MainActivity : ComponentActivity() {
                                 onBack = { nav.popBackStack() },
                             )
                         }
+                    }
+                    // The virtual house stays in view while you use the rest of the app.
+                    if (simActive && miniView && route != "sim" && route != "house/scan") {
+                        SimMiniView(
+                            onOpen = { nav.navigate("sim") { launchSingleTop = true } },
+                            onClose = { container.simulator.setMiniView(false) },
+                        )
+                    }
                     }
                 }
             }

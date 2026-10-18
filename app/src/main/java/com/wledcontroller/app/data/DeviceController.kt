@@ -162,7 +162,8 @@ class DeviceController(
                 closed.complete(Unit)
             }
         }
-        val ws = wsClient.newWebSocket(Request.Builder().url("ws://${WledApi.normalizeHost(host)}/ws").build(), listener)
+        val request = Request.Builder().url("ws://${WledApi.normalizeHost(host)}/ws").build()
+        val ws = com.wledcontroller.app.sim.SimHub.openSocket(host, request, listener) ?: wsClient.newWebSocket(request, listener)
         socket = ws
         try {
             closed.await()

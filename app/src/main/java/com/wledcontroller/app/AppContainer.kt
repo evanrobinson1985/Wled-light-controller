@@ -23,6 +23,8 @@ class AppContainer(context: Context) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val http = OkHttpClient.Builder()
+        // Simulated controllers answer in-process.
+        .addInterceptor(com.wledcontroller.app.sim.SimHub.interceptor)
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(6, TimeUnit.SECONDS)
         .writeTimeout(6, TimeUnit.SECONDS)
@@ -43,6 +45,7 @@ class AppContainer(context: Context) {
     val player = SequencePlayer(store, house, scope)
     val showRunner = ShowRunner(store, api, sequences, house, scope)
     val backup = com.wledcontroller.app.data.Backup(context, store, sequences)
+    val simulator = com.wledcontroller.app.sim.Simulator(context, store, backup, sequences, house, player, devices)
 
     init {
         scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }

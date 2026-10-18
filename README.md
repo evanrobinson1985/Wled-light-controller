@@ -32,7 +32,8 @@ multi-device control, scenes, and nicer controls.
 - Show schedule: playlists of shows (ordered, looping, gaps between songs) and time windows by day of week (past midnight OK, optional lights-off at the end); runs in the background with the screen off, restarts after a reboot, and has Play now for testing
 - xLights import: play .fseq sequences (v1/v2, zstd/zlib/uncompressed, sparse) on your controllers — map each controller's start channel automatically in order or from xlights_networks.xml (matched by IP), preview on the house map, add the song, and use them in playlists and the schedule
 - Show editing: undo/redo, long-press to multi-select effects and drag them together, copy/cut/paste (across tracks and shows, pasted at the playhead), and speed / brightness ramps within an effect
-- Backup & restore (⚙ Settings): one .zip with controllers, groups, scenes, favourites, the house map and photo, shows with their songs, imported xLights sequences, playlists and schedules — for a new phone or after a reset
+- Light show simulator (🧪 on the home screen): swaps in a virtual house with four simulated WLED controllers (roofline strip, bullet lights on the windows and door, a mega tree, arches and bushes) so every feature can be tried without real lights — effects, palettes, segments, presets and playlists, holiday themes, LED setup, nightlight, power limiter, groups and scenes, whole-house effects, standalone mode, shows and the schedule. The house is drawn live (tap a light to open its controller) and a small floating live view follows you round the app. Add your own simulated controllers of any size; your real setup is saved and comes back when you leave
+- - Backup & restore (⚙ Settings): one .zip with controllers, groups, scenes, favourites, the house map and photo, shows with their songs, imported xLights sequences, playlists and schedules — for a new phone or after a reset
 - Lights delay (app-wide) to line the lights up with Bluetooth speakers, and a home-screen card showing what the show schedule is playing or when the next show starts
 - Camera auto-mapping: prop the phone up facing the house and each light flashes in turn while the camera locates it; then fine-tune in the editor (pinch-zoom, drag lights, remove strays, fill gaps, place missed lights one by one, add/remove LEDs)
 - Whole-house effects: trace each run of lights on a photo of your house, then play position-based effects (colour wave, rainbow sweep, wipe, ripple, fireworks, snow, twinkle …) across every controller in sync — streamed from the phone over DDP (keeps running with the screen off), or set up one ESP32 controller as master with the others as network outputs and a 2D LED map so WLED's own 2D effects span the house without the phone (backed up, one-tap undo)
@@ -63,7 +64,7 @@ Requires JDK 17 and the Android SDK (Android Studio works out of the box).
 ```
 
 Unit tests (state patching, schedule windows, FSEQ decoding, beat detection, house map layout,
-sequence rendering) run on the JVM and in CI before every build:
+sequence rendering, the simulated controllers) run on the JVM and in CI before every build:
 
 ```
 ./gradlew testReleaseUnitTest

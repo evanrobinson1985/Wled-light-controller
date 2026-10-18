@@ -16,6 +16,7 @@ class DdpSender : AutoCloseable {
 
     /** [rgb] holds 3 bytes per LED starting at LED 0. Blocking: call off the main thread. */
     fun send(host: String, rgb: ByteArray) {
+        if (com.wledcontroller.app.sim.SimHub.deliverDdp(host, rgb)) return
         val addr = addresses.getOrPut(host) {
             InetAddress.getByName(WledApi.normalizeHost(host).substringBefore(':'))
         }
