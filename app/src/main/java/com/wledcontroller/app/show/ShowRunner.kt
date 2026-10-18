@@ -81,16 +81,17 @@ class ShowRunner(
         while (currentCoroutineContext().isActive) {
             val now = LocalDateTime.now()
             val entries = store.schedules.first()
-            val active = entries.firstOrNull { it.isActive(now) }
+            val place = store.location.first()
+            val active = entries.firstOrNull { it.isActive(now, place) }
             if (active == null) {
-                val next = entries.mapNotNull { it.nextStart(now) }.minOrNull()
+                val next = entries.mapNotNull { it.nextStart(now, place) }.minOrNull()
                 _state.value = RunnerState(running = true, mode = "schedule", nextStart = next)
                 delay(15_000)
                 continue
             }
             val playlist = store.playlists.first().firstOrNull { it.id == active.playlistId }
             if (playlist == null || playlist.sequenceIds.isEmpty()) { delay(15_000); continue }
-            val end = active.endTime(now)
+            val end = active.endTime(now, place)
             // Keep cycling the playlist until the window closes; the current song always finishes.
             var anyPlayed = false
             while (currentCoroutineContext().isActive && LocalDateTime.now().isBefore(end)) {

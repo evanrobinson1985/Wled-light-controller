@@ -4,6 +4,7 @@ package com.wledcontroller.app.ui.screens
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
 import android.net.Uri
@@ -40,7 +41,9 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -76,7 +79,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.show.Playlist
+import com.wledcontroller.app.show.GeoPoint
 import com.wledcontroller.app.show.ScheduleEntry
+import com.wledcontroller.app.show.Solar
+import com.wledcontroller.app.show.TimeKind
+import com.wledcontroller.app.show.formatMonthDay
+import com.wledcontroller.app.show.formatOffset
+import com.wledcontroller.app.show.parseMonthDay
+import java.time.LocalDate
+import java.time.ZoneId
 import com.wledcontroller.app.show.Sequence
 import com.wledcontroller.app.show.ShowRunnerService
 import com.wledcontroller.app.show.formatMinutes
@@ -97,6 +108,7 @@ fun ScheduleScreen(onBack: () -> Unit) {
     val scheduleOn by container.store.scheduleOn.collectAsStateWithLifecycle(false)
     val runner by container.showRunner.state.collectAsStateWithLifecycle()
     val shows by container.sequences.all.collectAsStateWithLifecycle()
+    val place by container.store.location.collectAsStateWithLifecycle(null)
 
     var editPlaylist by remember { mutableStateOf<Playlist?>(null) }
     var editSchedule by remember { mutableStateOf<ScheduleEntry?>(null) }
@@ -231,6 +243,15 @@ fun ScheduleScreen(onBack: () -> Unit) {
                     Row(Modifier.padding(start = 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(e.describe(), fontWeight = FontWeight.SemiBold)
+                            if (e.startKind != TimeKind.CLOCK || e.endKind != TimeKind.CLOCK) {
+                                val (st, en) = e.window(LocalDate.now(), place)
+                                Text(
+                                    if (place == null) "Set your location below for sunset times"
+                                    else "Tonight ${formatMinutes(st)}–${formatMinutes(en)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (place == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                )
+                            }
                             Text(
                                 (p?.name ?: "Missing playlist") + if (e.lightsOffAtEnd) " · lights off after" else "",
                                 style = MaterialTheme.typography.bodySmall,
@@ -243,6 +264,7 @@ fun ScheduleScreen(onBack: () -> Unit) {
                     }
                 }
             }
+            LocationCard()
             Spacer(Modifier.height(32.dp))
         }
     }
@@ -254,7 +276,7 @@ fun ScheduleScreen(onBack: () -> Unit) {
         }
     }
     editSchedule?.let { e ->
-        ScheduleDialog(e, playlists, onDismiss = { editSchedule = null }) { updated ->
+        ScheduleDialog(e, playlists, place, onDismiss = { editSchedule = null }) { updated ->
             scope.launch { container.store.upsertSchedule(updated) }
             editSchedule = null
         }
@@ -314,24 +336,41 @@ private fun PlaylistDialog(playlist: Playlist, shows: List<Sequence>, onDismiss:
 private val DayLetters = listOf("M", "T", "W", "T", "F", "S", "S")
 
 @Composable
-private fun ScheduleDialog(entry: ScheduleEntry, playlists: List<Playlist>, onDismiss: () -> Unit, onSave: (ScheduleEntry) -> Unit) {
+private fun ScheduleDialog(entry: ScheduleEntry, playlists: List<Playlist>, place: GeoPoint?, onDismiss: () -> Unit, onSave: (ScheduleEntry) -> Unit) {
     val context = LocalContext.current
     var playlistId by remember { mutableStateOf(entry.playlistId) }
     val days = remember { mutableStateListOf<Int>().apply { addAll(entry.days) } }
     var start by remember { mutableIntStateOf(entry.startMin) }
     var end by remember { mutableIntStateOf(entry.endMin) }
+    var startKind by remember { mutableStateOf(entry.startKind) }
+    var endKind by remember { mutableStateOf(entry.endKind) }
+    var startOffset by remember { mutableIntStateOf(entry.startOffsetMin) }
+    var endOffset by remember { mutableIntStateOf(entry.endOffsetMin) }
+    var seasonOn by remember { mutableStateOf(entry.seasonStart != null && entry.seasonEnd != null) }
+    var seasonStart by remember { mutableStateOf(entry.seasonStart ?: "11-25") }
+    var seasonEnd by remember { mutableStateOf(entry.seasonEnd ?: "01-06") }
     var lightsOff by remember { mutableStateOf(entry.lightsOffAtEnd) }
     var menu by remember { mutableStateOf(false) }
 
     fun pick(initial: Int, onPicked: (Int) -> Unit) {
-        TimePickerDialog(context, { _, h, m -> onPicked(h * 60 + m) }, initial / 60, initial % 60, false).show()
+        TimePickerDialog(context, { _, h, m -> onPicked(h * 60 + m) }, initial / 60 % 24, initial % 60, false).show()
     }
+    fun pickDate(current: String, onPicked: (String) -> Unit) {
+        val md = parseMonthDay(current) ?: java.time.MonthDay.of(12, 1)
+        DatePickerDialog(context, { _, _, m, d -> onPicked("%02d-%02d".format(m + 1, d)) }, LocalDate.now().year, md.monthValue - 1, md.dayOfMonth).show()
+    }
+    val draft = entry.copy(
+        startMin = start, endMin = end, startKind = startKind, endKind = endKind,
+        startOffsetMin = startOffset, endOffsetMin = endOffset,
+        seasonStart = if (seasonOn) seasonStart else null, seasonEnd = if (seasonOn) seasonEnd else null,
+    )
+    val usesSun = startKind != TimeKind.CLOCK || endKind != TimeKind.CLOCK
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Show time") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box {
                     OutlinedButton(onClick = { menu = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(playlists.firstOrNull { it.id == playlistId }?.name ?: "Choose playlist", Modifier.weight(1f))
@@ -348,18 +387,43 @@ private fun ScheduleDialog(entry: ScheduleEntry, playlists: List<Playlist>, onDi
                         FilterChip(selected = d in days, onClick = { if (d in days) days.remove(d) else days.add(d) }, label = { Text(l) })
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Starts", style = MaterialTheme.typography.labelMedium)
-                        OutlinedButton(onClick = { pick(start) { start = it } }) { Text(formatMinutes(start)) }
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text("Ends", style = MaterialTheme.typography.labelMedium)
-                        OutlinedButton(onClick = { pick(end) { end = it } }) { Text(formatMinutes(end)) }
-                    }
+
+                TimeChooser(
+                    "Starts", listOf(TimeKind.CLOCK, TimeKind.SUNSET, TimeKind.DUSK), startKind, { startKind = it },
+                    start, { pick(start) { v -> start = v } }, startOffset, { startOffset = it },
+                )
+                TimeChooser(
+                    "Ends", listOf(TimeKind.CLOCK, TimeKind.SUNRISE), endKind, { endKind = it },
+                    end, { pick(end) { v -> end = v } }, endOffset, { endOffset = it },
+                )
+                val (ws, we) = draft.window(LocalDate.now(), place)
+                Text(
+                    when {
+                        usesSun && place == null -> "Set your location on the schedule screen so the app knows when sunset is. Until then the clock times are used."
+                        else -> "Tonight: ${formatMinutes(ws)}–${formatMinutes(we)}" + if (we >= 1440) " (after midnight)" else ""
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (usesSun && place == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Only between dates", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                    Switch(checked = seasonOn, onCheckedChange = { seasonOn = it })
                 }
-                if (end <= start) {
-                    Text("Ends after midnight.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (seasonOn) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { pickDate(seasonStart) { seasonStart = it } }) { Text(formatMonthDay(seasonStart)) }
+                        Text("to")
+                        OutlinedButton(onClick = { pickDate(seasonEnd) { seasonEnd = it } }) { Text(formatMonthDay(seasonEnd)) }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            "Christmas" to ("11-25" to "01-06"), "Halloween" to ("10-01" to "10-31"),
+                            "Thanksgiving week" to ("11-20" to "11-30"), "July 4th" to ("07-01" to "07-05"),
+                        ).forEach { (label, range) ->
+                            AssistChip(onClick = { seasonStart = range.first; seasonEnd = range.second }, label = { Text(label) })
+                        }
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(lightsOff, { lightsOff = it }); Text("Turn lights off when it ends")
@@ -367,10 +431,131 @@ private fun ScheduleDialog(entry: ScheduleEntry, playlists: List<Playlist>, onDi
             }
         },
         confirmButton = {
-            Button(enabled = days.isNotEmpty() && playlists.any { it.id == playlistId } && start != end, onClick = {
-                onSave(entry.copy(playlistId = playlistId, days = days.toSet(), startMin = start, endMin = end, lightsOffAtEnd = lightsOff))
-            }) { Text("Save") }
+            Button(
+                enabled = days.isNotEmpty() && playlists.any { it.id == playlistId } && (usesSun || start != end),
+                onClick = { onSave(draft.copy(playlistId = playlistId, days = days.toSet(), lightsOffAtEnd = lightsOff)) },
+            ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** A start or end time: a clock time, or sunset / dusk / sunrise plus or minus an offset. */
+@Composable
+private fun TimeChooser(
+    label: String,
+    kinds: List<TimeKind>,
+    kind: TimeKind,
+    onKind: (TimeKind) -> Unit,
+    clock: Int,
+    onPickClock: () -> Unit,
+    offset: Int,
+    onOffset: (Int) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            kinds.forEach { k -> FilterChip(selected = kind == k, onClick = { onKind(k) }, label = { Text(k.label) }) }
+        }
+        if (kind == TimeKind.CLOCK) {
+            OutlinedButton(onClick = onPickClock) { Text(formatMinutes(clock)) }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { onOffset(offset - 15) }) { Text("− 15 min") }
+                Text(kind.label + formatOffset(offset), Modifier.weight(1f).padding(horizontal = 8.dp), style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(onClick = { onOffset(offset + 15) }) { Text("+ 15 min") }
+            }
+        }
+    }
+}
+
+/** Where the show is, so sunset and dusk times can be worked out. */
+@Composable
+private fun LocationCard() {
+    val container = LocalAppContainer.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val place by container.store.location.collectAsStateWithLifecycle(null)
+    var editing by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    @SuppressLint("MissingPermission")
+    fun locate() {
+        val lm = context.getSystemService(android.location.LocationManager::class.java)
+        val loc = lm?.getProviders(true)?.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }?.maxByOrNull { it.time }
+        if (loc != null) {
+            scope.launch { container.store.setLocation(GeoPoint(loc.latitude, loc.longitude)) }
+            error = null
+        } else if (lm != null && android.os.Build.VERSION.SDK_INT >= 30) {
+            val provider = if (lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) android.location.LocationManager.NETWORK_PROVIDER
+            else android.location.LocationManager.GPS_PROVIDER
+            runCatching {
+                lm.getCurrentLocation(provider, null, context.mainExecutor) { l ->
+                    if (l != null) scope.launch { container.store.setLocation(GeoPoint(l.latitude, l.longitude)) }
+                    else error = "Couldn't get your location. Turn on location, or enter it by hand."
+                }
+            }.onFailure { error = "Couldn't get your location. Enter it by hand." }
+        } else error = "Couldn't get your location. Turn on location, or enter it by hand."
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) locate() else error = "Location permission was declined. You can enter it by hand."
+    }
+
+    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Location for sunset times", fontWeight = FontWeight.SemiBold)
+            val p = place
+            if (p == null) {
+                Text(
+                    "Shows can start at sunset or dusk. The app works the time out each day from where you are — it isn't shared anywhere.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                val today = LocalDate.now(); val zone = ZoneId.systemDefault()
+                val sunset = Solar.sunset(today, p, zone); val dusk = Solar.dusk(today, p, zone)
+                Text("%.3f, %.3f".format(p.lat, p.lon), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Today: sunset ${sunset?.let(::formatMinutes) ?: "—"}, dusk ${dusk?.let(::formatMinutes) ?: "—"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { permission.launch(Manifest.permission.ACCESS_COARSE_LOCATION) }) { Text("Use my location") }
+                TextButton(onClick = { editing = true }) { Text("Enter by hand") }
+            }
+        }
+    }
+
+    if (editing) {
+        var lat by remember { mutableStateOf(place?.lat?.toString() ?: "") }
+        var lon by remember { mutableStateOf(place?.lon?.toString() ?: "") }
+        val la = lat.toDoubleOrNull()?.takeIf { it in -90.0..90.0 }
+        val lo = lon.toDoubleOrNull()?.takeIf { it in -180.0..180.0 }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Your location") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Latitude and longitude, e.g. 40.71 and -74.01 for New York. Long-press your house in Google Maps to copy them.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(lat, { lat = it.trim() }, label = { Text("Latitude") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text))
+                    OutlinedTextField(lon, { lon = it.trim() }, label = { Text("Longitude") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text))
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = la != null && lo != null, onClick = {
+                    scope.launch { container.store.setLocation(GeoPoint(la!!, lo!!)) }
+                    editing = false; error = null
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+        )
+    }
 }

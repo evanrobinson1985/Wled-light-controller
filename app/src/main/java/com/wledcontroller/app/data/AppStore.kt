@@ -51,6 +51,7 @@ class AppStore(private val context: Context) {
         val SCHEDULE_ON = androidx.datastore.preferences.core.booleanPreferencesKey("schedule_on")
         val LIGHTS_DELAY = androidx.datastore.preferences.core.intPreferencesKey("lights_delay_ms")
         val PIXEL_SIZE = androidx.datastore.preferences.core.floatPreferencesKey("pixel_size_dp")
+        val LOCATION = stringPreferencesKey("location")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -150,6 +151,14 @@ class AppStore(private val context: Context) {
 
     val lightsDelayMs: Flow<Int> = context.dataStore.data.map { it[Keys.LIGHTS_DELAY] ?: 0 }
     suspend fun setLightsDelay(ms: Int) { context.dataStore.edit { it[Keys.LIGHTS_DELAY] = ms } }
+
+    /** Where the show is, for sunset and dusk schedule times. */
+    val location: Flow<com.wledcontroller.app.show.GeoPoint?> = context.dataStore.data.map { prefs ->
+        prefs[Keys.LOCATION]?.let { runCatching { json.decodeFromString<com.wledcontroller.app.show.GeoPoint>(it) }.getOrNull() }
+    }
+    suspend fun setLocation(place: com.wledcontroller.app.show.GeoPoint?) {
+        context.dataStore.edit { if (place == null) it.remove(Keys.LOCATION) else it[Keys.LOCATION] = json.encodeToString(place) }
+    }
 
     /** How lights are drawn in previews, the house map and the simulator. */
     val pixelStyle: Flow<com.wledcontroller.app.ui.components.PixelStyle> = context.dataStore.data.map {
