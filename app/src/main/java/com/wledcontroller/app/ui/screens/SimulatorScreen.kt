@@ -432,8 +432,8 @@ private fun ActiveSimulator(
         Text("Simulated controllers", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         TextButton(onClick = onAdd, enabled = enabled) { Icon(Icons.Filled.Add, null); Spacer(Modifier.width(4.dp)); Text("Add") }
     }
-    saved.forEach { d -> key(d.id) {
-        val device = SimHub.find(d.host) ?: return@key
+    val simulated = saved.mapNotNull { d -> SimHub.find(d.host)?.let { d to it } }
+    simulated.forEach { (d, device) -> key(d.id) {
         val controller = container.devices.get(d.id)
         val snap = controller?.snapshot?.collectAsStateWithLifecycle()?.value
         Card(
