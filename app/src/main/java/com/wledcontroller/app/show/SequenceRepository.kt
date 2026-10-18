@@ -93,6 +93,21 @@ class SequenceRepository(context: Context, scope: CoroutineScope) {
     }
 
     /** Copies a picked song into app storage. Returns (path, title, durationMs). */
+    /** Copies a picture for the Picture effect into app storage (scaled down). Returns its path. */
+    suspend fun importPicture(context: Context, uri: android.net.Uri): String = withContext(Dispatchers.IO) {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri).use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 512) sample *= 2
+        val bmp = context.contentResolver.openInputStream(uri).use {
+            android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+        } ?: throw IllegalArgumentException("Couldn't read that picture")
+        val picDir = File(dir.parentFile, "pictures").apply { mkdirs() }
+        val file = File(picDir, "${java.util.UUID.randomUUID()}.png")
+        file.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        file.absolutePath
+    }
+
     suspend fun importAudio(context: Context, uri: android.net.Uri): Triple<String, String, Long> = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
         val title = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->

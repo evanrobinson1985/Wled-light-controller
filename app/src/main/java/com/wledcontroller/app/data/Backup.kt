@@ -138,6 +138,6 @@ class Backup(private val context: Context, private val store: AppStore, private 
 
     private companion object {
         /** Folders of app data; "simulator" holds the simulated controllers. */
-        val DIRS = listOf("sequences", "audio", "fseq", "simulator")
+        val DIRS = listOf("sequences", "audio", "fseq", "simulator", "pictures")
     }
 }

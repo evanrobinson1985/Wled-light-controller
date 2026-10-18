@@ -46,10 +46,20 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
         media?.release()
         media = null
         mediaPath = path
+        envelope = null
         if (path != null) {
             media = runCatching { android.media.MediaPlayer().apply { setDataSource(path); prepare() } }.getOrNull()
+            // Loudness over time, for the music effects (cached after the first time).
+            scope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                val env = runCatching { AudioAnalyzer.envelope(path) }.getOrNull()
+                if (mediaPath == path) envelope = env
+            }
         }
     }
+
+    /** The current song's loudness, once analysed. */
+    @Volatile var envelope: AudioEnvelope? = null
+        private set
 
     val hasAudio get() = media != null
 
@@ -140,7 +150,7 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
                         }
                     } else if (_live.value && seq != null && lay != null && lay.leds.isNotEmpty()) {
                         if (colors.size != lay.leds.size) colors = IntArray(lay.leds.size)
-                        SequenceRenderer.render(seq, lay, renderPos, colors)
+                        SequenceRenderer.render(seq, lay, renderPos, colors, envelope)
                         val buffers = HashMap<String, ByteArray>()
                         lay.leds.forEach { l ->
                             val needed = (l.index + 1) * 3

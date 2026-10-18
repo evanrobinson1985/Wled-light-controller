@@ -2,6 +2,15 @@
 
 package com.wledcontroller.app.ui.screens
 
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Path
+import androidx.compose.foundation.horizontalScroll
 import com.wledcontroller.app.ui.components.LocalPixelStyle
 import com.wledcontroller.app.ui.components.drawPixel
 import com.wledcontroller.app.ui.components.neighbourGaps
@@ -120,6 +129,10 @@ import com.wledcontroller.app.house.HouseMap
 import com.wledcontroller.app.show.AudioAnalyzer
 import com.wledcontroller.app.show.AudioEnvelope
 import com.wledcontroller.app.show.Clip
+import com.wledcontroller.app.show.ValueCurve
+import com.wledcontroller.app.show.Transition
+import com.wledcontroller.app.show.CurveShape
+import com.wledcontroller.app.show.BlendMode
 import com.wledcontroller.app.show.ClipClipboard
 import com.wledcontroller.app.show.SeqEffect
 import com.wledcontroller.app.show.Sequence
@@ -457,7 +470,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
             val landscape = maxWidth > maxHeight
             val preview: @Composable (Modifier) -> Unit = { m ->
                 Box(m, contentAlignment = Alignment.Center) {
-                    val colors = remember(pos, seq, layout) { SequenceRenderer.render(seq, layout, pos) }
+                    val colors = remember(pos, seq, layout) { SequenceRenderer.render(seq, layout, pos, audio = envelope) }
                     val pixel = LocalPixelStyle.current
                     val gaps = remember(layout, map.aspect) { neighbourGaps(layout.leds, map.aspect) }
                     HouseCanvas(map, photo, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp)) {
@@ -512,6 +525,14 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                         val list = seq.tracks.toMutableList(); val i = list.indexOfFirst { it.id == t.id }; val j = (i + delta).coerceIn(0, list.lastIndex)
                         if (i >= 0 && i != j) { list.add(j, list.removeAt(i)); seq = seq.copy(tracks = list) }
                     },
+                    onTrackAddLayer = { t ->
+                        // A new empty track on the same lights, just above, mixing in normally.
+                        val list = seq.tracks.toMutableList(); val i = list.indexOfFirst { it.id == t.id }.coerceAtLeast(0)
+                        val layers = seq.tracks.count { it.target == t.target }
+                        val layer = Track(UUID.randomUUID().toString(), "${t.name.substringBefore(" · layer")} · layer ${layers + 1}", t.target, blend = BlendMode.NORMAL)
+                        list.add(i, layer)
+                        seq = seq.copy(tracks = list); selectedTrack = layer.id; selectedClip = null
+                    },
                     onAddTrack = { addingTrack = true },
                     modifier = m,
                 )
@@ -547,6 +568,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                         },
                         onClose = { selectedClip = null },
                         onCopy = { ClipClipboard.copy(listOf(trackId to selected)) },
+                        hasSong = seq.audioFile != null,
                         modifier = m,
                     )
                 } else {
@@ -667,6 +689,7 @@ private fun Timeline(
     onTrackChange: (Track) -> Unit,
     onTrackDelete: (Track) -> Unit,
     onTrackMove: (Track, Int) -> Unit,
+    onTrackAddLayer: (Track) -> Unit,
     onAddTrack: () -> Unit,
     modifier: Modifier,
 ) {
@@ -774,7 +797,7 @@ private fun Timeline(
             seq.tracks.forEach { track ->
                 val isSel = track.id == selectedTrack
                 Row(Modifier.height(TrackHeight)) {
-                    TrackHeader(track, map, isSel, onSelect = { onSelectTrack(track.id) }, onChange = onTrackChange, onDelete = { onTrackDelete(track) }, onMove = { onTrackMove(track, it) })
+                    TrackHeader(track, map, isSel, onSelect = { onSelectTrack(track.id) }, onChange = onTrackChange, onDelete = { onTrackDelete(track) }, onMove = { onTrackMove(track, it) }, onAddLayer = { onTrackAddLayer(track) })
                     val trackState by rememberUpdatedState(track)
                     val select by rememberUpdatedState(onSelectClip)
                     val longPress by rememberUpdatedState(onLongPressClip)
@@ -924,9 +947,11 @@ private fun TrackHeader(
     onChange: (Track) -> Unit,
     onDelete: () -> Unit,
     onMove: (Int) -> Unit,
+    onAddLayer: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    var choosingBlend by remember { mutableStateOf(false) }
     val kind = when (track.target.kind) {
         TrackTarget.Kind.HOUSE -> "Whole house"
         TrackTarget.Kind.GROUP -> if (map.groups.any { it.id == track.target.refId }) "Group" else "Missing group"
@@ -940,7 +965,12 @@ private fun TrackHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(track.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(kind, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                Text(
+                    kind + if (track.blend != BlendMode.MAX) " · ${track.blend.label}" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (track.blend != BlendMode.MAX) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
             }
             if (track.muted) Icon(Icons.Filled.VolumeOff, "Muted", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
             Box {
@@ -948,6 +978,8 @@ private fun TrackHeader(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text(if (track.muted) "Unmute" else "Mute") }, onClick = { menu = false; onChange(track.copy(muted = !track.muted)) })
                     DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = true })
+                    DropdownMenuItem(text = { Text("Blend: ${track.blend.label}") }, onClick = { menu = false; choosingBlend = true })
+                    DropdownMenuItem(text = { Text("Add layer above") }, onClick = { menu = false; onAddLayer() })
                     DropdownMenuItem(text = { Text("Move up") }, onClick = { menu = false; onMove(-1) })
                     DropdownMenuItem(text = { Text("Move down") }, onClick = { menu = false; onMove(1) })
                     DropdownMenuItem(text = { Text("Delete track") }, onClick = { menu = false; onDelete() })
@@ -957,6 +989,34 @@ private fun TrackHeader(
     }
     if (renaming) {
         TextInputDialog("Rename track", track.name, "Name", onDismiss = { renaming = false }) { onChange(track.copy(name = it)) }
+    }
+    if (choosingBlend) {
+        AlertDialog(
+            onDismissRequest = { choosingBlend = false },
+            title = { Text("How ${track.name} mixes") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Tracks higher in the list sit on top. This sets how this track mixes with the ones below it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    BlendMode.entries.forEach { b ->
+                        Surface(
+                            onClick = { onChange(track.copy(blend = b)); choosingBlend = false },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (b == track.blend) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                                Text(b.label, fontWeight = FontWeight.SemiBold)
+                                Text(b.help, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingBlend = false }) { Text("Close") } },
+        )
     }
 }
 
@@ -971,9 +1031,19 @@ private fun ClipInspector(
     onDuplicate: () -> Unit,
     onClose: () -> Unit,
     onCopy: () -> Unit,
+    hasSong: Boolean,
     modifier: Modifier,
 ) {
     var editingSlot by remember { mutableIntStateOf(-1) }
+    var editingCurve by remember { mutableStateOf<String?>(null) }
+    val container = LocalAppContainer.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pickPicture = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch {
+            runCatching { container.sequences.importPicture(context, uri) }.onSuccess { onChange(clip.copy(imageFile = it)) }
+        }
+    }
     val themes = remember { HolidayThemes.forToday() }
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1003,6 +1073,28 @@ private fun ClipInspector(
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SeqEffect.entries.forEach { e -> FilterChip(selected = clip.effect == e, onClick = { onChange(clip.copy(effect = e)) }, label = { Text(e.label) }) }
         }
+        when {
+            clip.effect == SeqEffect.TEXT -> OutlinedTextField(
+                clip.text ?: "", { onChange(clip.copy(text = it.take(80))) },
+                label = { Text("Text") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                supportingText = { Text("Scrolls across the lights at the speed below (speed 0 holds it still). Size sets how tall it is.") },
+            )
+            clip.effect == SeqEffect.PICTURE -> Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                    Text(if (clip.imageFile == null) "Choose picture" else "Change picture")
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Fits the lights; speed above 0 scrolls it across. Best on matrices and big groups.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            clip.effect.musical && !hasSong -> Text(
+                "This effect follows the song — add one with the ♪ button.",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error,
+            )
+            else -> Unit
+        }
 
         SectionTitle("Colours")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1028,17 +1120,9 @@ private fun ClipInspector(
         }
 
         SectionTitle("Adjust")
-        GradientSlider(
-            clip.speed, { onChange(clip.copy(speed = it)) },
-            label = if (clip.speedEnd != null) "Speed at start" else "Speed", valueText = "${(clip.speed * 100).toInt()}%", height = 30.dp,
-        )
-        RampRow("Speed ramp", clip.speedEnd, clip.speed, onChange = { onChange(clip.copy(speedEnd = it)) })
-        GradientSlider(clip.size, { onChange(clip.copy(size = it)) }, label = "Size", valueText = "${(clip.size * 100).toInt()}%", height = 30.dp)
-        GradientSlider(
-            clip.intensity, { onChange(clip.copy(intensity = it)) },
-            label = if (clip.intensityEnd != null) "Brightness at start" else "Brightness", valueText = "${(clip.intensity * 100).toInt()}%", height = 30.dp,
-        )
-        RampRow("Brightness ramp", clip.intensityEnd, clip.intensity, onChange = { onChange(clip.copy(intensityEnd = it)) })
+        CurvedSlider("Speed", clip.speed, clip.speedCurveOrRamp, { onChange(clip.copy(speed = it)) }) { editingCurve = "speed" }
+        CurvedSlider("Size", clip.size, clip.sizeCurve, { onChange(clip.copy(size = it)) }) { editingCurve = "size" }
+        CurvedSlider("Brightness", clip.intensity, clip.intensityCurveOrRamp, { onChange(clip.copy(intensity = it)) }) { editingCurve = "intensity" }
         val maxFade = (clip.durationMs / 2).coerceAtLeast(1)
         GradientSlider(
             clip.fadeInMs.toFloat() / maxFade, { onChange(clip.copy(fadeInMs = (it * maxFade).toLong())) },
@@ -1048,7 +1132,27 @@ private fun ClipInspector(
             clip.fadeOutMs.toFloat() / maxFade, { onChange(clip.copy(fadeOutMs = (it * maxFade).toLong())) },
             label = "Fade out", valueText = "%.1f s".format(clip.fadeOutMs / 1000f), height = 30.dp,
         )
+        TransitionRow("Comes in with", clip.inTransition, enabled = clip.fadeInMs > 0) { onChange(clip.copy(inTransition = it)) }
+        TransitionRow("Goes out with", clip.outTransition, enabled = clip.fadeOutMs > 0) { onChange(clip.copy(outTransition = it)) }
         Spacer(Modifier.height(16.dp))
+    }
+
+    editingCurve?.let { key ->
+        val (label, start, curve) = when (key) {
+            "speed" -> Triple("Speed", clip.speed, clip.speedCurveOrRamp)
+            "size" -> Triple("Size", clip.size, clip.sizeCurve)
+            else -> Triple("Brightness", clip.intensity, clip.intensityCurveOrRamp)
+        }
+        CurveDialog(label, start, curve, onDismiss = { editingCurve = null }) { c ->
+            onChange(
+                when (key) {
+                    "speed" -> clip.copy(speedCurve = c, speedEnd = null)
+                    "size" -> clip.copy(sizeCurve = c)
+                    else -> clip.copy(intensityCurve = c, intensityEnd = null)
+                }
+            )
+            editingCurve = null
+        }
     }
 
     if (editingSlot >= 0) {
@@ -1274,14 +1378,84 @@ internal fun LightsDelaySetting() {
     }
 }
 
-/** Turns a ramp on (ending at the current value, so nothing jumps) and edits where it ends. */
+/** A setting's slider, with a button to make it follow a curve over the effect. */
 @Composable
-private fun RampRow(label: String, end: Float?, start: Float, onChange: (Float?) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-        Switch(checked = end != null, onCheckedChange = { on -> onChange(if (on) start else null) })
+private fun CurvedSlider(label: String, value: Float, curve: ValueCurve?, onChange: (Float) -> Unit, onEditCurve: () -> Unit) {
+    Row(verticalAlignment = Alignment.Bottom) {
+        GradientSlider(
+            value, onChange, modifier = Modifier.weight(1f),
+            label = if (curve != null) "$label at start" else label, valueText = "${(value * 100).toInt()}%", height = 30.dp,
+        )
+        Spacer(Modifier.width(6.dp))
+        FilledTonalIconButton(
+            onClick = onEditCurve,
+            colors = if (curve != null) IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            else IconButtonDefaults.filledTonalIconButtonColors(),
+        ) { Icon(Icons.AutoMirrored.Filled.ShowChart, "$label curve") }
     }
-    if (end != null) {
-        GradientSlider(end, { onChange(it) }, label = "…at the end", valueText = "${(end * 100).toInt()}%", height = 30.dp)
+    if (curve != null) {
+        Text(
+            "Follows a ${curve.shape.label.lowercase()} curve to ${(curve.end * 100).toInt()}%" + if (curve.shape.periodic) ", ${"%.1f".format(curve.cycles).removeSuffix(".0")} times" else "",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+/** Picks the shape of a value curve and where it ends, with a picture of it. */
+@Composable
+private fun CurveDialog(label: String, start: Float, curve: ValueCurve?, onDismiss: () -> Unit, onSave: (ValueCurve?) -> Unit) {
+    var shape by remember { mutableStateOf(curve?.shape ?: CurveShape.RAMP) }
+    var end by remember { mutableFloatStateOf(curve?.end ?: if (start > 0.5f) 0f else 1f) }
+    var cycles by remember { mutableFloatStateOf(curve?.cycles ?: 2f) }
+    val draft = ValueCurve(shape, end, cycles)
+    val lineColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("$label curve") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "$label goes from its slider value (${(start * 100).toInt()}%) along this curve over the effect's length.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CurveShape.entries.forEach { sh -> FilterChip(selected = shape == sh, onClick = { shape = sh }, label = { Text(sh.label) }) }
+                }
+                Canvas(Modifier.fillMaxWidth().height(90.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+                    drawLine(gridColor, Offset(0f, size.height / 2), Offset(size.width, size.height / 2))
+                    val path = Path()
+                    val n = 80
+                    for (i in 0..n) {
+                        val p = i / n.toFloat()
+                        val v = draft.at(start, p)
+                        val x = p * size.width; val y = (1f - v) * (size.height - 8f) + 4f
+                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    drawPath(path, lineColor, style = Stroke(2.5f))
+                }
+                GradientSlider(end, { end = it }, label = if (shape.periodic) "Swings to" else "Ends at", valueText = "${(end * 100).toInt()}%", height = 28.dp)
+                if (shape.periodic) {
+                    GradientSlider((cycles - 0.5f) / 15.5f, { cycles = 0.5f + it * 15.5f }, label = "Times", valueText = "%.1f".format(cycles), height = 28.dp)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(draft) }) { Text("Use curve") } },
+        dismissButton = {
+            Row {
+                if (curve != null) TextButton(onClick = { onSave(null) }) { Text("No curve") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+/** How an effect comes in or goes out over its fade time. */
+@Composable
+private fun TransitionRow(label: String, value: Transition, enabled: Boolean, onChange: (Transition) -> Unit) {
+    Text(label + if (!enabled) " (set a fade time first)" else "", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Transition.entries.forEach { t -> FilterChip(selected = value == t, enabled = enabled, onClick = { onChange(t) }, label = { Text(t.label) }) }
     }
 }

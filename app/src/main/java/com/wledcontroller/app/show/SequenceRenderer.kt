@@ -10,6 +10,7 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.hypot
+import kotlin.math.pow
 import kotlin.math.sin
 
 /**
@@ -31,6 +32,8 @@ class TrackLayout(
     val ly: FloatArray,
     /** Direction used for [Direction.AUTO]: the LED's prop default. */
     val natural: Array<Direction>,
+    /** Width / height of the area the track covers, in real proportions (for text and pictures). */
+    val aspect: Float = 1f,
 )
 
 object SequenceRenderer {
@@ -65,44 +68,115 @@ object SequenceRenderer {
                 // Flip so 0 is the bottom: "up" effects read naturally.
                 ly = FloatArray(idx.size) { i -> sy?.let { 1f - (ys[i] - minY) / it } ?: 0.5f },
                 natural = Array(idx.size) { runs[leds[idx[it]].runIndex].prop.natural },
+                aspect = if (sx != null && sy != null) sx / sy else if (sx != null) 8f else 1f,
             )
         }
         return PreparedLayout(leds, trackLayouts)
     }
 
-    /** Colours (0xRRGGBB) of every LED in [layout] at [timeMs]. Overlapping tracks blend by keeping the brightest. */
-    fun render(seq: Sequence, layout: PreparedLayout, timeMs: Long, out: IntArray = IntArray(layout.leds.size)): IntArray {
+    /**
+     * Colours (0xRRGGBB) of every LED in [layout] at [timeMs]. Tracks are layered from the bottom
+     * of the list up, each mixing in with its [BlendMode]. [audio] drives the music effects.
+     */
+    fun render(
+        seq: Sequence,
+        layout: PreparedLayout,
+        timeMs: Long,
+        out: IntArray = IntArray(layout.leds.size),
+        audio: AudioEnvelope? = null,
+    ): IntArray {
         out.fill(0)
-        seq.tracks.forEachIndexed { ti, track ->
-            if (track.muted) return@forEachIndexed
-            val tl = layout.tracks.getOrNull(ti) ?: return@forEachIndexed
+        val level = audio?.at(timeMs)?.coerceIn(0f, 1f) ?: 0f
+        val beat = audio?.let { beatStrength(it, timeMs) } ?: 0f
+        for (ti in seq.tracks.indices.reversed()) {
+            val track = seq.tracks[ti]
+            if (track.muted) continue
+            val tl = layout.tracks.getOrNull(ti) ?: continue
             // The latest-starting clip that covers this moment wins within a track.
-            val stored = track.clips.lastOrNull { timeMs >= it.startMs && timeMs < it.endMs } ?: return@forEachIndexed
+            val stored = track.clips.lastOrNull { timeMs >= it.startMs && timeMs < it.endMs } ?: continue
             val local = timeMs - stored.startMs
             val progress = local.toFloat() / stored.durationMs.coerceAtLeast(1)
-            // Ramps: brightness follows the line; speed uses its average so far, so motion stays continuous.
-            val intensity = stored.intensityEnd?.let { stored.intensity + (it - stored.intensity) * progress } ?: stored.intensity
-            val clip = stored.speedEnd?.let { stored.copy(speed = stored.speed + (it - stored.speed) * progress / 2f) } ?: stored
-            val env = envelope(clip, local) * intensity
-            if (env <= 0f) return@forEachIndexed
+            val intensity = stored.intensityCurveOrRamp?.at(stored.intensity, progress) ?: stored.intensity
+            // Speed uses its average so far, so motion stays continuous as the speed changes.
+            val speed = stored.speedCurveOrRamp?.let { averageOf(it, stored.speed, progress) } ?: stored.speed
+            val size = stored.sizeCurve?.at(stored.size, progress) ?: stored.size
+            val clip = if (speed != stored.speed || size != stored.size) stored.copy(speed = speed, size = size) else stored
+            if (intensity <= 0f) continue
             val t = local / 1000f
             for (k in tl.ledIndex.indices) {
                 val li = tl.ledIndex[k]
                 val dir = if (clip.direction == Direction.AUTO) tl.natural[k] else clip.direction
                 val pos = position(dir, tl.along[k], tl.lx[k], tl.ly[k])
-                val c = HouseRenderer.scale(effectColor(clip, pos, tl.lx[k], tl.ly[k], t, progress, li), env)
-                out[li] = HouseRenderer.maxRgb(out[li], c)
+                val reveal = transition(clip, local, pos, tl.lx[k], tl.ly[k], li)
+                val c = if (reveal <= 0f) 0
+                else HouseRenderer.scale(effectColor(clip, pos, tl.lx[k], tl.ly[k], t, progress, li, tl.aspect, level, beat), intensity * reveal)
+                out[li] = mix(track.blend, out[li], c)
             }
         }
         return out
     }
 
-    private fun envelope(clip: Clip, local: Long): Float {
+    /** Mean of a curve from the start to [progress] (16-step trapezoid). */
+    private fun averageOf(curve: ValueCurve, start: Float, progress: Float): Float {
+        if (progress <= 0.001f) return start
+        val n = 16
+        var sum = 0f
+        for (i in 0..n) {
+            val w = if (i == 0 || i == n) 0.5f else 1f
+            sum += w * curve.at(start, progress * i / n)
+        }
+        return sum / n
+    }
+
+    /** How strongly a beat is hitting: loudness jumping above the last moment's average. */
+    private fun beatStrength(env: AudioEnvelope, timeMs: Long): Float {
+        val now = env.at(timeMs)
+        var avg = 0f
+        for (i in 1..10) avg += env.at((timeMs - i * 40L).coerceAtLeast(0))
+        avg /= 10f
+        return ((now - avg) * 5f).coerceIn(0f, 1f)
+    }
+
+    /** How much of the effect shows at an LED while it comes in or goes out. */
+    private fun transition(clip: Clip, local: Long, pos: Float, lx: Float, ly: Float, id: Int): Float {
         var e = 1f
-        if (clip.fadeInMs > 0 && local < clip.fadeInMs) e = local.toFloat() / clip.fadeInMs
+        if (clip.fadeInMs > 0 && local < clip.fadeInMs) e = reveal(clip.inTransition, local.toFloat() / clip.fadeInMs, pos, lx, ly, id)
         val remaining = clip.durationMs - local
-        if (clip.fadeOutMs > 0 && remaining < clip.fadeOutMs) e = minOf(e, remaining.toFloat() / clip.fadeOutMs)
+        if (clip.fadeOutMs > 0 && remaining < clip.fadeOutMs) e = minOf(e, reveal(clip.outTransition, remaining.toFloat() / clip.fadeOutMs, pos, lx, ly, id))
         return e.coerceIn(0f, 1f)
+    }
+
+    private fun reveal(tr: Transition, p: Float, pos: Float, lx: Float, ly: Float, id: Int): Float {
+        fun edge(d: Float) = ((p * 1.15f - d) / 0.15f).coerceIn(0f, 1f)
+        return when (tr) {
+            Transition.FADE -> p
+            Transition.WIPE -> edge(pos)
+            Transition.FROM_MIDDLE -> edge(abs(pos - 0.5f) * 2f)
+            Transition.FROM_ENDS -> edge(1f - abs(pos - 0.5f) * 2f)
+            Transition.CIRCLE -> edge((hypot(lx - 0.5f, ly - 0.5f) * 1.4142f).coerceAtMost(1f))
+            Transition.DISSOLVE -> if (HouseRenderer.hash(id, 23) < p) 1f else 0f
+            Transition.BLINDS -> edge(HouseRenderer.frac(pos * 6f))
+        }
+    }
+
+    /** One LED of a track mixed onto what the tracks below made. */
+    internal fun mix(mode: BlendMode, below: Int, top: Int): Int {
+        fun ch(c: Int, sh: Int) = (c shr sh) and 0xFF
+        fun rgb(r: Int, g: Int, b: Int) = (r.coerceIn(0, 255) shl 16) or (g.coerceIn(0, 255) shl 8) or b.coerceIn(0, 255)
+        val a = maxOf(ch(top, 16), ch(top, 8), ch(top, 0)) / 255f
+        return when (mode) {
+            BlendMode.MAX -> HouseRenderer.maxRgb(below, top)
+            BlendMode.NORMAL -> rgb(
+                (ch(below, 16) + (ch(top, 16) - ch(below, 16)) * a).toInt(),
+                (ch(below, 8) + (ch(top, 8) - ch(below, 8)) * a).toInt(),
+                (ch(below, 0) + (ch(top, 0) - ch(below, 0)) * a).toInt(),
+            )
+            BlendMode.ADD -> rgb(ch(below, 16) + ch(top, 16), ch(below, 8) + ch(top, 8), ch(below, 0) + ch(top, 0))
+            BlendMode.SUBTRACT -> rgb(ch(below, 16) - ch(top, 16), ch(below, 8) - ch(top, 8), ch(below, 0) - ch(top, 0))
+            BlendMode.AVERAGE -> rgb((ch(below, 16) + ch(top, 16)) / 2, (ch(below, 8) + ch(top, 8)) / 2, (ch(below, 0) + ch(top, 0)) / 2)
+            BlendMode.MASK -> HouseRenderer.scale(below, 1f - a)
+            BlendMode.REVEAL -> HouseRenderer.scale(below, a)
+        }
     }
 
     private fun position(dir: Direction, along: Float, lx: Float, ly: Float): Float = when (dir) {
@@ -116,7 +190,10 @@ object SequenceRenderer {
         Direction.DOWN -> 1f - ly
     }
 
-    private fun effectColor(c: Clip, pos: Float, lx: Float, ly: Float, t: Float, progress: Float, id: Int): Int {
+    private fun effectColor(
+        c: Clip, pos: Float, lx: Float, ly: Float, t: Float, progress: Float, id: Int,
+        aspect: Float = 1f, level: Float = 0f, beat: Float = 0f,
+    ): Int {
         val cols = c.colors.ifEmpty { listOf(0xFFFFFF) }
         val rate = 0.1f + c.speed * 2.9f         // cycles per second-ish
         val count = 1f + (1f - c.size) * 7f      // bands across the target
@@ -177,6 +254,46 @@ object SequenceRenderer {
                 val flake = if (fall < 0.06f) 1f - fall / 0.06f else 0f
                 HouseRenderer.maxRgb(HouseRenderer.scale(cols.getOrElse(1) { cols[0] }, 0.1f), HouseRenderer.scale(cols[0], flake))
             }
+            SeqEffect.SPIRALS -> {
+                val band = HouseRenderer.frac(lx * count * 0.5f + ly * (0.5f + c.size * 2f) - t * rate * 0.3f)
+                cols[(band * cols.size).toInt().coerceAtMost(cols.size - 1)]
+            }
+            SeqEffect.BUTTERFLY -> {
+                val v = sin(lx * 9f + t * rate) + sin(ly * 7f - t * rate * 1.3f) + sin((lx + ly) * 6f + t * rate * 0.7f)
+                HouseRenderer.palette(cols, v / 6f + 0.5f + t * 0.05f)
+            }
+            SeqEffect.METEORS -> {
+                val lanes = 10f + (1f - c.size) * 30f
+                val lane = floor(lx * lanes).toInt()
+                val head = HouseRenderer.frac(t * rate * (0.15f + HouseRenderer.hash(lane, 5) * 0.25f) + HouseRenderer.hash(lane, 9)) * 1.3f
+                val d = head - (1f - ly)
+                val tail = 0.08f + c.size * 0.3f
+                if (d < 0 || d > tail) 0 else HouseRenderer.scale(cols[lane.mod(cols.size)], 1f - d / tail)
+            }
+            SeqEffect.TEXT -> {
+                val r = Rasters.text(c.text ?: "") ?: return 0
+                val h = 0.4f + c.size * 0.6f
+                val w = r.width.toFloat() / r.height * h / aspect.coerceAtLeast(0.05f)
+                val left = if (c.speed < 0.02f) (1f - w) / 2f else 1f - HouseRenderer.frac(t * rate * 0.12f / (1f + w)) * (1f + w)
+                val px = r.sample((lx - left) / w, ((1f - ly) - (1f - h) / 2f) / h)
+                val alpha = ((px ushr 24) and 0xFF) / 255f
+                if (alpha <= 0f) 0 else HouseRenderer.scale(HouseRenderer.palette(cols, lx * 0.999f), alpha)
+            }
+            SeqEffect.PICTURE -> {
+                val r = c.imageFile?.let { Rasters.image(it) } ?: return 0
+                val imgAspect = r.width.toFloat() / r.height
+                // Fit the whole picture in the area; scroll it across when there's speed.
+                val (w, h) = if (imgAspect > aspect) 1f to aspect / imgAspect else imgAspect / aspect to 1f
+                val left = if (c.speed < 0.02f) (1f - w) / 2f else 1f - HouseRenderer.frac(t * rate * 0.12f / (1f + w)) * (1f + w)
+                val px = r.sample((lx - left) / w, ((1f - ly) - (1f - h) / 2f) / h)
+                HouseRenderer.scale(px and 0xFFFFFF, ((px ushr 24) and 0xFF) / 255f)
+            }
+            SeqEffect.VU_METER -> {
+                val l = level.toDouble().pow(0.8).toFloat()
+                if (l > 0.01f && pos <= l) HouseRenderer.palette(cols, pos * 0.999f) else 0
+            }
+            SeqEffect.MUSIC_PULSE -> HouseRenderer.scale(HouseRenderer.palette(cols, pos * count * 0.2f + t * 0.05f), level)
+            SeqEffect.BEAT_FLASH -> HouseRenderer.scale(cols[floor(t * 2f).toInt().mod(cols.size)], beat)
         }
     }
 }

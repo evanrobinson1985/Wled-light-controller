@@ -48,6 +48,7 @@ class AppContainer(context: Context) {
     val simulator = com.wledcontroller.app.sim.Simulator(context, store, backup, sequences, house, player, devices)
 
     init {
+        com.wledcontroller.app.show.AndroidRasters.install()
         scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }
     }
 }
