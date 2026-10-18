@@ -2,6 +2,8 @@
 
 package com.wledcontroller.app.ui.screens
 
+import androidx.compose.material3.CircularProgressIndicator
+import kotlinx.coroutines.flow.first
 import androidx.compose.material3.AssistChip
 import com.wledcontroller.app.house.allSubmodels
 import androidx.compose.material3.FilledTonalIconButton
@@ -180,6 +182,51 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
             }.onSuccess { onOpen(it.id) }.onFailure { importError = it.message }
         }
     }
+    var importMenu by remember { mutableStateOf(false) }
+    // An xLights .xsq waiting for its models to be matched to the house.
+    var xsqPending by remember { mutableStateOf<Pair<com.wledcontroller.app.show.XsqSequence, String>?>(null) }
+    val xsqImporter = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            importError = null
+            runCatching {
+                val name = uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':')?.removeSuffix(".xsq") ?: "xLights sequence"
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)!!.use { com.wledcontroller.app.show.XsqImport.parse(it) }
+                } to name
+            }.onSuccess { (x, name) ->
+                if (x.elements.isEmpty()) importError = "That sequence has no model effects to import." else xsqPending = x to name
+            }.onFailure { importError = it.message ?: "Couldn't read that sequence." }
+        }
+    }
+    // Exporting a show to .fseq.
+    var exporting by remember { mutableStateOf<Sequence?>(null) }
+    var exported by remember { mutableStateOf<List<com.wledcontroller.app.show.ChannelRange>?>(null) }
+    var exportBusy by remember { mutableStateOf(false) }
+    val exporter = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val s = exporting
+        if (uri != null && s != null) scope.launch {
+            exportBusy = true; importError = null
+            runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)!!.use { out ->
+                        val fseq = s.fseqFile
+                        if (fseq != null) { java.io.File(fseq).inputStream().use { it.copyTo(out) }; emptyList() }
+                        else {
+                            val layout = SequenceRenderer.prepare(map, s.tracks)
+                            val env = s.audioFile?.let { runCatching { AudioAnalyzer.envelope(it) }.getOrNull() }
+                            com.wledcontroller.app.show.FseqExport.export(s, layout, container.store.devices.first(), env, out)
+                        }
+                    }
+                }
+            }.onSuccess { exported = it }.onFailure { importError = "Export failed: ${it.message}" }
+            exportBusy = false
+        }
+        exporting = null
+    }
 
     Scaffold(
         topBar = {
@@ -187,7 +234,19 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                 title = { Text("Shows") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
-                    IconButton(onClick = { importer.launch(arrayOf("*/*")) }) { Icon(Icons.Filled.FileOpen, "Import xLights .fseq") }
+                    Box {
+                        IconButton(onClick = { importMenu = true }) { Icon(Icons.Filled.FileOpen, "Import from xLights") }
+                        DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Column { Text("xLights sequence (.xsq)"); Text("Effects you can edit", style = MaterialTheme.typography.labelSmall) } },
+                                onClick = { importMenu = false; xsqImporter.launch(arrayOf("*/*")) },
+                            )
+                            DropdownMenuItem(
+                                text = { Column { Text("Rendered sequence (.fseq)"); Text("Plays exactly as made", style = MaterialTheme.typography.labelSmall) } },
+                                onClick = { importMenu = false; importer.launch(arrayOf("*/*")) },
+                            )
+                        }
+                    }
                     TextButton(onClick = onSchedule) {
                         Icon(Icons.Filled.Schedule, null); Spacer(Modifier.width(6.dp)); Text("Schedule")
                     }
@@ -215,6 +274,12 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                 }
             }
             importError?.let { e -> item { Text(e, color = MaterialTheme.colorScheme.error) } }
+            if (exportBusy) item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp)); Text("Exporting…")
+                }
+            }
             if (shows.isEmpty()) {
                 item {
                     Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -250,6 +315,10 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                                     menu = false
                                     scope.launch { container.sequences.save(s.copy(id = UUID.randomUUID().toString(), name = s.name + " copy")) }
                                 })
+                                DropdownMenuItem(text = { Text("Export .fseq") }, onClick = {
+                                    menu = false; exporting = s
+                                    exporter.launch(s.name.replace(Regex("[^A-Za-z0-9 _-]"), "").ifBlank { "show" } + ".fseq")
+                                })
                                 DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; deleting = s })
                             }
                         }
@@ -258,6 +327,19 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
             }
         }
     }
+
+    xsqPending?.let { (x, name) ->
+        XsqMappingDialog(x, map, onDismiss = { xsqPending = null }) { targets ->
+            xsqPending = null
+            scope.launch {
+                val (seq, skipped) = com.wledcontroller.app.show.XsqImport.toSequence(x, name, targets)
+                container.sequences.save(seq)
+                if (skipped > 0) importError = "$skipped xLights effects have no match here yet and were left out."
+                onOpen(seq.id)
+            }
+        }
+    }
+    exported?.let { r -> ExportResultDialog(r) { exported = null } }
 
     if (creating) {
         NewShowDialog(onDismiss = { creating = false }) { name, ms ->
