@@ -84,7 +84,7 @@ class WledApi(val client: OkHttpClient) {
     suspend fun effectData(host: String): List<String> =
         (get(host, "/json/fxdata") as? JsonArray)?.map { it.asString() ?: "" } ?: emptyList()
 
-    suspend fun presets(host: String): List<Preset> = parsePresets(get(host, "/presets.json") as? JsonObject ?: return emptyList())
+    suspend fun presets(host: String): List<Preset> = parsePresets(get(host, "/presets.json") as? JsonObject ?: JsonObject(emptyMap()))
 
     /** The raw presets.json, for keeping a copy to use when the controller is only reachable over MQTT. */
     suspend fun presetsJson(host: String): JsonObject = get(host, "/presets.json") as? JsonObject ?: JsonObject(emptyMap())
