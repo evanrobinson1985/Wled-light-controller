@@ -40,12 +40,16 @@ object XlightsModels {
         return f.newDocumentBuilder().parse(input).documentElement
     }
 
+    /** A model file's model; newer exports wrap it: <models type="exported"><model …/></models>. */
+    private fun modelRoot(input: InputStream): Element =
+        parseXml(input).let { r -> if (r.tagName.equals("models", true)) r.children("model").firstOrNull() ?: r else r }
+
     private fun Element.children(tag: String) =
         (0 until childNodes.length).mapNotNull { childNodes.item(it) as? Element }.filter { it.tagName.equals(tag, ignoreCase = true) }
 
     /** A single prop from an .xmodel file. */
     fun parseXmodel(input: InputStream): XlModel {
-        val root = parseXml(input)
+        val root = modelRoot(input)
         val displayAs = root.getAttribute("DisplayAs").ifBlank {
             when (root.tagName.lowercase()) {
                 "custommodel" -> "Custom"
@@ -67,7 +71,7 @@ object XlightsModels {
      * for the user to set.
      */
     fun parseDmxFixture(input: InputStream): com.wledcontroller.app.data.DmxFixture {
-        val e = parseXml(input)
+        val e = modelRoot(input)
         val count = e.int("parm1", 0).coerceIn(1, 512)
         val names = e.getAttribute("NodeNames").split(',').map { it.trim() }
         val byAttr = HashMap<Int, com.wledcontroller.app.data.DmxRole>()
@@ -212,8 +216,9 @@ object XlightsModels {
 
     /** A custom grid: "CustomModel" rows split by ';', cells by ',' (layers by '|'), or the compressed "node,row,col[,layer];…" form. */
     private fun customModel(e: Element): PropModel? {
-        val w = e.int("parm1", 1).coerceAtLeast(1)
-        val h = e.int("parm2", 1).coerceAtLeast(1)
+        // Older files give the grid as parm1 × parm2, newer ones as CustomWidth × CustomHeight.
+        val w = e.int("CustomWidth", e.int("parm1", 1)).coerceAtLeast(1)
+        val h = e.int("CustomHeight", e.int("parm2", 1)).coerceAtLeast(1)
         val firstCell = HashMap<Int, Int>()
         val compressed = e.getAttribute("CustomModelCompressed")
         if (compressed.isNotBlank()) {

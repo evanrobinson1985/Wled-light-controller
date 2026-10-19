@@ -1103,7 +1103,7 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
 
                 Text("Parts (submodels)", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 4.dp))
                 Text(
-                    (activeModel?.submodels()?.let { auto -> "From the model: ${auto.size} (${auto.first().name}…). " } ?: "") +
+                    (activeModel?.submodels()?.takeIf { it.isNotEmpty() }?.let { auto -> "From the model: ${auto.size} (${auto.first().name}…). " } ?: "") +
                         "Add your own to light part of this run on its own in shows, e.g. the left half of the roofline.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

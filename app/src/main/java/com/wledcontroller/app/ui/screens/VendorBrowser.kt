@@ -158,7 +158,7 @@ internal fun VendorBrowser(dmx: Boolean, onDismiss: () -> Unit, onPicked: (xml: 
                     }
                     Text("${models.size} models", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
-                        items(models, key = { it.id + it.name }) { m ->
+                        items(models) { m ->
                             Card(
                                 shape = RoundedCornerShape(14.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),

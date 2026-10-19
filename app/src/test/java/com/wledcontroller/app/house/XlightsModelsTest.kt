@@ -34,6 +34,20 @@ class XlightsModelsTest {
         assertEquals(listOf(0, 2, 4), XlightsModels.parseXmodel(xml.byteInputStream()).model!!.customCells)
     }
 
+    @Test
+    fun wrappedExportWithCustomSize() {
+        // As newer xLights exports (and some vendors) write it: wrapped, sized by CustomWidth/Height.
+        val xml = """<?xml version="1.0"?>
+<models type="exported">
+  <model name="GE Starburst" DisplayAs="Custom" CustomWidth="3" CustomHeight="2" CustomModelCompressed="1,0,0;2,0,2;3,1,1" StartChannel="2402"/>
+</models>"""
+        val m = XlightsModels.parseXmodel(xml.byteInputStream())
+        assertEquals("GE Starburst", m.name)
+        assertEquals(3, m.ledCount)
+        assertEquals(3, m.model!!.customW)
+        assertEquals(listOf(0, 2, 4), m.model!!.customCells)
+    }
+
     private val layoutXml = """<?xml version="1.0" encoding="UTF-8"?>
 <xrgb>
   <models>
