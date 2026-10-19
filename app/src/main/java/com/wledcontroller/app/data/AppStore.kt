@@ -53,6 +53,7 @@ class AppStore(private val context: Context) {
         val PIXEL_SIZE = androidx.datastore.preferences.core.floatPreferencesKey("pixel_size_dp")
         val LOCATION = stringPreferencesKey("location")
         val OUTPUTS = stringPreferencesKey("outputs")
+        val FIXTURES = stringPreferencesKey("dmx_fixtures")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -160,9 +161,17 @@ class AppStore(private val context: Context) {
     }
     suspend fun removeOutput(id: String) = editList<PixelOutput>(Keys.OUTPUTS) { list -> list.filterNot { it.id == id } }
 
-    /** Where to stream each light run's controller: WLED hosts and other controllers' addresses. */
+    /** DMX lights (pars, washes, moving heads) on E1.31 / Art-Net outputs. */
+    val fixtures: Flow<List<DmxFixture>> = listFlow(Keys.FIXTURES)
+    suspend fun upsertFixture(f: DmxFixture) = editList<DmxFixture>(Keys.FIXTURES) { list ->
+        if (list.any { it.id == f.id }) list.map { if (it.id == f.id) f else it } else list + f
+    }
+    suspend fun removeFixture(id: String) = editList<DmxFixture>(Keys.FIXTURES) { list -> list.filterNot { it.id == id } }
+
+    /** Where to stream each light run's controller: WLED hosts, other controllers and DMX fixtures. */
     suspend fun streamTargets(): Map<String, String> =
-        devices.first().associate { it.id to it.host } + outputs.first().associate { it.id to it.address }
+        devices.first().associate { it.id to it.host } + outputs.first().associate { it.id to it.address } +
+            fixtures.first().associate { it.id to DmxRegistry.address(it.id) }
 
     /** Where the show is, for sunset and dusk schedule times. */
     val location: Flow<com.wledcontroller.app.show.GeoPoint?> = context.dataStore.data.map { prefs ->

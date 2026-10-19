@@ -37,6 +37,9 @@ data class LightRun(
     val model: PropModel? = null,
     /** Parts of the run shows can light on their own (as well as the model's own). */
     val submodels: List<Submodel> = emptyList(),
+    /** A model's real size (e.g. from its maker), so it can be placed at true scale. */
+    val realWidthCm: Float? = null,
+    val realHeightCm: Float? = null,
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
@@ -76,6 +79,13 @@ data class HouseMap(
 
     /** Where each LED of [run] is on this map. */
     fun positions(run: LightRun): List<MapPoint?> = run.ledPositions(aspect, cmPerHeight)
+
+    /** The corners of a box [widthCm] × [heightCm] centred on [center], or null without a scale. */
+    fun boxAround(center: MapPoint, widthCm: Float, heightCm: Float): List<MapPoint>? {
+        val scale = cmPerHeight ?: return null
+        val halfW = widthCm / scale / aspect / 2f; val halfH = heightCm / scale / 2f
+        return listOf(MapPoint(center.x - halfW, center.y - halfH), MapPoint(center.x + halfW, center.y + halfH))
+    }
 }
 
 /** A named set of props (e.g. "All arches") that sequences can target together. */

@@ -391,20 +391,41 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     var importMenu by remember { mutableStateOf(false) }
     var layoutPending by remember { mutableStateOf<com.wledcontroller.app.house.XlLayout?>(null) }
     var importNote by remember { mutableStateOf<String?>(null) }
+    var browsingVendors by remember { mutableStateOf(false) }
+    // A DMX fixture model picked here: set it up, then put it on the map.
+    var newFixture by remember { mutableStateOf<com.wledcontroller.app.data.DmxFixture?>(null) }
+    val outputs by container.store.outputs.collectAsStateWithLifecycle(emptyList())
+    val fixtures by container.store.fixtures.collectAsStateWithLifecycle(emptyList())
+    /** A prop or DMX fixture model, from a file or a vendor: open it to choose where it goes. */
+    fun importModelXml(xml: String, nameOverride: String?, vendor: com.wledcontroller.app.house.VendorModel? = null) {
+        importError = null
+        if (com.wledcontroller.app.house.XlightsModels.isDmx(xml)) {
+            val dmxOut = outputs.filter { it.protocol != com.wledcontroller.app.data.OutputProtocol.DDP }
+            if (dmxOut.isEmpty()) { importError = "That's a DMX fixture. Add your E1.31 / Art-Net controller in Settings first, then import it again."; return }
+            runCatching { com.wledcontroller.app.house.XlightsModels.parseDmxFixture(xml.byteInputStream()) }
+                .onSuccess { f -> newFixture = f.copy(name = (nameOverride ?: f.name).take(40), outputId = dmxOut.first().id, address = nextAddress(fixtures)) }
+                .onFailure { importError = it.message ?: "Couldn't read that fixture." }
+            return
+        }
+        runCatching { com.wledcontroller.app.house.XlightsModels.parseXmodel(xml.byteInputStream()) }.onSuccess { m ->
+            val target = targets.firstOrNull { it.kind?.startsWith("DMX") != true }
+            val usedEnd = map.runs.filter { it.deviceId == target?.id }.maxOfOrNull { it.endLed } ?: 0
+            // Open it in the run editor to choose the controller, then place it.
+            editRun = LightRun(
+                UUID.randomUUID().toString(), (nameOverride ?: m.name).take(40), target?.id ?: "", usedEnd, m.ledCount,
+                prop = m.prop, model = m.model, submodels = m.submodels,
+                // The maker's size, so it goes on the house at its true scale.
+                realWidthCm = vendor?.width?.let(com.wledcontroller.app.house.VendorCatalog::lengthCm),
+                realHeightCm = vendor?.height?.let(com.wledcontroller.app.house.VendorCatalog::lengthCm),
+            )
+        }.onFailure { importError = it.message ?: "Couldn't read that model." }
+    }
     val xmodelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             importError = null
             runCatching {
-                withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { com.wledcontroller.app.house.XlightsModels.parseXmodel(it) } }
-            }.onSuccess { m ->
-                val target = targets.firstOrNull()
-                val usedEnd = map.runs.filter { it.deviceId == target?.id }.maxOfOrNull { it.endLed } ?: 0
-                // Open it in the run editor to choose the controller, then place it.
-                editRun = LightRun(
-                    UUID.randomUUID().toString(), m.name, target?.id ?: "", usedEnd, m.ledCount,
-                    prop = m.prop, model = m.model, submodels = m.submodels,
-                )
-            }.onFailure { importError = it.message ?: "Couldn't read that model." }
+                withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() } }
+            }.onSuccess { importModelXml(it, null) }.onFailure { importError = it.message ?: "Couldn't read that model." }
         }
     }
     val layoutPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -469,7 +490,11 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                                     onClick = { importMenu = false; layoutPicker.launch(arrayOf("*/*")) },
                                 )
                                 DropdownMenuItem(
-                                    text = { Column { Text("Prop model"); Text(".xmodel from xLights or a prop maker", style = MaterialTheme.typography.labelSmall) } },
+                                    text = { Column { Text("Prop from a vendor"); Text("Boscoyo, Gilbert Engineering, Mattos and more", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = { importMenu = false; browsingVendors = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Column { Text("Prop or fixture model file"); Text(".xmodel from xLights or a prop maker", style = MaterialTheme.typography.labelSmall) } },
                                     onClick = { importMenu = false; xmodelPicker.launch(arrayOf("*/*")) },
                                 )
                             }
@@ -561,8 +586,11 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             HouseCanvas(
                 map, photo,
                 onTap = if (drawingRun != null) { { p ->
-                    // A model needs just the two corners of its box.
-                    if (drawingRun.model == null || draft.size < 2) draft.add(p)
+                    // A model needs just the two corners of its box; one with a real size, just its centre.
+                    val w = drawingRun.realWidthCm; val h = drawingRun.realHeightCm
+                    val sized = if (drawingRun.model != null && w != null && h != null) map.boxAround(p, w, h) else null
+                    if (sized != null) { draft.clear(); draft.addAll(sized) }
+                    else if (drawingRun.model == null || draft.size < 2) draft.add(p)
                     if (drawingRun.model == null && nextHidden && draft.size >= 2) {
                         val k = draft.size - 2
                         draftHidden.add(HiddenStretch(k)); askHidden = k; nextHidden = false
@@ -632,8 +660,15 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             ScaleSummary(map, onSet = { scaling = true; scaleDraft.clear() })
 
             if (drawingRun != null && drawingRun.model != null) {
+                val w = drawingRun.realWidthCm; val h = drawingRun.realHeightCm
                 Text(
-                    "Tap two opposite corners of the ${drawingRun.model.kind.label.lowercase()} on the photo. Its ${drawingRun.count} lights are laid out inside from how it's wired.",
+                    when {
+                        w != null && h != null && map.cmPerHeight != null ->
+                            "Tap where the middle of the prop goes. It's placed at its real size, ${formatLength(w, true)} × ${formatLength(h, true)}; tap again to move it."
+                        w != null && h != null ->
+                            "Set the house scale (ruler button) to place this prop at its real size, ${formatLength(w, true)} × ${formatLength(h, true)}. For now, tap two opposite corners."
+                        else -> "Tap two opposite corners of the ${drawingRun.model.kind.label.lowercase()} on the photo. Its ${drawingRun.count} lights are laid out inside from how it's wired."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(vertical = 8.dp),
                 )
@@ -651,7 +686,8 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
 
             if (drawingRun != null) {
                 Text(
-                    "Tap along the lights, starting at the end where LED ${drawingRun.startLed} is (usually the end nearest the controller). Add a point at every corner.",
+                    if (drawingRun.count == 1) "Tap where this light is on the photo, then Done."
+                    else "Tap along the lights, starting at the end where LED ${drawingRun.startLed} is (usually the end nearest the controller). Add a point at every corner.",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(vertical = 8.dp),
                 )
@@ -677,7 +713,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     }
                     TextButton(onClick = { drawingRunId = null; draft.clear(); draftHidden.clear() }) { Text("Cancel") }
                     Spacer(Modifier.weight(1f))
-                    Button(enabled = draft.size >= 2, onClick = {
+                    Button(enabled = draft.size >= 2 || (drawingRun.count == 1 && draft.size == 1), onClick = {
                         saveRun(drawingRun.copy(points = draft.toList(), ledPoints = null, hidden = draftHidden.toList(), hiddenLeds = emptySet()))
                         drawingRunId = null; draft.clear(); draftHidden.clear()
                     }) { Text("Done") }
@@ -793,6 +829,22 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             saveRun(updated)
             editRun = null
             if (isNew) startTracing(updated.id)
+        }
+    }
+    if (browsingVendors) VendorBrowser(dmx = false, onDismiss = { browsingVendors = false }) { xml, m ->
+        browsingVendors = false
+        importModelXml(xml, m.name, m)
+    }
+    newFixture?.let { f ->
+        FixtureDialog(f, outputs.filter { it.protocol != com.wledcontroller.app.data.OutputProtocol.DDP }, fixtures, onDismiss = { newFixture = null }) { saved ->
+            newFixture = null
+            scope.launch {
+                container.store.upsertFixture(saved)
+                // On the map as a single light; one tap places it.
+                val run = LightRun(UUID.randomUUID().toString(), saved.name, saved.id, 0, 1, prop = PropType.BUSH)
+                saveRun(run).join()
+                startTracing(run.id)
+            }
         }
     }
     layoutPending?.let { l ->
@@ -980,7 +1032,12 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
     fun shown(cm: Float, inches: Boolean) = "%.2f".format(if (inches) cm / 2.54f else cm).trimEnd('0').trimEnd('.')
     var spacingText by remember { mutableStateOf(run.spacingCm?.let { shown(it, map.useInches) } ?: "") }
     val spacingCm = spacingText.replace(',', '.').toFloatOrNull()?.takeIf { it > 0f }?.let { if (spacingInches) it * 2.54f else it }
-    val activeModel = modelKind?.let { model.copy(kind = it) }
+    val isFixture = device?.kind?.startsWith("DMX") == true
+    // Real size in inches, for placing models at true scale.
+    fun inches(cm: Float?) = cm?.let { "%.1f".format(it / 2.54f).removeSuffix(".0") } ?: ""
+    var realW by remember { mutableStateOf(inches(run.realWidthCm)) }
+    var realH by remember { mutableStateOf(inches(run.realHeightCm)) }
+    val activeModel = modelKind?.takeIf { !isFixture }?.let { model.copy(kind = it) }
     val valid = name.isNotBlank() && device != null && s != null && (activeModel != null || (c != null && c > 0)) && (!fixedSpacing || spacingCm != null)
 
     AlertDialog(
@@ -999,7 +1056,20 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                         }, label = { Text(k.label) })
                     }
                 }
-                if (activeModel != null) ModelEditor(activeModel) { model = it }
+                if (activeModel != null) {
+                    ModelEditor(activeModel) { model = it }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(realW, { realW = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) }, label = { Text("Real width (in)") },
+                            singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                        OutlinedTextField(realH, { realH = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) }, label = { Text("Real height (in)") },
+                            singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    }
+                    Text(
+                        "With a real size and the house scale set, it's placed at true size with one tap.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text("Prop type", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     PropType.entries.forEach { p ->
@@ -1110,7 +1180,8 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
         confirmButton = {
             TextButton(enabled = valid, onClick = { onSave(
                     run.copy(
-                        name = name.trim(), deviceId = deviceId, startLed = s!!, count = activeModel?.ledCount ?: c!!, prop = prop,
+                        name = name.trim(), deviceId = deviceId, startLed = if (isFixture) 0 else s!!,
+                        count = if (isFixture) 1 else activeModel?.ledCount ?: c!!, prop = prop,
                         spacingCm = if (fixedSpacing && activeModel == null) spacingCm else null,
                         hidden = if (activeModel == null) hiddenList.toList() else emptyList(),
                         model = activeModel,
@@ -1118,6 +1189,8 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                         points = if ((activeModel == null) != (run.model == null)) emptyList() else run.points,
                         ledPoints = if (activeModel != null) null else run.ledPoints,
                         submodels = customSubs.toList(),
+                        realWidthCm = realW.toFloatOrNull()?.takeIf { it > 0f && activeModel != null }?.times(2.54f),
+                        realHeightCm = realH.toFloatOrNull()?.takeIf { it > 0f && activeModel != null }?.times(2.54f),
                     )
                 ) }) {
                 Text(if (run.count == 0) "Next: trace it" else "Save")
@@ -1698,8 +1771,10 @@ internal fun rememberLightTargets(): List<LightTarget> {
     val container = LocalAppContainer.current
     val devices by container.devices.list.collectAsStateWithLifecycle()
     val outputs by container.store.outputs.collectAsStateWithLifecycle(emptyList())
-    return remember(devices, outputs) {
+    val fixtures by container.store.fixtures.collectAsStateWithLifecycle(emptyList())
+    return remember(devices, outputs, fixtures) {
         devices.map { LightTarget(it.id, it.device.name, it.device.host, it.snapshot.value.info?.ledCount ?: 0, null) } +
-            outputs.map { LightTarget(it.id, it.name, it.address, it.ledCount, it.protocol.label) }
+            outputs.map { LightTarget(it.id, it.name, it.address, it.ledCount, it.protocol.label) } +
+            fixtures.map { LightTarget(it.id, it.name, com.wledcontroller.app.data.DmxRegistry.address(it.id), 1, "DMX ${it.type.lowercase()}") }
     }
 }

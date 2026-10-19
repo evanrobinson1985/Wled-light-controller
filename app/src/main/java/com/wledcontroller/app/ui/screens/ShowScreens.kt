@@ -1229,6 +1229,20 @@ private fun ClipInspector(
         )
         TransitionRow("Comes in with", clip.inTransition, enabled = clip.fadeInMs > 0) { onChange(clip.copy(inTransition = it)) }
         TransitionRow("Goes out with", clip.outTransition, enabled = clip.fadeOutMs > 0) { onChange(clip.copy(outTransition = it)) }
+
+        SectionTitle("Moving heads")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Aim DMX moving heads under this effect", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            Switch(
+                checked = clip.pan != null || clip.tilt != null,
+                onCheckedChange = { on -> onChange(if (on) clip.copy(pan = 0.5f, tilt = 0.5f) else clip.copy(pan = null, tilt = null, panCurve = null, tiltCurve = null)) },
+            )
+        }
+        if (clip.pan != null || clip.tilt != null) {
+            CurvedSlider("Pan (left ↔ right)", clip.pan ?: 0.5f, clip.panCurve, { onChange(clip.copy(pan = it)) }) { editingCurve = "pan" }
+            CurvedSlider("Tilt (down ↔ up)", clip.tilt ?: 0.5f, clip.tiltCurve, { onChange(clip.copy(tilt = it)) }) { editingCurve = "tilt" }
+            Text("Give pan a Wave curve to sweep the beam back and forth.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Spacer(Modifier.height(16.dp))
     }
 
@@ -1236,6 +1250,8 @@ private fun ClipInspector(
         val (label, start, curve) = when (key) {
             "speed" -> Triple("Speed", clip.speed, clip.speedCurveOrRamp)
             "size" -> Triple("Size", clip.size, clip.sizeCurve)
+            "pan" -> Triple("Pan", clip.pan ?: 0.5f, clip.panCurve)
+            "tilt" -> Triple("Tilt", clip.tilt ?: 0.5f, clip.tiltCurve)
             else -> Triple("Brightness", clip.intensity, clip.intensityCurveOrRamp)
         }
         CurveDialog(label, start, curve, onDismiss = { editingCurve = null }) { c ->
@@ -1243,6 +1259,8 @@ private fun ClipInspector(
                 when (key) {
                     "speed" -> clip.copy(speedCurve = c, speedEnd = null)
                     "size" -> clip.copy(sizeCurve = c)
+                    "pan" -> clip.copy(panCurve = c)
+                    "tilt" -> clip.copy(tiltCurve = c)
                     else -> clip.copy(intensityCurve = c, intensityEnd = null)
                 }
             )

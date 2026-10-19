@@ -103,8 +103,11 @@ object SequenceRenderer {
         timeMs: Long,
         out: IntArray = IntArray(layout.leds.size),
         audio: AudioEnvelope? = null,
+        /** When given (2 per LED), filled with where moving heads point: pan, tilt (0..1). */
+        motion: FloatArray? = null,
     ): IntArray {
         out.fill(0)
+        motion?.fill(0.5f)
         val level = audio?.at(timeMs)?.coerceIn(0f, 1f) ?: 0f
         val beat = audio?.let { beatStrength(it, timeMs) } ?: 0f
         for (ti in seq.tracks.indices.reversed()) {
@@ -120,6 +123,14 @@ object SequenceRenderer {
             val speed = stored.speedCurveOrRamp?.let { averageOf(it, stored.speed, progress) } ?: stored.speed
             val size = stored.sizeCurve?.at(stored.size, progress) ?: stored.size
             val clip = if (speed != stored.speed || size != stored.size) stored.copy(speed = speed, size = size) else stored
+            if (motion != null && (stored.pan != null || stored.tilt != null)) {
+                val pan = stored.pan?.let { stored.panCurve?.at(it, progress) ?: it }
+                val tilt = stored.tilt?.let { stored.tiltCurve?.at(it, progress) ?: it }
+                for (li in tl.ledIndex) {
+                    if (pan != null) motion[li * 2] = pan
+                    if (tilt != null) motion[li * 2 + 1] = tilt
+                }
+            }
             if (intensity <= 0f) continue
             val t = local / 1000f
             for (k in tl.ledIndex.indices) {

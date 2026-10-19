@@ -49,6 +49,10 @@ class AppContainer(context: Context) {
 
     init {
         com.wledcontroller.app.show.AndroidRasters.install()
+        scope.launch {
+            kotlinx.coroutines.flow.combine(store.fixtures, store.outputs) { f, o -> f to o }
+                .collect { (f, o) -> com.wledcontroller.app.data.DmxRegistry.update(f, o) }
+        }
         scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }
     }
 }

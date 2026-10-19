@@ -55,6 +55,61 @@ object XlightsModels {
         return modelFrom(root, displayAs) ?: throw IllegalArgumentException("That model type isn't supported yet.")
     }
 
+    /** Whether an xLights model file describes a DMX fixture rather than pixels. */
+    fun isDmx(xml: String): Boolean {
+        val head = xml.take(4000)
+        return head.contains("<dmxmodel", ignoreCase = true) || Regex("DisplayAs=\"Dmx", RegexOption.IGNORE_CASE).containsMatchIn(head)
+    }
+
+    /**
+     * A DMX fixture from an xLights fixture model: its channels, with roles from the
+     * Dmx…Channel settings and the channel names. The output, universe and address are left
+     * for the user to set.
+     */
+    fun parseDmxFixture(input: InputStream): com.wledcontroller.app.data.DmxFixture {
+        val e = parseXml(input)
+        val count = e.int("parm1", 0).coerceIn(1, 512)
+        val names = e.getAttribute("NodeNames").split(',').map { it.trim() }
+        val byAttr = HashMap<Int, com.wledcontroller.app.data.DmxRole>()
+        fun attr(key: String, role: com.wledcontroller.app.data.DmxRole) {
+            e.getAttribute(key).toIntOrNull()?.takeIf { it in 1..count }?.let { byAttr[it - 1] = role }
+        }
+        attr("DmxRedChannel", com.wledcontroller.app.data.DmxRole.RED)
+        attr("DmxGreenChannel", com.wledcontroller.app.data.DmxRole.GREEN)
+        attr("DmxBlueChannel", com.wledcontroller.app.data.DmxRole.BLUE)
+        attr("DmxWhiteChannel", com.wledcontroller.app.data.DmxRole.WHITE)
+        attr("DmxPanChannel", com.wledcontroller.app.data.DmxRole.PAN)
+        attr("DmxTiltChannel", com.wledcontroller.app.data.DmxRole.TILT)
+        attr("DmxShutterChannel", com.wledcontroller.app.data.DmxRole.SHUTTER)
+        val shutterOpen = e.getAttribute("DmxShutterOpen").toIntOrNull()?.takeIf { it in 1..255 } ?: 255
+        val channels = List(count) { i ->
+            val name = names.getOrElse(i) { "" }
+            val n = name.lowercase()
+            val role = byAttr[i] ?: when {
+                n.contains("fine") && n.contains("pan") -> com.wledcontroller.app.data.DmxRole.PAN_FINE
+                n.contains("fine") && n.contains("tilt") -> com.wledcontroller.app.data.DmxRole.TILT_FINE
+                n.contains("fine") -> com.wledcontroller.app.data.DmxRole.NONE
+                n == "dimmer" || n.startsWith("dimmer") || n.contains("intensity") || n == "master" -> com.wledcontroller.app.data.DmxRole.DIMMER
+                n == "amber" -> com.wledcontroller.app.data.DmxRole.AMBER
+                n == "uv" || n.startsWith("uv ") -> com.wledcontroller.app.data.DmxRole.UV
+                n == "red" -> com.wledcontroller.app.data.DmxRole.RED
+                n == "green" -> com.wledcontroller.app.data.DmxRole.GREEN
+                n == "blue" -> com.wledcontroller.app.data.DmxRole.BLUE
+                n == "white" -> com.wledcontroller.app.data.DmxRole.WHITE
+                n == "pan" -> com.wledcontroller.app.data.DmxRole.PAN
+                n == "tilt" -> com.wledcontroller.app.data.DmxRole.TILT
+                else -> com.wledcontroller.app.data.DmxRole.NONE // strobe, programs, macros … stay at 0
+            }
+            com.wledcontroller.app.data.DmxChannel(role, if (role == com.wledcontroller.app.data.DmxRole.SHUTTER) shutterOpen else 0, name)
+        }
+        return com.wledcontroller.app.data.DmxFixture(
+            name = e.getAttribute("name").ifBlank { "DMX fixture" },
+            outputId = "",
+            channels = channels,
+            type = e.getAttribute("DmxStyle").ifBlank { "Flood light" },
+        )
+    }
+
     /** All props and groups from xlights_rgbeffects.xml. */
     fun parseLayout(input: InputStream): XlLayout {
         val root = parseXml(input)

@@ -17,7 +17,8 @@ class DdpSender : AutoCloseable {
     /** [rgb] holds 3 bytes per LED starting at LED 0. Blocking: call off the main thread. */
     fun send(host: String, rgb: ByteArray) {
         if (com.wledcontroller.app.sim.SimHub.deliverDdp(host, rgb)) return
-        // Non-WLED controllers come as "e131://", "artnet://" or "ddp://" addresses.
+        // DMX fixtures send their whole universe; other controllers come as "e131://" etc.
+        if (host.startsWith("dmx://")) { sendDmx(host.removePrefix("dmx://"), rgb); return }
         if (host.contains("://")) { sendOther(host, rgb); return }
         val addr = addresses.getOrPut(host) {
             InetAddress.getByName(WledApi.normalizeHost(host).substringBefore(':'))
@@ -46,6 +47,18 @@ class DdpSender : AutoCloseable {
     }
 
     private val universeSeq = HashMap<String, Int>()
+
+    private fun sendDmx(fixtureId: String, frame: ByteArray) {
+        val u = com.wledcontroller.app.data.DmxRegistry.stage(fixtureId, frame) ?: return
+        val addr = addresses.getOrPut(u.host) { InetAddress.getByName(u.host) }
+        val key = "dmx:${u.host}/${u.number}"
+        val seq = (universeSeq[key] ?: 0).let { (it + 1) and 0xFF }.also { universeSeq[key] = it }
+        val (packet, port) = when (u.protocol) {
+            com.wledcontroller.app.data.OutputProtocol.ARTNET -> com.wledcontroller.app.data.PixelPackets.artnet(u.number, seq, u.data) to com.wledcontroller.app.data.PixelPackets.ARTNET_PORT
+            else -> com.wledcontroller.app.data.PixelPackets.e131(u.number, seq, u.data) to com.wledcontroller.app.data.PixelPackets.E131_PORT
+        }
+        socket.send(DatagramPacket(packet, packet.size, addr, port))
+    }
 
     private fun sendOther(address: String, rgb: ByteArray) {
         val scheme = address.substringBefore("://")

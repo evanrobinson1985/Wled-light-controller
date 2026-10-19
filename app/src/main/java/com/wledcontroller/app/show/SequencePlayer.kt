@@ -112,6 +112,7 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
             DdpSender().use { ddp ->
                 var last = SystemClock.elapsedRealtime()
                 var colors = IntArray(0)
+                var motion = FloatArray(0)
                 while (_playing.value || _live.value) {
                     val now = SystemClock.elapsedRealtime()
                     val seq = sequence
@@ -150,14 +151,23 @@ class SequencePlayer(private val store: AppStore, private val house: HouseEngine
                         }
                     } else if (_live.value && seq != null && lay != null && lay.leds.isNotEmpty()) {
                         if (colors.size != lay.leds.size) colors = IntArray(lay.leds.size)
-                        SequenceRenderer.render(seq, lay, renderPos, colors, envelope)
+                        if (motion.size != lay.leds.size * 2) motion = FloatArray(lay.leds.size * 2)
+                        SequenceRenderer.render(seq, lay, renderPos, colors, envelope, motion)
                         val buffers = HashMap<String, ByteArray>()
+                        // DMX fixtures get their colour and where to point.
+                        lay.leds.forEachIndexed { i, l ->
+                            if (com.wledcontroller.app.data.DmxRegistry.isFixture(l.deviceId)) {
+                                buffers[l.deviceId] = com.wledcontroller.app.data.DmxRegistry.frame(colors[i], motion[i * 2], motion[i * 2 + 1])
+                            }
+                        }
                         lay.leds.forEach { l ->
+                            if (com.wledcontroller.app.data.DmxRegistry.isFixture(l.deviceId)) return@forEach
                             val needed = (l.index + 1) * 3
                             val cur = buffers[l.deviceId]
                             if (cur == null || cur.size < needed) buffers[l.deviceId] = (cur ?: ByteArray(0)).copyOf(needed)
                         }
                         lay.leds.forEachIndexed { i, l ->
+                            if (com.wledcontroller.app.data.DmxRegistry.isFixture(l.deviceId)) return@forEachIndexed
                             val b = buffers.getValue(l.deviceId); val o = l.index * 3; val c = colors[i]
                             b[o] = (c shr 16).toByte(); b[o + 1] = (c shr 8).toByte(); b[o + 2] = c.toByte()
                         }

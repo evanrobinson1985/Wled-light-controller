@@ -152,6 +152,11 @@ data class Clip(
     val text: String? = null,
     /** Image in app storage for the Picture effect. */
     val imageFile: String? = null,
+    /** Where moving heads under this effect point (0..1, 0.5 = straight ahead); null leaves them. */
+    val pan: Float? = null,
+    val tilt: Float? = null,
+    val panCurve: ValueCurve? = null,
+    val tiltCurve: ValueCurve? = null,
 ) {
     val speedCurveOrRamp get() = speedCurve ?: speedEnd?.let { ValueCurve(CurveShape.RAMP, it) }
     val intensityCurveOrRamp get() = intensityCurve ?: intensityEnd?.let { ValueCurve(CurveShape.RAMP, it) }

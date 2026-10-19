@@ -160,4 +160,17 @@ class SequenceRendererTest {
         val loud = SequenceRenderer.render(Sequence("q", "Q", 5000, tracks), layout, 1000, audio = AudioEnvelope(FloatArray(500) { 0.8f }))
         assertEquals(listOf(0x00FF00, 0x00FF00, 0, 0, 0, 0, 0xFF0000, 0xFF0000), loud.toList())
     }
+
+    @Test
+    fun movingHeadsFollowPanAndTilt() {
+        val clip = Clip("m", 0, 1000, SeqEffect.ON, colors = listOf(0xFFFFFF), pan = 0f, panCurve = ValueCurve(CurveShape.RAMP, end = 1f), tilt = 0.8f)
+        val s = seq(house(clip))
+        val motion = FloatArray(12)
+        SequenceRenderer.render(s, SequenceRenderer.prepare(map, s.tracks), 500, motion = motion)
+        assertEquals(0.5f, motion[0], 1e-4f)   // half way along the pan ramp
+        assertEquals(0.8f, motion[1], 1e-4f)
+        // No aim set: straight ahead.
+        SequenceRenderer.render(seq(house(solid(0xFF0000))), SequenceRenderer.prepare(map, s.tracks), 500, motion = motion)
+        assertEquals(0.5f, motion[1], 1e-4f)
+    }
 }
