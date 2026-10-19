@@ -396,6 +396,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     var newFixture by remember { mutableStateOf<com.wledcontroller.app.data.DmxFixture?>(null) }
     val outputs by container.store.outputs.collectAsStateWithLifecycle(emptyList())
     val fixtures by container.store.fixtures.collectAsStateWithLifecycle(emptyList())
+    val simActive by container.simulator.active.collectAsStateWithLifecycle()
     /** A prop or DMX fixture model, from a file or a vendor: open it to choose where it goes. */
     fun importModelXml(xml: String, nameOverride: String?, vendor: com.wledcontroller.app.house.VendorModel? = null) {
         importError = null
@@ -408,6 +409,20 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             return
         }
         runCatching { com.wledcontroller.app.house.XlightsModels.parseXmodel(xml.byteInputStream()) }.onSuccess { m ->
+            if (simActive) {
+                // In the simulator the prop gets a simulated controller of its own and goes on
+                // the house straight away; one tap moves it.
+                scope.launch {
+                    runCatching {
+                        container.simulator.addProp(
+                            m.copy(name = (nameOverride ?: m.name)),
+                            widthCm = vendor?.width?.let(com.wledcontroller.app.house.VendorCatalog::lengthCm) ?: m.widthCm,
+                            heightCm = vendor?.height?.let(com.wledcontroller.app.house.VendorCatalog::lengthCm) ?: m.heightCm,
+                        )
+                    }.onSuccess { startTracing(it.id) }.onFailure { importError = it.message ?: "Couldn't add that prop." }
+                }
+                return@onSuccess
+            }
             val target = targets.firstOrNull { it.kind?.startsWith("DMX") != true }
             val usedEnd = map.runs.filter { it.deviceId == target?.id }.maxOfOrNull { it.endLed } ?: 0
             // Open it in the run editor to choose the controller, then place it.
@@ -415,8 +430,8 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 UUID.randomUUID().toString(), (nameOverride ?: m.name).take(40), target?.id ?: "", usedEnd, m.ledCount,
                 prop = m.prop, model = m.model, submodels = m.submodels,
                 // The maker's size, so it goes on the house at its true scale.
-                realWidthCm = vendor?.width?.let(com.wledcontroller.app.house.VendorCatalog::lengthCm),
-                realHeightCm = vendor?.height?.let(com.wledcontroller.app.house.VendorCatalog::lengthCm),
+                realWidthCm = vendor?.width?.let(com.wledcontroller.app.house.VendorCatalog::lengthCm) ?: m.widthCm,
+                realHeightCm = vendor?.height?.let(com.wledcontroller.app.house.VendorCatalog::lengthCm) ?: m.heightCm,
             )
         }.onFailure { importError = it.message ?: "Couldn't read that model." }
     }

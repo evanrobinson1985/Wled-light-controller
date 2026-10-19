@@ -18,6 +18,9 @@ data class XlModel(
     val startChannel: Int?,
     val chainedAfter: String?,
     val absoluteChannel: Int?,
+    /** Its real size when the file gives one (newer xLights files carry widthmm / heightmm). */
+    val widthCm: Float? = null,
+    val heightCm: Float? = null,
 )
 
 /** Everything worth bringing over from an xLights layout. */
@@ -211,7 +214,8 @@ object XlightsModels {
             else -> absolute = start.toIntOrNull()
         }
         if (controller != null && startChannel == null) startChannel = absolute
-        return XlModel(name, displayAs, count, model, prop, subs, controller, startChannel, chained, absolute)
+        fun cm(attr: String) = e.getAttribute(attr).trim().toFloatOrNull()?.takeIf { it > 0f }?.div(10f)
+        return XlModel(name, displayAs, count, model, prop, subs, controller, startChannel, chained, absolute, cm("widthmm"), cm("heightmm"))
     }
 
     /** A custom grid: "CustomModel" rows split by ';', cells by ',' (layers by '|'), or the compressed "node,row,col[,layer];…" form. */

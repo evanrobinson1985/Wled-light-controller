@@ -8,6 +8,9 @@ import com.wledcontroller.app.data.LightProfile
 import com.wledcontroller.app.data.SavedDevice
 import com.wledcontroller.app.house.HouseEffectService
 import com.wledcontroller.app.house.HouseEngine
+import com.wledcontroller.app.house.LightRun
+import com.wledcontroller.app.house.MapPoint
+import com.wledcontroller.app.house.XlModel
 import com.wledcontroller.app.show.SequencePlayer
 import com.wledcontroller.app.show.SequenceRepository
 import com.wledcontroller.app.show.ShowRunnerService
@@ -128,6 +131,27 @@ class Simulator(
         store.upsertDevice(SavedDevice(id, name, host))
         store.setLightProfile(LightProfile.deviceKey(id), profile)
         return id
+    }
+
+    /**
+     * Brings a prop model (e.g. a vendor's) into the virtual house: a simulated controller of
+     * its own with just enough LEDs, and the prop on the map at its real size when known. New
+     * props are spread along the yard so they don't land on top of each other.
+     */
+    suspend fun addProp(prop: XlModel, widthCm: Float? = prop.widthCm, heightCm: Float? = prop.heightCm): LightRun {
+        val name = prop.name.take(40)
+        val id = addController(name, prop.ledCount, LightProfile.BULLETS, rgbw = false)
+        val map = store.houseMap.first()
+        val added = map.runs.count { r -> r.model != null && r.id.startsWith("prop-") }
+        val center = MapPoint(0.2f + 0.15f * (added % 5), 0.62f)
+        val run = LightRun(
+            "prop-" + UUID.randomUUID().toString().take(8), name, id, 0, prop.ledCount,
+            points = map.propBox(center, widthCm, heightCm, prop.model?.shapeAspect ?: 1f),
+            prop = prop.prop, model = prop.model, submodels = prop.submodels,
+            realWidthCm = widthCm, realHeightCm = heightCm,
+        )
+        store.updateHouseMap { m -> m.copy(runs = m.runs + run) }
+        return run
     }
 
     /** Removes a simulated controller from the app and the virtual house. */

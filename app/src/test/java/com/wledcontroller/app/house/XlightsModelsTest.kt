@@ -39,13 +39,15 @@ class XlightsModelsTest {
         // As newer xLights exports (and some vendors) write it: wrapped, sized by CustomWidth/Height.
         val xml = """<?xml version="1.0"?>
 <models type="exported">
-  <model name="GE Starburst" DisplayAs="Custom" CustomWidth="3" CustomHeight="2" CustomModelCompressed="1,0,0;2,0,2;3,1,1" StartChannel="2402"/>
+  <model name="GE Starburst" DisplayAs="Custom" CustomWidth="3" CustomHeight="2" CustomModelCompressed="1,0,0;2,0,2;3,1,1" StartChannel="2402" widthmm="4605" heightmm="8794"/>
 </models>"""
         val m = XlightsModels.parseXmodel(xml.byteInputStream())
         assertEquals("GE Starburst", m.name)
         assertEquals(3, m.ledCount)
         assertEquals(3, m.model!!.customW)
         assertEquals(listOf(0, 2, 4), m.model!!.customCells)
+        assertEquals(460.5f, m.widthCm!!, 1e-3f)
+        assertEquals(879.4f, m.heightCm!!, 1e-3f)
     }
 
     private val layoutXml = """<?xml version="1.0" encoding="UTF-8"?>

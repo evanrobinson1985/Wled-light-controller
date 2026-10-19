@@ -80,6 +80,24 @@ data class HouseMap(
     /** Where each LED of [run] is on this map. */
     fun positions(run: LightRun): List<MapPoint?> = run.ledPositions(aspect, cmPerHeight)
 
+    /**
+     * Where a newly added prop goes: a box centred near [center], at its real size when it has
+     * one and the map a scale, otherwise a fifth of the picture high with the shape of its
+     * grid ([gridAspect] = width / height). Kept inside the picture.
+     */
+    fun propBox(center: MapPoint, widthCm: Float?, heightCm: Float?, gridAspect: Float): List<MapPoint> {
+        val real = if (widthCm != null && heightCm != null) boxAround(center, widthCm, heightCm) else null
+        val (halfW, halfH) = if (real != null) (real[1].x - real[0].x) / 2f to (real[1].y - real[0].y) / 2f
+        else {
+            val h = 0.2f
+            (h * gridAspect.coerceIn(0.2f, 5f) / aspect / 2f) to h / 2f
+        }
+        // Keep the box on the picture where it fits; a prop bigger than the picture stays centred.
+        val cx = if (halfW < 0.5f) center.x.coerceIn(halfW, 1f - halfW) else 0.5f
+        val cy = if (halfH < 0.5f) center.y.coerceIn(halfH, 1f - halfH) else 0.5f
+        return listOf(MapPoint(cx - halfW, cy - halfH), MapPoint(cx + halfW, cy + halfH))
+    }
+
     /** The corners of a box [widthCm] × [heightCm] centred on [center], or null without a scale. */
     fun boxAround(center: MapPoint, widthCm: Float, heightCm: Float): List<MapPoint>? {
         val scale = cmPerHeight ?: return null

@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Workspaces
 import androidx.compose.material.icons.outlined.Delete
@@ -100,6 +101,8 @@ import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.LightProfile
 import com.wledcontroller.app.data.SavedDevice
 import com.wledcontroller.app.house.HouseMap
+import com.wledcontroller.app.house.VendorCatalog
+import com.wledcontroller.app.house.XlightsModels
 import com.wledcontroller.app.house.placedLeds
 import com.wledcontroller.app.sim.SimDevice
 import com.wledcontroller.app.sim.SimHub
@@ -107,7 +110,9 @@ import com.wledcontroller.app.ui.components.LocalPixelStyle
 import com.wledcontroller.app.ui.components.drawPixel
 import com.wledcontroller.app.ui.components.neighbourGaps
 import com.wledcontroller.app.ui.components.pixelRadius
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /** Time for live drawing, ticking every frame while shown. */
@@ -284,6 +289,8 @@ fun SimulatorScreen(
     var tuning by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    var addingProp by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
     var removing by remember { mutableStateOf<SavedDevice?>(null) }
     val miniView by sim.miniView.collectAsStateWithLifecycle()
 
@@ -336,11 +343,12 @@ fun SimulatorScreen(
                 }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
             if (!active) Intro(enabled = busy == null, onStart = { run("Building the virtual house…") { sim.enter() } })
             else ActiveSimulator(
                 onOpenDevice = onOpenDevice, onOpenGroup = onOpenGroup, onOpenHouse = onOpenHouse, onOpenShows = onOpenShows,
                 onOpenShow = onOpenShow, onOpenSchedule = onOpenSchedule, onOpenMap = onOpenMap,
-                onAdd = { adding = true }, onRemove = { removing = it },
+                onAdd = { adding = true }, onAddProp = { addingProp = true }, onRemove = { removing = it },
                 onLeave = { run("Putting your lights back…") { sim.leave() } },
                 enabled = busy == null,
             )
@@ -366,6 +374,21 @@ fun SimulatorScreen(
     if (adding) AddSimControllerDialog(onDismiss = { adding = false }) { name, leds, profile, rgbw ->
         adding = false
         run("Adding $name…") { sim.addController(name, leds, profile, rgbw) }
+    }
+    if (addingProp) VendorBrowser(dmx = false, onDismiss = { addingProp = false }) { xml, m ->
+        addingProp = false
+        note = null
+        run("Adding ${m.name}…") {
+            if (XlightsModels.isDmx(xml)) throw IllegalStateException("DMX fixtures can't be simulated yet.")
+            val prop = withContext(Dispatchers.Default) { XlightsModels.parseXmodel(xml.byteInputStream()) }
+            val run = sim.addProp(
+                prop.copy(name = m.name),
+                widthCm = VendorCatalog.lengthCm(m.width) ?: prop.widthCm,
+                heightCm = VendorCatalog.lengthCm(m.height) ?: prop.heightCm,
+            )
+            note = "${run.name} is on the house with its own simulated controller (${run.count} LEDs)" +
+                (if (run.realWidthCm != null) ", at its real size" else "") + ". Move it in Edit map."
+        }
     }
     removing?.let { d ->
         AlertDialog(
@@ -425,6 +448,7 @@ private fun ActiveSimulator(
     onOpenSchedule: () -> Unit,
     onOpenMap: () -> Unit,
     onAdd: () -> Unit,
+    onAddProp: () -> Unit,
     onRemove: (SavedDevice) -> Unit,
     onLeave: () -> Unit,
     enabled: Boolean,
@@ -459,6 +483,14 @@ private fun ActiveSimulator(
         Text("Simulated controllers", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         TextButton(onClick = onAdd, enabled = enabled) { Icon(Icons.Filled.Add, null); Spacer(Modifier.width(4.dp)); Text("Add") }
     }
+    FilledTonalButton(onClick = onAddProp, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Filled.Storefront, null); Spacer(Modifier.width(8.dp)); Text("Add a prop from a vendor")
+    }
+    Text(
+        "Arches, stars, snowflakes, trees and more from Boscoyo, Gilbert Engineering, Mattos and others: each gets its own simulated controller and goes on the house at its real size.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     val simulated = saved.mapNotNull { d -> SimHub.find(d.host)?.let { d to it } }
     simulated.forEach { (d, device) -> key(d.id) {
         val controller = container.devices.get(d.id)

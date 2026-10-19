@@ -51,6 +51,13 @@ data class PropModel(
         ModelKind.CUSTOM -> customCells.size
     }
 
+    /** Its natural shape, width / height, for when it's placed without a real size. */
+    val shapeAspect: Float get() = when (kind) {
+        ModelKind.CUSTOM -> customW.coerceAtLeast(1).toFloat() / customH.coerceAtLeast(1)
+        ModelKind.MEGA_TREE -> 0.6f
+        else -> 1f
+    }
+
     /** For a singing face: which part LED [i] is (0 eyes, 1 mouth closed, 2 open, 3 wide); else null. */
     fun facePart(i: Int): Int? = if (kind != ModelKind.FACE) null else (i / nodes.coerceAtLeast(2)).coerceAtMost(FACE_PARTS.lastIndex)
 

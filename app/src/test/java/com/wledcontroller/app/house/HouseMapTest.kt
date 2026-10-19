@@ -112,4 +112,20 @@ class HouseMapTest {
         assertEquals(listOf(false, true, true, false), placed.map { it.hidden })
         assertEquals(0.1f, placed[1].x, 1e-4f)
     }
+
+    @Test
+    fun newPropsGoOnAtRealSizeAndStayOnThePicture() {
+        // 1200 cm across 0.6 of a 1.5-wide photo: 1200 / 0.9 cm per picture height.
+        val map = HouseMap(aspect = 1.5f, scaleA = MapPoint(0.2f, 0.8f), scaleB = MapPoint(0.8f, 0.8f), scaleCm = 1200f)
+        val box = map.propBox(MapPoint(0.5f, 0.5f), 120f, 90f, 1f)
+        assertEquals(0.06f, box[1].x - box[0].x, 1e-4f)   // 120 cm = 0.09 heights = 0.06 widths
+        assertEquals(0.0675f, box[1].y - box[0].y, 1e-4f)
+        // Too near the edge: pulled in so it all shows.
+        val edge = map.propBox(MapPoint(0.99f, 0.99f), 120f, 90f, 1f)
+        assertEquals(1f, edge[1].x, 1e-4f); assertEquals(1f, edge[1].y, 1e-4f)
+        // No real size: a fifth of the picture high, shaped like its grid.
+        val plain = HouseMap(aspect = 1.5f).propBox(MapPoint(0.5f, 0.5f), null, null, 1.5f)
+        assertEquals(0.2f, plain[1].y - plain[0].y, 1e-4f)
+        assertEquals(0.2f, plain[1].x - plain[0].x, 1e-4f)
+    }
 }
