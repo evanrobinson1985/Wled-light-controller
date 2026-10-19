@@ -11,6 +11,7 @@ import com.wledcontroller.app.house.HouseEngine
 import com.wledcontroller.app.house.LightRun
 import com.wledcontroller.app.house.MapPoint
 import com.wledcontroller.app.house.XlModel
+import com.wledcontroller.app.house.mirroredCopy
 import com.wledcontroller.app.show.SequencePlayer
 import com.wledcontroller.app.show.SequenceRepository
 import com.wledcontroller.app.show.ShowRunnerService
@@ -152,6 +153,18 @@ class Simulator(
         )
         store.updateHouseMap { m -> m.copy(runs = m.runs + run) }
         return run
+    }
+
+    /**
+     * The other one of a pair (a right-hand corner web for a left-hand one): the same prop facing
+     * the other way, on a simulated controller of its own, set beside [run].
+     */
+    suspend fun addMirroredCopy(run: LightRun): LightRun {
+        val copy = run.mirroredCopy("prop-" + UUID.randomUUID().toString().take(8))
+        val id = addController(copy.name, run.count, LightProfile.BULLETS, rgbw = false)
+        val placed = copy.copy(deviceId = id, startLed = 0)
+        store.updateHouseMap { m -> m.copy(runs = m.runs + placed) }
+        return placed
     }
 
     /** Removes a simulated controller from the app and the virtual house. */

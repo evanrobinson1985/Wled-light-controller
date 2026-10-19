@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Flip
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureInPicture
@@ -188,7 +190,12 @@ fun SimHouseView(
     suspend fun save(run: LightRun) = container.store.updateHouseMap { m -> m.copy(runs = m.runs.map { if (it.id == run.id) run else it }) }
     LaunchedEffect(selectedRunId) { live?.let { save(it) }; live = null }
     // Saved once the fingers rest.
-    LaunchedEffect(live) { val l = live ?: return@LaunchedEffect; delay(350); save(l) }
+    LaunchedEffect(live) {
+        val l = live ?: return@LaunchedEffect
+        delay(350); save(l)
+        // Saved: go back to the map, so changes made elsewhere (like mirroring) show.
+        if (live === l) live = null
+    }
     val map = live?.let { l -> stored.copy(runs = stored.runs.map { if (it.id == l.id) l else it }) } ?: stored
     val selectedStored by rememberUpdatedState(stored.runs.firstOrNull { it.id == selectedRunId })
     val select by rememberUpdatedState(onSelectRun)
@@ -547,6 +554,17 @@ private fun ActiveSimulator(
                     )
                 }
                 Button(onClick = { onArrange(false) }) { Text("Done") }
+            }
+            if (picked?.model != null) {
+                val scope = rememberCoroutineScope()
+                Row(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = {
+                        scope.launch { container.store.updateHouseMap { m -> m.copy(runs = m.runs.map { if (it.id == picked.id) it.copy(mirrored = !it.mirrored) else it }) } }
+                    }) { Icon(Icons.Filled.Flip, null); Spacer(Modifier.width(4.dp)); Text(if (picked.mirrored) "Unmirror" else "Mirror") }
+                    TextButton(onClick = {
+                        scope.launch { onSelectRun(container.simulator.addMirroredCopy(picked).id) }
+                    }) { Icon(Icons.Filled.ContentCopy, null); Spacer(Modifier.width(4.dp)); Text("Mirrored copy") }
+                }
             }
         }
     } else Text(

@@ -57,6 +57,8 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Flip
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Home
@@ -135,6 +137,7 @@ import com.wledcontroller.app.house.PropGroup
 import com.wledcontroller.app.house.PropType
 import com.wledcontroller.app.house.StandalonePlan
 import com.wledcontroller.app.house.ledPositions
+import com.wledcontroller.app.house.mirroredCopy
 import com.wledcontroller.app.house.fillGaps
 import com.wledcontroller.app.house.formatLength
 import com.wledcontroller.app.house.tracedLength
@@ -791,6 +794,19 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                             TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { saveRun(run.copy(points = run.points.reversed(), hidden = run.hidden.map { it.copy(after = run.points.size - 2 - it.after) })) }) {
                                 Icon(Icons.Filled.SwapHoriz, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Flip start")
                             }
+                            if (run.model != null) {
+                                TextButton(onClick = { saveRun(run.copy(mirrored = !run.mirrored)) }) {
+                                    Icon(Icons.Filled.Flip, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(if (run.mirrored) "Unmirror" else "Mirror")
+                                }
+                                TextButton(onClick = {
+                                    // The other one of a pair: open it to choose its controller and LEDs, then place it.
+                                    val copy = run.mirroredCopy(UUID.randomUUID().toString())
+                                    val usedEnd = map.runs.filter { it.deviceId == run.deviceId }.maxOfOrNull { it.endLed } ?: 0
+                                    editRun = copy.copy(startLed = usedEnd)
+                                }) {
+                                    Icon(Icons.Filled.ContentCopy, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Mirrored copy")
+                                }
+                            }
                             TextButton(enabled = device != null, onClick = { device?.let { container.house.identify(run, it.address) } }) {
                                 Icon(Icons.Outlined.Lightbulb, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Identify")
                             }
@@ -1052,6 +1068,8 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
     fun inches(cm: Float?) = cm?.let { "%.1f".format(it / 2.54f).removeSuffix(".0") } ?: ""
     var realW by remember { mutableStateOf(inches(run.realWidthCm)) }
     var realH by remember { mutableStateOf(inches(run.realHeightCm)) }
+    var mirrored by remember { mutableStateOf(run.mirrored) }
+    var upsideDown by remember { mutableStateOf(run.upsideDown) }
     val activeModel = modelKind?.takeIf { !isFixture }?.let { model.copy(kind = it) }
     val valid = name.isNotBlank() && device != null && s != null && (activeModel != null || (c != null && c > 0)) && (!fixedSpacing || spacingCm != null)
 
@@ -1084,6 +1102,10 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(selected = mirrored, onClick = { mirrored = !mirrored }, label = { Text("Mirror (left ↔ right)") })
+                        FilterChip(selected = upsideDown, onClick = { upsideDown = !upsideDown }, label = { Text("Upside down") })
+                    }
                 }
                 Text("Prop type", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1206,6 +1228,8 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                         submodels = customSubs.toList(),
                         realWidthCm = realW.toFloatOrNull()?.takeIf { it > 0f && activeModel != null }?.times(2.54f),
                         realHeightCm = realH.toFloatOrNull()?.takeIf { it > 0f && activeModel != null }?.times(2.54f),
+                        mirrored = activeModel != null && mirrored,
+                        upsideDown = activeModel != null && upsideDown,
                     )
                 ) }) {
                 Text(if (run.count == 0) "Next: trace it" else "Save")

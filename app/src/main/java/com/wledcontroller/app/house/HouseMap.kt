@@ -40,6 +40,10 @@ data class LightRun(
     /** A model's real size (e.g. from its maker), so it can be placed at true scale. */
     val realWidthCm: Float? = null,
     val realHeightCm: Float? = null,
+    /** A model shown the other way round (left ↔ right), e.g. the right-hand one of a pair. */
+    val mirrored: Boolean = false,
+    /** A model shown upside down. */
+    val upsideDown: Boolean = false,
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
@@ -154,7 +158,13 @@ fun LightRun.ledPositions(aspect: Float, cmPerHeight: Float? = null): List<MapPo
     ledPoints?.let { lp -> return List(count) { lp.getOrNull(it) } }
     model?.let { m ->
         if (points.size < 2) return List(count) { null }
-        val pos = m.layout(points[0], points[1], aspect)
+        var pos = m.layout(points[0], points[1], aspect)
+        if (mirrored || upsideDown) {
+            // Turned over inside its own box.
+            val l = minOf(points[0].x, points[1].x) + maxOf(points[0].x, points[1].x)
+            val t = minOf(points[0].y, points[1].y) + maxOf(points[0].y, points[1].y)
+            pos = pos.map { p -> MapPoint(if (mirrored) l - p.x else p.x, if (upsideDown) t - p.y else p.y) }
+        }
         return List(count) { pos.getOrNull(it) }
     }
     return tracedPositions(aspect, cmPerHeight)
@@ -305,4 +315,32 @@ fun LightRun.transformed(dx: Float, dy: Float, zoom: Float = 1f, pivot: MapPoint
         realWidthCm = realWidthCm?.times(zoom),
         realHeightCm = realHeightCm?.times(zoom),
     )
+}
+
+/** "Left web" → "Right web" (and back); names without a side get "(mirrored)" added or taken off. */
+fun mirroredName(name: String): String {
+    val side = Regex("\\b(left|right)\\b", RegexOption.IGNORE_CASE)
+    if (side.containsMatchIn(name)) return side.replace(name) { m ->
+        val other = if (m.value.equals("left", true)) "right" else "left"
+        when {
+            m.value.all { it.isUpperCase() } -> other.uppercase()
+            m.value.first().isUpperCase() -> other.replaceFirstChar(Char::uppercase)
+            else -> other
+        }
+    }
+    return if (name.endsWith(" (mirrored)")) name.removeSuffix(" (mirrored)") else "$name (mirrored)"
+}
+
+/**
+ * The other one of a pair: the same prop facing the other way, under a new [id], set just
+ * beside this one (to the right if there's room, else to the left).
+ */
+fun LightRun.mirroredCopy(id: String): LightRun {
+    val moved = if (points.size >= 2) {
+        val left = points.minOf { it.x }; val right = points.maxOf { it.x }
+        val step = (right - left) * 1.15f
+        val dx = if (right + step <= 1f) step else -step
+        points.map { MapPoint(it.x + dx, it.y) }
+    } else points
+    return copy(id = id, name = mirroredName(name).take(40), mirrored = !mirrored, points = moved, ledPoints = null)
 }

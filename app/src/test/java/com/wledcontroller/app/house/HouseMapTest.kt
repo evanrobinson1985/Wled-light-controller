@@ -142,4 +142,26 @@ class HouseMapTest {
         assertEquals(0.5f, bigger.pivot()!!.x, 1e-5f)
         assertEquals(200f, bigger.realWidthCm!!, 1e-4f); assertEquals(100f, bigger.realHeightCm!!, 1e-4f)
     }
+
+    @Test
+    fun mirroredPropsFaceTheOtherWay() {
+        // A 2 × 1 matrix: LED 0 on the left, LED 1 on the right.
+        val run = LightRun("w", "Left corner web", "d", 0, 2, points = listOf(MapPoint(0.2f, 0.2f), MapPoint(0.4f, 0.3f)),
+            model = PropModel(ModelKind.MATRIX, strings = 1, nodes = 2, start = StartCorner.BOTTOM_LEFT))
+        val normal = run.ledPositions(1f)
+        val flipped = run.copy(mirrored = true).ledPositions(1f)
+        assertEquals(0.6f - normal[0]!!.x, flipped[0]!!.x, 1e-5f)
+        assertEquals(normal[0]!!.y, flipped[0]!!.y, 1e-5f)
+        val upside = run.copy(upsideDown = true).ledPositions(1f)
+        assertEquals(0.5f - normal[0]!!.y, upside[0]!!.y, 1e-5f)
+
+        val other = run.mirroredCopy("w2")
+        assertEquals("Right corner web", other.name)
+        assertEquals(true, other.mirrored)
+        assertEquals("w2", other.id)
+        assertEquals(0.43f, other.points[0].x, 1e-5f)  // set beside it, to the right
+        assertEquals("Arch", mirroredName("Arch (mirrored)"))
+        assertEquals("Arch (mirrored)", mirroredName("Arch"))
+        assertEquals("RIGHT web", mirroredName("LEFT web"))
+    }
 }
