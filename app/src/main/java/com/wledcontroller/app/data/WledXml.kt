@@ -29,9 +29,11 @@ object WledXml {
             put("on", ac > 0)
             if (ac > 0) put("bri", ac)
             putJsonObject("seg") {
+                // "wv" is -1 on strips without a white channel; "ws" is reported either way.
+                val white = int("wv")?.takeIf { it >= 0 }
                 if (values["cl"]?.size == 3) put("col", buildJsonArray {
-                    add(color("cl", int("wv")))
-                    if (values["cs"]?.size == 3) add(color("cs", int("ws")))
+                    add(color("cl", white))
+                    if (values["cs"]?.size == 3) add(color("cs", if (white != null) int("ws") ?: 0 else null))
                 })
                 int("fx")?.let { put("fx", it) }
                 int("sx")?.let { put("sx", it) }
