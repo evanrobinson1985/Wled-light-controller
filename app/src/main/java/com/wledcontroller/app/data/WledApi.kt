@@ -26,6 +26,13 @@ class WledApi(val client: OkHttpClient) {
         .callTimeout(3000, TimeUnit.MILLISECONDS)
         .build()
 
+    /** For finding out quickly whether a controller answers at an address (at home or remotely). */
+    val reachClient: OkHttpClient = client.newBuilder()
+        .connectTimeout(2500, TimeUnit.MILLISECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)
+        .build()
+
     fun baseUrl(host: String) = "http://" + normalizeHost(host)
 
     suspend fun get(host: String, path: String, http: OkHttpClient = client): JsonElement = withContext(Dispatchers.IO) {
@@ -77,8 +84,12 @@ class WledApi(val client: OkHttpClient) {
     suspend fun effectData(host: String): List<String> =
         (get(host, "/json/fxdata") as? JsonArray)?.map { it.asString() ?: "" } ?: emptyList()
 
-    suspend fun presets(host: String): List<Preset> {
-        val o = get(host, "/presets.json") as? JsonObject ?: return emptyList()
+    suspend fun presets(host: String): List<Preset> = parsePresets(get(host, "/presets.json") as? JsonObject ?: return emptyList())
+
+    /** The raw presets.json, for keeping a copy to use when the controller is only reachable over MQTT. */
+    suspend fun presetsJson(host: String): JsonObject = get(host, "/presets.json") as? JsonObject ?: JsonObject(emptyMap())
+
+    fun parsePresets(o: JsonObject): List<Preset> {
         return o.mapNotNull { (k, v) ->
             val id = k.toIntOrNull() ?: return@mapNotNull null
             val p = v as? JsonObject ?: return@mapNotNull null

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Info
@@ -108,6 +109,7 @@ private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOp
     var showRename by remember { mutableStateOf(false) }
     var showRemove by remember { mutableStateOf(false) }
     var showReboot by remember { mutableStateOf(false) }
+    var showRemote by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -120,7 +122,8 @@ private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOp
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 when (snap.conn) {
-                                    ConnState.ONLINE -> if (snap.live) "Live sync" else "Connected"
+                                    ConnState.ONLINE -> (if (snap.live) "Live sync" else "Connected") +
+                                        (if (snap.route != com.wledcontroller.app.data.Route.LOCAL) " · via ${snap.route.label}" else "")
                                     ConnState.CONNECTING -> "Connecting…"
                                     ConnState.OFFLINE -> "Offline"
                                 },
@@ -178,6 +181,10 @@ private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOp
                                 onClick = { menu = false; scope.launch { container.store.setTileDevice(controller.id) } },
                             )
                             DropdownMenuItem(
+                                text = { Text("Remote access") }, leadingIcon = { Icon(Icons.Filled.Public, null) },
+                                onClick = { menu = false; showRemote = true },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Rename") }, leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                                 onClick = { menu = false; showRename = true },
                             )
@@ -211,7 +218,8 @@ private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOp
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (snap.conn == ConnState.OFFLINE) {
                 Banner(
-                    text = "Can't reach ${controller.device.host}. Check the device has power and is on your Wi-Fi.",
+                    text = "Can't reach ${controller.device.host}. Check the device has power and is on your Wi-Fi" +
+                        (if (controller.device.remoteHost != null || controller.device.mqttTopic != null) ", or that your VPN or broker is up." else ". Away from home? Set up Remote access in the menu."),
                     action = "Retry",
                     onAction = { controller.reconnect() },
                     error = true,
@@ -247,7 +255,8 @@ private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOp
         }
     }
 
-    if (showInfo) DeviceInfoSheet(info, controller.device.host, onDismiss = { showInfo = false })
+    if (showInfo) DeviceInfoSheet(info, controller.apiHost, onDismiss = { showInfo = false })
+    if (showRemote) RemoteAccessDialog(controller, onDismiss = { showRemote = false })
     if (showTimer) NightlightDialog(controller, onDismiss = { showTimer = false })
     if (showRename) {
         TextInputDialog("Rename", controller.device.name, "Name", onDismiss = { showRename = false }) { name ->

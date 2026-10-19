@@ -37,7 +37,9 @@ class AppContainer(context: Context) {
 
     val api = WledApi(http)
     val store = AppStore(context)
-    val devices = DeviceManager(api, wsClient, store, scope)
+    /** The broker connection for controlling the lights from anywhere. */
+    val mqtt = com.wledcontroller.app.data.MqttLink()
+    val devices = DeviceManager(api, wsClient, store, scope, mqtt, com.wledcontroller.app.data.DeviceCache(java.io.File(context.filesDir, "devcache")))
     val discovery = Discovery(context, api)
     val house = HouseEngine(context, store, scope)
     val standalone = StandaloneSetup(context, api, store)
@@ -53,6 +55,7 @@ class AppContainer(context: Context) {
             kotlinx.coroutines.flow.combine(store.fixtures, store.outputs) { f, o -> f to o }
                 .collect { (f, o) -> com.wledcontroller.app.data.DmxRegistry.update(f, o) }
         }
+        scope.launch { store.mqtt.collect { s -> mqtt.update(s ?: com.wledcontroller.app.data.MqttSettings()) } }
         scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }
     }
 }

@@ -18,7 +18,15 @@ import com.wledcontroller.app.show.Playlist
 import com.wledcontroller.app.show.ScheduleEntry
 
 @Serializable
-data class SavedDevice(val id: String, val name: String, val host: String)
+data class SavedDevice(
+    val id: String,
+    val name: String,
+    val host: String,
+    /** Another address for it when the home Wi-Fi can't reach it: a VPN / Tailscale address or a forwarded hostname. */
+    val remoteHost: String? = null,
+    /** Its MQTT topic, for control through the broker from anywhere. */
+    val mqttTopic: String? = null,
+)
 
 @Serializable
 data class DeviceGroup(val id: String, val name: String, val deviceIds: List<String>)
@@ -54,6 +62,7 @@ class AppStore(private val context: Context) {
         val LOCATION = stringPreferencesKey("location")
         val OUTPUTS = stringPreferencesKey("outputs")
         val FIXTURES = stringPreferencesKey("dmx_fixtures")
+        val MQTT = stringPreferencesKey("mqtt")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -172,6 +181,14 @@ class AppStore(private val context: Context) {
     suspend fun streamTargets(): Map<String, String> =
         devices.first().associate { it.id to it.host } + outputs.first().associate { it.id to it.address } +
             fixtures.first().associate { it.id to DmxRegistry.address(it.id) }
+
+    /** The MQTT broker for remote control, if set up. */
+    val mqtt: Flow<MqttSettings?> = context.dataStore.data.map { prefs ->
+        prefs[Keys.MQTT]?.let { runCatching { json.decodeFromString<MqttSettings>(it) }.getOrNull() }
+    }
+    // Defaults written out too: the topic prefix is random, so it must be stored as it is.
+    private val mqttJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    suspend fun setMqtt(s: MqttSettings) { context.dataStore.edit { it[Keys.MQTT] = mqttJson.encodeToString(s) } }
 
     /** Where the show is, for sunset and dusk schedule times. */
     val location: Flow<com.wledcontroller.app.show.GeoPoint?> = context.dataStore.data.map { prefs ->

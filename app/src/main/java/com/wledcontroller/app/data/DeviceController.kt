@@ -5,6 +5,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -32,10 +34,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ConnState { CONNECTING, ONLINE, OFFLINE }
 
+/** How the app is reaching a controller: on the home network, at its remote address (VPN …) or through the MQTT broker. */
+enum class Route(val label: String) { LOCAL("Home Wi-Fi"), REMOTE("Remote address"), MQTT("MQTT") }
+
 data class DeviceSnapshot(
     val conn: ConnState = ConnState.CONNECTING,
     /** True while a WebSocket push channel is open (instant two-way sync). */
     val live: Boolean = false,
+    val route: Route = Route.LOCAL,
     val state: WledState? = null,
     val info: WledInfo? = null,
     val effects: List<String> = emptyList(),
@@ -58,11 +64,21 @@ class DeviceController(
     private val api: WledApi,
     private val wsClient: OkHttpClient,
     parentScope: CoroutineScope,
+    private val mqtt: MqttLink? = null,
+    private val cache: DeviceCache? = null,
 ) {
     @Volatile var device: SavedDevice = device
         internal set
     val id get() = device.id
-    private val host get() = device.host
+
+    /** The address it last answered at (home or remote). */
+    @Volatile private var activeHost: String? = null
+    private val host get() = activeHost ?: device.host
+    /** Where to send HTTP requests to it right now. */
+    val apiHost: String get() = host
+    /** Set while it's only reachable through the MQTT broker, on this topic. */
+    @Volatile private var mqttTopic: String? = null
+    private val viaMqtt get() = mqttTopic != null
 
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -107,22 +123,40 @@ class DeviceController(
         start()
     }
 
+    /** Its home address, then its remote one if it has one. */
+    private fun hosts(): List<String> {
+        val home = device.host
+        val remote = device.remoteHost?.trim()?.takeIf { it.isNotEmpty() && WledApi.normalizeHost(it) != WledApi.normalizeHost(home) }
+        return listOfNotNull(home, remote)
+    }
+
+    /** The first address it answers at, with its full state taken in; null if none. */
+    private suspend fun reachable(): String? {
+        for (h in hosts()) {
+            try {
+                val o = api.get(h, "/json", api.reachClient).jsonObject
+                handleMessage(o)
+                cache?.save(id, DeviceCache.FULL, o)
+                return h
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Try the next way in.
+            }
+        }
+        return null
+    }
+
     private suspend fun runLoop() {
         var backoff = 1000L
         while (currentCoroutineContext().isActive) {
             try {
-                handleMessage(api.get(host, "/json").jsonObject)
-                _snapshot.update { it.copy(conn = ConnState.ONLINE) }
-                if (_snapshot.value.fxData.isEmpty()) scope.launch { loadEffectData() }
-                backoff = 1000L
-                val opened = runSocketSession()
-                if (!opened) {
-                    // Device refused a socket (WLED allows only a few clients): poll for a while instead.
-                    repeat(10) {
-                        delay(3000)
-                        handleMessage(api.get(host, "/json/si").jsonObject)
-                        _snapshot.update { it.copy(conn = ConnState.ONLINE) }
-                    }
+                val h = reachable()
+                val topic = device.mqttTopic?.takeIf { it.isNotBlank() }
+                when {
+                    h != null -> { backoff = 1000L; httpSession(h) }
+                    topic != null && mqtt?.ready == true -> { backoff = 1000L; mqttSession(mqtt, topic) }
+                    else -> throw java.io.IOException("Not reachable")
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -131,6 +165,85 @@ class DeviceController(
                 delay(backoff)
                 backoff = (backoff * 2).coerceAtMost(15_000L)
             }
+        }
+    }
+
+    /** Talks to it over HTTP and its WebSocket at [h] until the socket drops. */
+    private suspend fun httpSession(h: String) {
+        activeHost = h
+        val route = if (h == device.host) Route.LOCAL else Route.REMOTE
+        _snapshot.update { it.copy(conn = ConnState.ONLINE, route = route) }
+        if (_snapshot.value.fxData.isEmpty()) scope.launch { loadEffectData() }
+        val opened = runSocketSession()
+        if (!opened) {
+            // Device refused a socket (WLED allows only a few clients): poll for a while instead.
+            repeat(10) {
+                delay(3000)
+                handleMessage(api.get(h, "/json/si").jsonObject)
+                _snapshot.update { it.copy(conn = ConnState.ONLINE) }
+            }
+        }
+    }
+
+    /**
+     * Reaches it through the MQTT broker: commands go to "[topic]/api" and its state comes back
+     * on "[topic]/v". Ends when it can be reached directly again, or the broker drops.
+     */
+    private suspend fun mqttSession(link: MqttLink, topic: String) {
+        loadCached()
+        _snapshot.update { it.copy(conn = ConnState.CONNECTING, route = Route.MQTT, live = false) }
+        mqttTopic = topic
+        try {
+            link.follow(topic) { sub, payload -> onMqtt(sub, payload) }
+            _snapshot.update { it.copy(conn = if (it.conn == ConnState.OFFLINE) ConnState.OFFLINE else ConnState.ONLINE) }
+            while (currentCoroutineContext().isActive) {
+                delay(20_000)
+                if (!link.isConnected) throw java.io.IOException("Lost the broker")
+                // Home again (or the VPN came up): switch to the direct way.
+                if (hosts().any { api.probe(it) != null }) return
+            }
+        } finally {
+            mqttTopic = null
+            withContext(NonCancellable) { runCatching { link.unfollow(topic) } }
+        }
+    }
+
+    private fun onMqtt(sub: String, payload: String) {
+        when (sub) {
+            "status" -> _snapshot.update { it.copy(conn = if (payload.trim().equals("offline", true)) ConnState.OFFLINE else ConnState.ONLINE) }
+            "v" -> {
+                val patch = WledXml.statePatch(payload) ?: return
+                val base = synchronized(lock) { rawState }.let { st ->
+                    if ((st["seg"] as? JsonArray)?.isNotEmpty() == true) st
+                    else JsonObject(st + mapOf(
+                        "mainseg" to JsonPrimitive(0),
+                        "seg" to buildJsonArray {
+                            add(buildJsonObject {
+                                put("id", 0); put("start", 0); put("stop", _snapshot.value.info?.ledCount ?: 0)
+                                put("sel", true); put("on", true)
+                            })
+                        },
+                    ))
+                }
+                val merged = StatePatch.apply(base, patch).let { JsonObject(it + ("ps" to JsonPrimitive(WledXml.preset(payload)))) }
+                _snapshot.update { it.copy(conn = ConnState.ONLINE) }
+                incomingState(merged)
+            }
+        }
+    }
+
+    /** What it last told the app at home: names, effect details and presets. */
+    private fun loadCached() {
+        val c = cache ?: return
+        (c.load(id, DeviceCache.FULL) as? JsonObject)?.let { o ->
+            val hasState = synchronized(lock) { rawState.isNotEmpty() }
+            handleMessage(if (hasState) JsonObject(o - "state") else o)
+        }
+        if (_snapshot.value.fxData.isEmpty()) {
+            (c.load(id, DeviceCache.FX_DATA) as? JsonArray)?.map { it.asString() ?: "" }?.let { fx -> _snapshot.update { it.copy(fxData = fx) } }
+        }
+        if (_snapshot.value.presets == null) {
+            (c.load(id, DeviceCache.PRESETS) as? JsonObject)?.let { p -> _snapshot.update { it.copy(presets = api.parsePresets(p)) } }
         }
     }
 
@@ -255,6 +368,17 @@ class DeviceController(
                 outQueue.removeFirstOrNull().also { if (it == null) flushing = false }
             } ?: return
             lastSentAt = SystemClock.elapsedRealtime()
+            val topic = mqttTopic
+            if (topic != null) {
+                try {
+                    mqtt?.command(topic, next.toString())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _snapshot.update { it.copy(conn = ConnState.OFFLINE) }
+                }
+                continue
+            }
             val viaSocket = socketOpen.get() && socket?.send(next.toString()) == true
             if (!viaSocket) {
                 try {
@@ -270,20 +394,29 @@ class DeviceController(
     }
 
     suspend fun refreshState() {
+        if (viaMqtt) return
         runCatching { handleMessage(api.get(host, "/json/si").jsonObject) }
             .onSuccess { _snapshot.update { it.copy(conn = ConnState.ONLINE) } }
     }
 
     suspend fun loadEffectData() {
-        runCatching { api.effectData(host) }.onSuccess { list -> _snapshot.update { it.copy(fxData = list) } }
+        if (viaMqtt) { loadCached(); return }
+        runCatching { api.effectData(host) }.onSuccess { list ->
+            _snapshot.update { it.copy(fxData = list) }
+            cache?.save(id, DeviceCache.FX_DATA, JsonArray(list.map { JsonPrimitive(it) }))
+        }
     }
 
     suspend fun loadPresets() {
-        runCatching { api.presets(host) }.onSuccess { list -> _snapshot.update { it.copy(presets = list) } }
+        if (viaMqtt) { loadCached(); return }
+        runCatching { api.presetsJson(host) }.onSuccess { raw ->
+            _snapshot.update { it.copy(presets = api.parsePresets(raw)) }
+            cache?.save(id, DeviceCache.PRESETS, raw)
+        }
     }
 
     suspend fun loadPalettePreviews() {
-        if (_snapshot.value.palettePreviews.isNotEmpty()) return
+        if (_snapshot.value.palettePreviews.isNotEmpty() || viaMqtt) return
         runCatching { api.palettePreviews(host) }.onSuccess { map -> _snapshot.update { it.copy(palettePreviews = map) } }
     }
 

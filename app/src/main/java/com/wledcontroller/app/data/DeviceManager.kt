@@ -15,6 +15,8 @@ class DeviceManager(
     private val wsClient: OkHttpClient,
     store: AppStore,
     private val scope: CoroutineScope,
+    private val mqtt: MqttLink? = null,
+    private val cache: DeviceCache? = null,
 ) {
     private val controllers = LinkedHashMap<String, DeviceController>()
     private val _list = MutableStateFlow<List<DeviceController>>(emptyList())
@@ -36,10 +38,13 @@ class DeviceManager(
         for (d in devices) {
             val existing = controllers[d.id]
             if (existing != null && WledApi.normalizeHost(existing.device.host) == WledApi.normalizeHost(d.host)) {
+                val remoteChanged = existing.device.remoteHost != d.remoteHost || existing.device.mqttTopic != d.mqttTopic
                 existing.device = d
+                // A new way to reach it from afar: try it now rather than after the next retry.
+                if (remoteChanged && foreground) existing.reconnect()
             } else {
                 existing?.dispose()
-                val c = DeviceController(d, api, wsClient, scope)
+                val c = DeviceController(d, api, wsClient, scope, mqtt, cache)
                 controllers[d.id] = c
                 if (foreground) c.start()
             }

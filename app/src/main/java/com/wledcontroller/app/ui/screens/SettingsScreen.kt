@@ -117,6 +117,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
 
             Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Column(Modifier.padding(16.dp)) { RemoteSetting() }
+            }
+
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                 Column(Modifier.padding(16.dp)) { LightsDelaySetting() }
             }
 

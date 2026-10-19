@@ -361,6 +361,7 @@ private fun DeviceCard(controller: DeviceController, onClick: () -> Unit) {
                                 if (state?.on == true) "${(state.bri * 100 / 255).coerceAtLeast(1)}%" else "Off",
                                 effect,
                                 snap.info?.let { "${it.ledCount} LEDs" },
+                                snap.route.takeIf { it != com.wledcontroller.app.data.Route.LOCAL }?.let { "via ${it.label}" },
                             ).joinToString(" · ")
                         }
                         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)

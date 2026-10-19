@@ -231,7 +231,7 @@ fun WebUiScreen(deviceId: String, onBack: () -> Unit) {
     val container = LocalAppContainer.current
     val controller = container.devices.get(deviceId)
     var webView by remember { mutableStateOf<WebView?>(null) }
-    val url = controller?.let { container.api.baseUrl(it.device.host) + "/" }
+    val url = controller?.let { container.api.baseUrl(it.apiHost) + "/" }
 
     BackHandler {
         val wv = webView

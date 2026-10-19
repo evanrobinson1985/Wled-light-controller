@@ -171,7 +171,7 @@ private fun LedSetupContent(controller: DeviceController, onBack: () -> Unit) {
     LaunchedEffect(reloadKey) {
         loading = true; error = null
         try {
-            val led = container.api.config(controller.device.host).obj("hw")?.obj("led")
+            val led = container.api.config(controller.apiHost).obj("hw")?.obj("led")
                 ?: throw IllegalStateException("This firmware doesn't expose its LED configuration.")
             ledConfig = led
             outputs.clear()
@@ -319,7 +319,7 @@ private fun LedSetupContent(controller: DeviceController, onBack: () -> Unit) {
                                     }
                                 }
                             }
-                            container.api.postConfig(controller.device.host, body)
+                            container.api.postConfig(controller.apiHost, body)
                             delay(600)
                             controller.reboot()
                             delay(500)
