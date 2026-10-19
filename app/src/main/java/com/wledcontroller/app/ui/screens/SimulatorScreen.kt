@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
@@ -87,6 +89,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -101,6 +106,10 @@ import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.LightProfile
 import com.wledcontroller.app.data.SavedDevice
 import com.wledcontroller.app.house.HouseMap
+import com.wledcontroller.app.house.LightRun
+import com.wledcontroller.app.house.formatLength
+import com.wledcontroller.app.house.pivot
+import com.wledcontroller.app.house.transformed
 import com.wledcontroller.app.house.VendorCatalog
 import com.wledcontroller.app.house.XlightsModels
 import com.wledcontroller.app.house.placedLeds
@@ -111,6 +120,7 @@ import com.wledcontroller.app.ui.components.drawPixel
 import com.wledcontroller.app.ui.components.neighbourGaps
 import com.wledcontroller.app.ui.components.pixelRadius
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -123,7 +133,7 @@ private fun rememberNow(): Long {
     return now
 }
 
-private class SimLed(val device: SimDevice, val deviceId: String, val index: Int, val x: Float, val y: Float, val bullet: Boolean, val gap: Float)
+private class SimLed(val device: SimDevice, val deviceId: String, val runId: String, val index: Int, val x: Float, val y: Float, val bullet: Boolean, val gap: Float)
 
 /** Every mapped LED of a simulated controller, with what it looks like. */
 @Composable
@@ -140,7 +150,7 @@ private fun rememberSimLeds(map: HouseMap): List<SimLed> {
             // Lights out of sight in the photo aren't drawn (their controller still runs them).
             if (l.hidden) null else SimHub.find(hostOf[l.deviceId])?.let { d ->
                 val bullet = LightProfile.parse(profiles[LightProfile.deviceKey(l.deviceId)]) == LightProfile.BULLETS
-                SimLed(d, l.deviceId, l.index, l.x, l.y, bullet, gaps[i])
+                SimLed(d, l.deviceId, map.runs[l.runIndex].id, l.index, l.x, l.y, bullet, gaps[i])
             }
         }
     }
@@ -158,11 +168,30 @@ private fun DrawScope.glow(color: Int, center: Offset, radius: Float, bullet: Bo
     drawCircle(c, radius, center)
 }
 
-/** The virtual house with every simulated light drawn live. */
+/**
+ * The virtual house with every simulated light drawn live. While [arranging], tapping a prop
+ * picks it ([onSelectRun]) and the picked one ([selectedRunId]) follows drags, pinches and taps.
+ */
 @Composable
-fun SimHouseView(modifier: Modifier = Modifier, bulbSize: Float = 1f, onTapDevice: ((String) -> Unit)? = null) {
+fun SimHouseView(
+    modifier: Modifier = Modifier,
+    bulbSize: Float = 1f,
+    onTapDevice: ((String) -> Unit)? = null,
+    arranging: Boolean = false,
+    selectedRunId: String? = null,
+    onSelectRun: (String) -> Unit = {},
+) {
     val container = LocalAppContainer.current
-    val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
+    val stored by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
+    // The prop being moved, ahead of the saved map so its lights follow the finger.
+    var live by remember { mutableStateOf<LightRun?>(null) }
+    suspend fun save(run: LightRun) = container.store.updateHouseMap { m -> m.copy(runs = m.runs.map { if (it.id == run.id) run else it }) }
+    LaunchedEffect(selectedRunId) { live?.let { save(it) }; live = null }
+    // Saved once the fingers rest.
+    LaunchedEffect(live) { val l = live ?: return@LaunchedEffect; delay(350); save(l) }
+    val map = live?.let { l -> stored.copy(runs = stored.runs.map { if (it.id == l.id) l else it }) } ?: stored
+    val selectedStored by rememberUpdatedState(stored.runs.firstOrNull { it.id == selectedRunId })
+    val select by rememberUpdatedState(onSelectRun)
     val photo = rememberPhoto(map.photoPath)
     val leds = rememberSimLeds(map)
     val now = rememberNow()
@@ -177,22 +206,52 @@ fun SimHouseView(modifier: Modifier = Modifier, bulbSize: Float = 1f, onTapDevic
     ) {
         if (photo != null) Image(photo, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
         Canvas(
-            Modifier.fillMaxSize().pointerInput(leds) {
+            Modifier.fillMaxSize().pointerInput(leds, arranging) {
                 detectTapGestures { o ->
-                    val hit = leds.minByOrNull { l ->
+                    val near = leds.minByOrNull { l ->
                         val dx = l.x * size.width - o.x; val dy = l.y * size.height - o.y
                         dx * dx + dy * dy
-                    } ?: return@detectTapGestures
-                    val dx = hit.x * size.width - o.x; val dy = hit.y * size.height - o.y
-                    if (dx * dx + dy * dy < (40.dp.toPx() * 40.dp.toPx())) tap?.invoke(hit.deviceId)
+                    }?.takeIf { l ->
+                        val dx = l.x * size.width - o.x; val dy = l.y * size.height - o.y
+                        dx * dx + dy * dy < (40.dp.toPx() * 40.dp.toPx())
+                    }
+                    if (!arranging) { near?.let { tap?.invoke(it.deviceId) }; return@detectTapGestures }
+                    val picked = live ?: selectedStored
+                    // A tap on another prop picks it; anywhere else sends the picked one there.
+                    if (near != null && near.runId != picked?.id) select(near.runId)
+                    else if (picked != null && near == null) {
+                        val c = picked.pivot() ?: return@detectTapGestures
+                        live = picked.transformed(o.x / size.width - c.x, o.y / size.height - c.y)
+                    }
                 }
-            }
+            }.then(
+                if (!arranging) Modifier
+                else Modifier.pointerInput(selectedRunId) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        val run = live ?: selectedStored ?: return@detectTransformGestures
+                        live = run.transformed(pan.x / size.width, pan.y / size.height, zoom)
+                    }
+                }
+            )
         ) {
             val frames = HashMap<SimDevice, IntArray>()
             for (l in leds) {
                 val f = frames.getOrPut(l.device) { l.device.frame(now) }
                 val r = pixelRadius(pixel, l.gap, scale = bulbSize)
                 glow(f.getOrElse(l.index) { 0 }, Offset(l.x * size.width, l.y * size.height), r, l.bullet)
+            }
+            if (arranging) {
+                // A dashed frame round the picked prop.
+                val mine = leds.filter { it.runId == selectedRunId }
+                if (mine.isNotEmpty()) {
+                    val pad = 8.dp.toPx()
+                    val left = mine.minOf { it.x } * size.width - pad; val top = mine.minOf { it.y } * size.height - pad
+                    val right = mine.maxOf { it.x } * size.width + pad; val bottom = mine.maxOf { it.y } * size.height + pad
+                    drawRect(
+                        Color.White, Offset(left, top), Size(right - left, bottom - top),
+                        style = Stroke(1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))),
+                    )
+                }
             }
         }
         if (leds.isEmpty()) {
@@ -290,6 +349,8 @@ fun SimulatorScreen(
     var confirmReset by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var addingProp by remember { mutableStateOf(false) }
+    var arranging by remember { mutableStateOf(false) }
+    var selectedRun by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var removing by remember { mutableStateOf<SavedDevice?>(null) }
     val miniView by sim.miniView.collectAsStateWithLifecycle()
@@ -349,6 +410,8 @@ fun SimulatorScreen(
                 onOpenDevice = onOpenDevice, onOpenGroup = onOpenGroup, onOpenHouse = onOpenHouse, onOpenShows = onOpenShows,
                 onOpenShow = onOpenShow, onOpenSchedule = onOpenSchedule, onOpenMap = onOpenMap,
                 onAdd = { adding = true }, onAddProp = { addingProp = true }, onRemove = { removing = it },
+                arranging = arranging, selectedRunId = selectedRun, onSelectRun = { selectedRun = it },
+                onArrange = { on -> arranging = on; if (!on) selectedRun = null; note = null },
                 onLeave = { run("Putting your lights back…") { sim.leave() } },
                 enabled = busy == null,
             )
@@ -387,7 +450,9 @@ fun SimulatorScreen(
                 heightCm = VendorCatalog.lengthCm(m.height) ?: prop.heightCm,
             )
             note = "${run.name} is on the house with its own simulated controller (${run.count} LEDs)" +
-                (if (run.realWidthCm != null) ", at its real size" else "") + ". Move it in Edit map."
+                (if (run.realWidthCm != null) ", at its real size" else "") + "."
+            // Picked, ready to be dragged into place.
+            arranging = true; selectedRun = run.id
         }
     }
     removing?.let { d ->
@@ -449,6 +514,10 @@ private fun ActiveSimulator(
     onOpenMap: () -> Unit,
     onAdd: () -> Unit,
     onAddProp: () -> Unit,
+    arranging: Boolean,
+    selectedRunId: String?,
+    onSelectRun: (String) -> Unit,
+    onArrange: (Boolean) -> Unit,
     onRemove: (SavedDevice) -> Unit,
     onLeave: () -> Unit,
     enabled: Boolean,
@@ -459,8 +528,28 @@ private fun ActiveSimulator(
     val shows by container.sequences.all.collectAsStateWithLifecycle()
     SimHub.version.collectAsStateWithLifecycle().value // Refresh summaries when a controller changes.
 
-    SimHouseView(Modifier.heightIn(max = 420.dp), onTapDevice = onOpenDevice)
-    Text(
+    SimHouseView(
+        Modifier.heightIn(max = 420.dp), onTapDevice = onOpenDevice,
+        arranging = arranging, selectedRunId = selectedRunId, onSelectRun = onSelectRun,
+    )
+    if (arranging) {
+        val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
+        val picked = map.runs.firstOrNull { it.id == selectedRunId }
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+            Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(picked?.name ?: "Tap a prop to pick it", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (picked == null) "Then drag it to move it, or pinch to make it bigger or smaller."
+                        else "Drag to move it, pinch to resize, or tap where it should go. Tap another prop to pick that one." +
+                            (picked.realWidthCm?.let { w -> picked.realHeightCm?.let { h -> " Now ${formatLength(w, map.useInches)} × ${formatLength(h, map.useInches)}." } } ?: ""),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Button(onClick = { onArrange(false) }) { Text("Done") }
+            }
+        }
+    } else Text(
         "Tap a light to open its controller. Whatever you do in the app shows up here live — and in the floating view on other screens.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -473,6 +562,7 @@ private fun ActiveSimulator(
         OutlinedButton(onClick = onOpenHouse) { Icon(Icons.Filled.Home, null); Spacer(Modifier.width(6.dp)); Text("Whole-house effects") }
         OutlinedButton(onClick = onOpenShows) { Icon(Icons.Filled.Movie, null); Spacer(Modifier.width(6.dp)); Text("Shows") }
         OutlinedButton(onClick = onOpenSchedule) { Icon(Icons.Filled.Schedule, null); Spacer(Modifier.width(6.dp)); Text("Schedule") }
+        OutlinedButton(onClick = { onArrange(true) }, enabled = !arranging) { Icon(Icons.Filled.OpenWith, null); Spacer(Modifier.width(6.dp)); Text("Arrange props") }
         OutlinedButton(onClick = onOpenMap) { Icon(Icons.Filled.Edit, null); Spacer(Modifier.width(6.dp)); Text("Edit map") }
         groups.forEach { g ->
             OutlinedButton(onClick = { onOpenGroup(g.id) }) { Icon(Icons.Filled.Workspaces, null); Spacer(Modifier.width(6.dp)); Text(g.name) }

@@ -128,4 +128,18 @@ class HouseMapTest {
         assertEquals(0.2f, plain[1].y - plain[0].y, 1e-4f)
         assertEquals(0.2f, plain[1].x - plain[0].x, 1e-4f)
     }
+
+    @Test
+    fun propsMoveAndResizeAboutTheirMiddle() {
+        val run = LightRun("p", "Star", "d", 0, 10, points = listOf(MapPoint(0.4f, 0.4f), MapPoint(0.6f, 0.5f)),
+            model = PropModel(ModelKind.STAR), realWidthCm = 100f, realHeightCm = 50f)
+        assertEquals(0.5f, run.pivot()!!.x, 1e-5f); assertEquals(0.45f, run.pivot()!!.y, 1e-5f)
+        val moved = run.transformed(0.1f, -0.05f)
+        assertEquals(0.5f, moved.points[0].x, 1e-5f); assertEquals(0.35f, moved.points[0].y, 1e-5f)
+        assertEquals(100f, moved.realWidthCm!!, 1e-4f)
+        val bigger = run.transformed(0f, 0f, zoom = 2f)
+        assertEquals(0.3f, bigger.points[0].x, 1e-5f); assertEquals(0.7f, bigger.points[1].x, 1e-5f)
+        assertEquals(0.5f, bigger.pivot()!!.x, 1e-5f)
+        assertEquals(200f, bigger.realWidthCm!!, 1e-4f); assertEquals(100f, bigger.realHeightCm!!, 1e-4f)
+    }
 }

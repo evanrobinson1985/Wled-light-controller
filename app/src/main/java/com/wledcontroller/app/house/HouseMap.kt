@@ -285,3 +285,24 @@ fun List<MapPoint?>.fillGaps(): List<MapPoint?> {
         }
     }
 }
+
+/** The middle of what the run was placed with (its box, traced line or LEDs), or null if it isn't placed. */
+fun LightRun.pivot(): MapPoint? {
+    val pts = ledPoints?.filterNotNull() ?: points
+    if (pts.isEmpty()) return null
+    return MapPoint((pts.minOf { it.x } + pts.maxOf { it.x }) / 2f, (pts.minOf { it.y } + pts.maxOf { it.y }) / 2f)
+}
+
+/**
+ * The run moved by [dx], [dy] (fractions of the picture) and scaled by [zoom] about [pivot],
+ * keeping its shape. A model's real size scales with it.
+ */
+fun LightRun.transformed(dx: Float, dy: Float, zoom: Float = 1f, pivot: MapPoint = this.pivot() ?: MapPoint(0.5f, 0.5f)): LightRun {
+    fun t(p: MapPoint) = MapPoint(pivot.x + (p.x - pivot.x) * zoom + dx, pivot.y + (p.y - pivot.y) * zoom + dy)
+    return copy(
+        points = points.map(::t),
+        ledPoints = ledPoints?.map { it?.let(::t) },
+        realWidthCm = realWidthCm?.times(zoom),
+        realHeightCm = realHeightCm?.times(zoom),
+    )
+}
