@@ -50,6 +50,8 @@ class DdpSender : AutoCloseable {
 
     private fun sendDmx(fixtureId: String, frame: ByteArray) {
         val u = com.wledcontroller.app.data.DmxRegistry.stage(fixtureId, frame) ?: return
+        // The simulator's DMX node takes it in the app.
+        if (com.wledcontroller.app.sim.SimHub.deliverDmx(u.host, u.number, u.data)) return
         val addr = addresses.getOrPut(u.host) { InetAddress.getByName(u.host) }
         val key = "dmx:${u.host}/${u.number}"
         val seq = (universeSeq[key] ?: 0).let { (it + 1) and 0xFF }.also { universeSeq[key] = it }

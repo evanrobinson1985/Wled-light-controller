@@ -72,6 +72,40 @@ data class DmxFixture(
         }
     }
 
+    /**
+     * What this fixture shows for its universe's values ([universe] = the 512 channels): colour
+     * (0xRRGGBB, with the dimmer and white mixed in, black when the shutter is shut) and aim.
+     */
+    fun read(universe: ByteArray): DmxLook {
+        fun v(i: Int) = universe.getOrNull(address - 1 + i)?.toInt()?.and(0xFF) ?: 0
+        var r = 0; var g = 0; var b = 0; var w = 0
+        var dimmer = 255; var open = true
+        var pan = 0; var panFine = 0; var tilt = 0; var tiltFine = 0
+        var hasPan = false; var hasTilt = false
+        channels.forEachIndexed { i, c ->
+            when (c.role) {
+                DmxRole.RED -> r = v(i)
+                DmxRole.GREEN -> g = v(i)
+                DmxRole.BLUE -> b = v(i)
+                DmxRole.WHITE -> w = v(i)
+                DmxRole.DIMMER -> dimmer = v(i)
+                DmxRole.SHUTTER -> open = v(i) > 0
+                DmxRole.PAN -> { pan = v(i); hasPan = true }
+                DmxRole.PAN_FINE -> panFine = v(i)
+                DmxRole.TILT -> { tilt = v(i); hasTilt = true }
+                DmxRole.TILT_FINE -> tiltFine = v(i)
+                else -> Unit
+            }
+        }
+        val k = if (open) dimmer / 255f else 0f
+        fun ch(x: Int) = ((x + w).coerceAtMost(255) * k).toInt()
+        return DmxLook(
+            (ch(r) shl 16) or (ch(g) shl 8) or ch(b),
+            if (hasPan) ((pan shl 8) or panFine) / 65535f else 0.5f,
+            if (hasTilt) ((tilt shl 8) or tiltFine) / 65535f else 0.5f,
+        )
+    }
+
     companion object {
         private fun ch(vararg roles: DmxRole) = roles.map { DmxChannel(it, if (it == DmxRole.SHUTTER) 255 else 0) }
 
@@ -94,6 +128,9 @@ data class DmxFixture(
         )
     }
 }
+
+/** What a fixture is showing: its colour (brightness included) and where it points (0..1). */
+data class DmxLook(val rgb: Int, val pan: Float, val tilt: Float)
 
 /**
  * Keeps every DMX universe's current values and sends a whole universe whenever one of its

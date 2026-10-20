@@ -158,6 +158,53 @@ private fun rememberSimLeds(map: HouseMap): List<SimLed> {
     }
 }
 
+/** A DMX spotlight on the virtual house: where it is, and where its values arrive. */
+private class SimSpot(val fixture: com.wledcontroller.app.data.DmxFixture, val host: String, val x: Float, val y: Float)
+
+/**
+ * A spotlight: its head on the house and a beam of light into the night, in its colour and
+ * brightness, swung left and right by pan and raised or lowered by tilt.
+ */
+private fun DrawScope.spotlight(s: SimSpot, scale: Float) {
+    val data = SimHub.dmxUniverse(s.host, s.fixture.universe)
+    val look = data?.let { s.fixture.read(it) }
+    val o = Offset(s.x * size.width, s.y * size.height)
+    val head = 3.5.dp.toPx() * scale
+    val rgb = look?.rgb ?: 0
+    val level = maxOf((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF) / 255f
+    if (look == null || level < 0.02f) {
+        drawCircle(Color(0xFF3A3F4C), head, o)
+        return
+    }
+    // The colour at full strength; brightness goes into how strongly the beam shows.
+    val k = 1f / level.coerceAtLeast(0.01f)
+    val full = Color(
+        (((rgb shr 16) and 0xFF) * k / 255f).coerceIn(0f, 1f),
+        (((rgb shr 8) and 0xFF) * k / 255f).coerceIn(0f, 1f),
+        ((rgb and 0xFF) * k / 255f).coerceIn(0f, 1f),
+    )
+    val angle = (look.pan - 0.5f) * 2.6f                       // left / right of straight up
+    val len = size.height * (0.25f + 0.65f * look.tilt) * scale
+    val spread = 0.06f + 0.05f * (1f - look.tilt)
+    fun end(a: Float) = Offset(o.x + kotlin.math.sin(a) * len, o.y - kotlin.math.cos(a) * len)
+    val beam = androidx.compose.ui.graphics.Path().apply {
+        moveTo(o.x, o.y)
+        end(angle - spread).let { lineTo(it.x, it.y) }
+        end(angle + spread).let { lineTo(it.x, it.y) }
+        close()
+    }
+    drawPath(
+        beam,
+        androidx.compose.ui.graphics.Brush.radialGradient(
+            listOf(full.copy(alpha = 0.55f * level), full.copy(alpha = 0.18f * level), full.copy(alpha = 0f)),
+            center = o, radius = len,
+        ),
+        blendMode = BlendMode.Plus,
+    )
+    drawCircle(full.copy(alpha = 0.45f * level), head * 2.6f, o, blendMode = BlendMode.Plus)
+    drawCircle(full, head, o)
+}
+
 /** Glowing lights: a soft halo added to the scene, then the bulb itself. */
 private fun DrawScope.glow(color: Int, center: Offset, radius: Float, bullet: Boolean) {
     // Tiny, tightly packed lights (a pixel matrix) skip the wide halo and unlit outline: their
@@ -204,6 +251,17 @@ fun SimHouseView(
     val select by rememberUpdatedState(onSelectRun)
     val photo = rememberPhoto(map.photoPath)
     val leds = rememberSimLeds(map)
+    // DMX spotlights placed on the house, drawn from what the simulated DMX node receives.
+    val fixtures by container.store.fixtures.collectAsStateWithLifecycle(emptyList())
+    val outputs by container.store.outputs.collectAsStateWithLifecycle(emptyList())
+    val spots = remember(map, fixtures, outputs) {
+        fixtures.mapNotNull { f ->
+            val out = outputs.firstOrNull { it.id == f.outputId }?.takeIf { SimHub.isSimulatedDmx(it.host) } ?: return@mapNotNull null
+            val run = map.runs.firstOrNull { it.deviceId == f.id } ?: return@mapNotNull null
+            val p = map.positions(run).firstOrNull { it != null } ?: return@mapNotNull null
+            SimSpot(f, out.host, p.x, p.y)
+        }
+    }
     val now = rememberNow()
     val tap by rememberUpdatedState(onTapDevice)
     val pixel = LocalPixelStyle.current
@@ -244,6 +302,7 @@ fun SimHouseView(
                 }
             )
         ) {
+            spots.forEach { spotlight(it, bulbSize) }
             val frames = HashMap<SimDevice, IntArray>()
             for (l in leds) {
                 val f = frames.getOrPut(l.device) { l.device.frame(now) }
@@ -491,7 +550,7 @@ private fun Intro(enabled: Boolean, onStart: () -> Unit) {
             Icon(Icons.Filled.Science, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
             Text("Try everything on a virtual house", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
-                "The simulator lights up a virtual house with six simulated WLED controllers: a roofline strip along the house and garage, icicles hanging from both eaves, bullet lights round the windows and door, a mega tree, arches and bushes in the yard, and a dense pixel matrix covering the garage door. They behave like the real thing, so you can try every part of the app and watch the result live:",
+                "The simulator lights up a virtual house with six simulated WLED controllers: a roofline strip along the house and garage, icicles hanging from both eaves, bullet lights round the windows and door, a mega tree, arches and bushes in the yard, a dense pixel matrix covering the garage door, and six DMX moving-head spotlights on the roofs. They behave like the real thing, so you can try every part of the app and watch the result live:",
                 style = MaterialTheme.typography.bodyMedium,
             )
             listOf(

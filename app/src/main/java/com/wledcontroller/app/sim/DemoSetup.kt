@@ -8,6 +8,9 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import com.wledcontroller.app.data.AppStore
+import com.wledcontroller.app.data.DmxFixture
+import com.wledcontroller.app.data.OutputProtocol
+import com.wledcontroller.app.data.PixelOutput
 import com.wledcontroller.app.data.DeviceGroup
 import com.wledcontroller.app.data.LightProfile
 import com.wledcontroller.app.data.SavedDevice
@@ -21,6 +24,8 @@ import com.wledcontroller.app.house.MapPoint
 import com.wledcontroller.app.house.PropGroup
 import com.wledcontroller.app.house.PropType
 import com.wledcontroller.app.show.Clip
+import com.wledcontroller.app.show.CurveShape
+import com.wledcontroller.app.show.ValueCurve
 import com.wledcontroller.app.show.Playlist
 import com.wledcontroller.app.show.ScheduleEntry
 import com.wledcontroller.app.show.SeqEffect
@@ -97,6 +102,17 @@ object DemoSetup {
     private const val GARAGE_ROOF_LEDS = 85
     private const val ROOF_LEDS = HOUSE_ROOF_LEDS + GARAGE_ROOF_LEDS
 
+    /** Where the moving-head spotlights sit: four on the house roof's slopes, two on the garage's. */
+    private val houseSpots get() = listOf(0.31f, 0.40f, 0.56f, 0.65f).map { x ->
+        MapPoint(x, (if (x < 0.48f) EAVE_Y - (x - 0.23f) else 0.17f + (x - 0.48f)) - 0.012f)
+    }
+    private val garageSpots get() = garageRoof.let { (l, peak, r) ->
+        fun lerp(a: MapPoint, b: MapPoint, f: Float) = MapPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f - 0.01f)
+        listOf(lerp(l, peak, 0.45f), lerp(peak, r, 0.55f))
+    }
+    /** The simulated DMX node the spotlights are patched to (E1.31, universe 1). */
+    private const val DMX_HOST = "127.77.1.1"
+
     /** Icicle drops: how many LEDs each hangs, repeating, and how far apart they are. */
     private val ICICLE_DROPS = intArrayOf(3, 5, 4, 6, 4)
     private const val ICICLE_STEP_X = 0.0125f
@@ -120,12 +136,25 @@ object DemoSetup {
         val garageIcicles = icicles(GARAGE_LEFT + 0.004f, GARAGE_RIGHT - 0.004f, GARAGE_EAVE + 0.006f)
         val icicleLeds = houseIcicles.size + garageIcicles.size
 
+        // Six moving-head spotlights on a DMX node: 11 channels each, one after another in universe 1.
+        val dmxNode = PixelOutput(id = "sim-dmx", name = "DMX node (simulated)", host = DMX_HOST, protocol = OutputProtocol.E131, ledCount = 0)
+        val headChannels = DmxFixture.PRESETS.first { it.first.startsWith("Moving head + shutter") }.second
+        val spotPlaces = houseSpots.mapIndexed { i, p -> Triple("House spotlight ${i + 1}", "sim-spot-h${i + 1}", p) } +
+            garageSpots.mapIndexed { i, p -> Triple("Garage spotlight ${i + 1}", "sim-spot-g${i + 1}", p) }
+        val spots = spotPlaces.mapIndexed { i, (name, id, _) ->
+            DmxFixture(id = id, name = name, outputId = dmxNode.id, universe = 1, address = 1 + i * headChannels.size, channels = headChannels, type = "Moving head")
+        }
+
         val runs = listOf(
             LightRun("run-roof", "Roofline", roofDev.id, 0, HOUSE_ROOF_LEDS, roof, prop = PropType.LINE),
             LightRun("run-garage-roof", "Garage roofline", roofDev.id, HOUSE_ROOF_LEDS, GARAGE_ROOF_LEDS, garageRoof, prop = PropType.LINE),
             // Icicles hanging from the eaves, placed drop by drop.
             LightRun("run-icicles", "House icicles", icicleDev.id, 0, houseIcicles.size, ledPoints = houseIcicles, prop = PropType.LINE),
             LightRun("run-garage-icicles", "Garage icicles", icicleDev.id, houseIcicles.size, garageIcicles.size, ledPoints = garageIcicles, prop = PropType.LINE),
+        ) + spotPlaces.mapIndexed { i, (name, id, p) ->
+            // Each spotlight is a one-light run on the map, on its fixture.
+            LightRun("run-${id.removePrefix("sim-")}", name, spots[i].id, 0, 1, ledPoints = listOf(p), prop = PropType.STAR)
+        } + listOf(
             LightRun("run-lwin", "Left window", windowDev.id, 0, 32, outline(leftWindow), prop = PropType.WINDOW),
             LightRun("run-rwin", "Right window", windowDev.id, 32, 32, outline(rightWindow), prop = PropType.WINDOW),
             LightRun(
@@ -155,6 +184,9 @@ object DemoSetup {
             PropGroup("grp-bushes", "Bushes", listOf("run-bush1", "run-bush2")),
             PropGroup("grp-rooflines", "Rooflines", listOf("run-roof", "run-garage-roof")),
             PropGroup("grp-icicles", "Icicles", listOf("run-icicles", "run-garage-icicles")),
+            PropGroup("grp-house-spots", "House spotlights", (1..4).map { "run-spot-h$it" }),
+            PropGroup("grp-garage-spots", "Garage spotlights", (1..2).map { "run-spot-g$it" }),
+            PropGroup("grp-spots", "All spotlights", (1..4).map { "run-spot-h$it" } + (1..2).map { "run-spot-g$it" }),
         )
 
         val now = System.currentTimeMillis()
@@ -180,6 +212,8 @@ object DemoSetup {
         simFile.writeText(kotlinx.serialization.json.Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(SimDeviceData.serializer()), sims))
 
         listOf(roofDev, windowDev, treeDev, yardDev, garageDev, icicleDev).forEach { store.upsertDevice(it) }
+        store.upsertOutput(dmxNode)
+        spots.forEach { store.upsertFixture(it) }
         store.upsertGroup(DeviceGroup("sim-all", "Whole yard", listOf(roofDev.id, windowDev.id, treeDev.id, yardDev.id, garageDev.id, icicleDev.id)))
         store.setLightProfile(LightProfile.deviceKey(roofDev.id), LightProfile.STRIP)
         store.setLightProfile(LightProfile.deviceKey(windowDev.id), LightProfile.BULLETS)
@@ -266,6 +300,10 @@ object DemoSetup {
                 clip(11000, 13000, SeqEffect.SHIMMER, c(0x10C020, 0x40FF60)),
                 clip(32000, 8000, SeqEffect.SNOW, c(0xFFFFFF)),
             )),
+            // The spotlights: sweeping the sky, changing colour, flashing and fanning up at the end.
+            // The garage pair mirrors the house four.
+            Track("demo-t8", "House spotlights", group("grp-house-spots"), spotClips(::clip, mirrored = false)),
+            Track("demo-t9", "Garage spotlights", group("grp-garage-spots"), spotClips(::clip, mirrored = true)),
             Track("demo-t7", "Garage door", prop("run-garage"), listOf(
                 clip(11000, 13000, SeqEffect.TEXT, c(0xFF2020, 0x20C040), speed = 0.45f).copy(text = "Merry Christmas!"),
                 clip(32000, 8000, SeqEffect.PLASMA, c(0xFF1010, 0x10C020, 0xFFB040), speed = 0.5f),
@@ -274,6 +312,37 @@ object DemoSetup {
         return Sequence(
             id = "sim-demo-show", name = "Demo show", durationMs = 48_000, tracks = tracks,
             marks = (0L until 48_000L step 500L).toList(), bpm = 120f,
+        )
+    }
+
+    /**
+     * The spotlights' part in the demo show. [clip] makes a clip; [mirrored] swings the other
+     * way, so pairs of beams cross.
+     */
+    private fun spotClips(
+        clip: (Long, Long, SeqEffect, List<Int>, Float, Float, Long, Long) -> Clip,
+        mirrored: Boolean,
+    ): List<Clip> {
+        fun c(vararg rgb: Int) = rgb.map { it or (0xFF shl 24) }
+        fun pan(from: Float, to: Float) = if (mirrored) 1f - from to 1f - to else from to to
+        val (p1, p2) = pan(0.25f, 0.75f)
+        val (p3, p4) = pan(0.15f, 0.85f)
+        return listOf(
+            // Slow searchlight sweeps in warm white.
+            clip(0, 11000, SeqEffect.ON, c(0xFFF0D0), 0.5f, 0.5f, 800, 0)
+                .copy(pan = p1, panCurve = ValueCurve(CurveShape.SINE, end = p2, cycles = 2f), tilt = 0.75f),
+            // Christmas colours, darting about.
+            clip(11000, 13000, SeqEffect.COLOR_WAVE, c(0xFF1010, 0x10C020, 0xFFB040), 0.5f, 0.5f, 0, 0)
+                .copy(pan = p1, panCurve = ValueCurve(CurveShape.RANDOM, end = p2, cycles = 3f), tilt = 0.55f, tiltCurve = ValueCurve(CurveShape.UP_DOWN, end = 0.95f)),
+            // Rainbow beams scanning side to side.
+            clip(24000, 8000, SeqEffect.RAINBOW, c(0xFFFFFF), 0.6f, 0.5f, 0, 0)
+                .copy(pan = p3, panCurve = ValueCurve(CurveShape.SAW, end = p4, cycles = 2f), tilt = 0.8f),
+            // White strobe bursts, nodding up and down.
+            clip(32000, 8000, SeqEffect.STROBE, c(0xFFFFFF), 0.5f, 0.5f, 0, 0)
+                .copy(pan = 0.5f, tilt = 0.4f, tiltCurve = ValueCurve(CurveShape.SINE, end = 0.95f, cycles = 4f)),
+            // Gold, rising from the house to the sky for the finale.
+            clip(40000, 8000, SeqEffect.ON, c(0xFFC040), 0.5f, 0.5f, 600, 1500)
+                .copy(pan = if (mirrored) 0.62f else 0.38f, tilt = 0.25f, tiltCurve = ValueCurve(CurveShape.EASE_OUT, end = 1f)),
         )
     }
 

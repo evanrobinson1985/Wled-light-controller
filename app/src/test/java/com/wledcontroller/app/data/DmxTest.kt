@@ -69,4 +69,24 @@ class DmxTest {
         assertEquals(DmxRole.NONE, w.channels[12].role)   // dimmer fine stays 0
         assertNotNull(w.channels.firstOrNull { it.role == DmxRole.WHITE })
     }
+
+    @Test
+    fun aFixtureReadsBackWhatItWasSent() {
+        val head = DmxFixture(
+            name = "Spot", outputId = "o", address = 12,
+            channels = DmxFixture.PRESETS.first { it.first.startsWith("Moving head + shutter") }.second,
+        )
+        val universe = ByteArray(512)
+        System.arraycopy(head.values(0x804020, pan = 0.25f, tilt = 0.9f), 0, universe, 11, head.channels.size)
+        val look = head.read(universe)
+        assertEquals(0.25f, look.pan, 0.001f)
+        assertEquals(0.9f, look.tilt, 0.001f)
+        // The colour comes back with the dimmer applied (white mixed in from the RGBW channel).
+        val r = (look.rgb shr 16) and 0xFF
+        val g = (look.rgb shr 8) and 0xFF
+        assertTrue("red is brightest: ${Integer.toHexString(look.rgb)}", r > g && r in 0x70..0xA0)
+        // A shut shutter is dark.
+        universe[11 + head.channels.indexOfFirst { it.role == DmxRole.SHUTTER }] = 0
+        assertEquals(0, head.read(universe).rgb)
+    }
 }

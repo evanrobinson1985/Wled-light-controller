@@ -140,6 +140,22 @@ object SimHub {
         find(ip.joinToString("."))?.realtime(part, find(from)?.name ?: from)
     }
 
+    /** DMX universes sent to the simulated DMX node(s), by "host/universe". */
+    private val dmx = ConcurrentHashMap<String, ByteArray>()
+
+    /** Simulated DMX nodes live at 127.77.1.x, beside the simulated controllers. */
+    fun isSimulatedDmx(host: String) = WledApi.normalizeHost(host).startsWith("127.77.1.")
+
+    /** Takes a DMX universe meant for a simulated DMX node; false if [host] is a real one. */
+    fun deliverDmx(host: String, universe: Int, data: ByteArray): Boolean {
+        if (!isSimulatedDmx(host)) return false
+        dmx["${WledApi.normalizeHost(host)}/$universe"] = data.copyOf()
+        return true
+    }
+
+    /** The last values sent to a simulated DMX node's [universe], or null if none yet. */
+    fun dmxUniverse(host: String, universe: Int): ByteArray? = dmx["${WledApi.normalizeHost(host)}/$universe"]
+
     /** Takes a DDP frame meant for [host] if it's simulated. */
     fun deliverDdp(host: String, rgb: ByteArray): Boolean {
         val d = find(host) ?: return false
