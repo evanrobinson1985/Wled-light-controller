@@ -64,13 +64,24 @@ object DemoSetup {
     private const val ARCH_BASE = 0.90f
     private val bushes = listOf(MapPoint(0.33f, 0.79f), MapPoint(0.63f, 0.79f))
 
-    // The garage, joined on to the right of the house. Its double door is 16 ft × 7 ft at the
-    // house's scale (the 40 ft front wall spans 0.44 of the picture).
+    /**
+     * The house's real size: its front wall (0.26 to 0.70 of the picture) is 25 ft wide, which
+     * makes one picture height about 35.5 ft. Everything is drawn to that: the front door is
+     * 6 ft 8 in, the windows 4 ft, the walls 12 ft to the eaves, the garage door 16 × 7 ft.
+     */
+    private const val FRONT_WALL_FT = 25f
+    private const val FT_PER_HEIGHT = FRONT_WALL_FT / (0.44f * W / H)
+    private fun ftAcross(ft: Float) = ft / FT_PER_HEIGHT / (W.toFloat() / H)
+    private fun ftUp(ft: Float) = ft / FT_PER_HEIGHT
+
+    // The garage, joined on to the right of the house, with a 16 ft × 7 ft double door.
     private const val GARAGE_LEFT = 0.70f
-    private const val GARAGE_RIGHT = 0.92f
-    private const val GARAGE_EAVE = 0.53f
-    private const val GARAGE_PEAK = 0.445f
-    private val garageDoor = RectF(0.722f, 0.636f, 0.898f, 0.758f)
+    private const val GROUND = 0.758f
+    private val GARAGE_DOOR_LEFT = GARAGE_LEFT + ftAcross(0.6f)
+    private val garageDoor = RectF(GARAGE_DOOR_LEFT, GROUND - ftUp(7f), GARAGE_DOOR_LEFT + ftAcross(16f), GROUND)
+    private val GARAGE_RIGHT = garageDoor.right + ftAcross(0.6f)
+    private val GARAGE_EAVE = garageDoor.top - ftUp(1.2f)
+    private val GARAGE_PEAK = GARAGE_EAVE - ftUp(3.5f)
     /** The matrix on the door: 96 × 42 pixels, about 2 in apart. */
     private const val MATRIX_W = 96
     private const val MATRIX_H = 42
@@ -144,11 +155,11 @@ object DemoSetup {
         store.setLightProfile(LightProfile.deviceKey(treeDev.id), LightProfile.STRIP)
         store.setLightProfile(LightProfile.deviceKey(yardDev.id), LightProfile.BULLETS)
         store.setLightProfile(LightProfile.deviceKey(garageDev.id), LightProfile.MATRIX)
-        // The front wall is 40 ft wide, which gives the map its scale.
+        // The front wall is 25 ft wide, which gives the map its scale.
         store.updateHouseMap {
             HouseMap(
                 photoPath = photo, aspect = aspect, runs = runs, groups = groups,
-                scaleA = MapPoint(0.26f, 0.76f), scaleB = MapPoint(0.70f, 0.76f), scaleCm = 40 * 30.48f,
+                scaleA = MapPoint(0.26f, 0.76f), scaleB = MapPoint(0.70f, 0.76f), scaleCm = FRONT_WALL_FT * 30.48f,
             )
         }
 
