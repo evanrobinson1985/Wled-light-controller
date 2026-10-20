@@ -221,7 +221,7 @@ private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOp
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            if (snap.online) LiveStrip(controller, snap)
+            LiveStrip(controller, snap)
             if (snap.conn == ConnState.OFFLINE) {
                 Banner(
                     text = "Can't reach ${controller.device.host}. Check the device has power and is on your Wi-Fi" +
@@ -313,29 +313,22 @@ private fun Banner(text: String, action: String, onAction: () -> Unit, error: Bo
 }
 
 /**
- * What the controller's LEDs are showing right now, one dot per LED: the controller's own live
- * view (or the simulated controller's frames), so a change shows here as it happens.
+ * What the controller's LEDs show, one dot per LED, worked out in the app from the effect,
+ * colours, palette and settings chosen here (the same look-alike effects as the simulator), so
+ * it never waits on the controller and changes the moment a setting does.
  */
 @Composable
 private fun LiveStrip(controller: DeviceController, snap: DeviceSnapshot) {
     val count = snap.info?.ledCount?.takeIf { it > 0 } ?: return
-    val sim = com.wledcontroller.app.sim.SimHub.find(controller.device.host)
-    val samples: IntArray? = if (sim != null) {
-        var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-        LaunchedEffect(sim) { while (true) withFrameMillis { now = System.currentTimeMillis() } }
-        sim.frame(now)
-    } else {
-        DisposableEffect(controller) {
-            controller.setLiveView(true)
-            onDispose { controller.setLiveView(false) }
-        }
-        controller.liveColors.collectAsStateWithLifecycle().value
-    }
-    val colors = samples?.let { com.wledcontroller.app.data.LiveView.expand(it, count) } ?: IntArray(count)
+    val state = snap.state ?: return
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) withFrameMillis { now = System.currentTimeMillis() } }
+    val colors = com.wledcontroller.app.sim.StatePreview.render(state, snap.effects, snap.palettes, count, now)
     Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
         com.wledcontroller.app.ui.components.LedStripPreview(colors)
         Text(
-            if (samples == null) "Connecting to the live view…" else "Live · $count LEDs",
+            (if (state.on) "Preview · $count LEDs" else "Off · $count LEDs") +
+                (if (snap.info?.live == true) " · lights are playing a show or whole-house effect" else ""),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
