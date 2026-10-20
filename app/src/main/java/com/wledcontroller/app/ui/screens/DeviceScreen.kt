@@ -51,6 +51,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import com.wledcontroller.app.data.DeviceSnapshot
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.withFrameMillis
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -216,6 +221,7 @@ private fun DeviceContent(controller: DeviceController, onBack: () -> Unit, onOp
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+            if (snap.online) LiveStrip(controller, snap)
             if (snap.conn == ConnState.OFFLINE) {
                 Banner(
                     text = "Can't reach ${controller.device.host}. Check the device has power and is on your Wi-Fi" +
@@ -303,5 +309,36 @@ private fun Banner(text: String, action: String, onAction: () -> Unit, error: Bo
             Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onAction) { Text(action) }
         }
+    }
+}
+
+/**
+ * What the controller's LEDs are showing right now, one dot per LED: the controller's own live
+ * view (or the simulated controller's frames), so a change shows here as it happens.
+ */
+@Composable
+private fun LiveStrip(controller: DeviceController, snap: DeviceSnapshot) {
+    val count = snap.info?.ledCount?.takeIf { it > 0 } ?: return
+    val sim = com.wledcontroller.app.sim.SimHub.find(controller.device.host)
+    val samples: IntArray? = if (sim != null) {
+        var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(sim) { while (true) withFrameMillis { now = System.currentTimeMillis() } }
+        sim.frame(now)
+    } else {
+        DisposableEffect(controller) {
+            controller.setLiveView(true)
+            onDispose { controller.setLiveView(false) }
+        }
+        controller.liveColors.collectAsStateWithLifecycle().value
+    }
+    val colors = samples?.let { com.wledcontroller.app.data.LiveView.expand(it, count) } ?: IntArray(count)
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+        com.wledcontroller.app.ui.components.LedStripPreview(colors)
+        Text(
+            if (samples == null) "Connecting to the live view…" else "Live · $count LEDs",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }

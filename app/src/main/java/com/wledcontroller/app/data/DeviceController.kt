@@ -255,7 +255,12 @@ class DeviceController(
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 opened.set(true)
                 socketOpen.set(true)
+                if (liveWanted) webSocket.send("""{"lv":true}""")
                 _snapshot.update { it.copy(live = true, conn = ConnState.ONLINE) }
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                LiveView.parseBinary(bytes.toByteArray())?.let { colors -> _liveColors.value = colors; lastLiveAt = SystemClock.elapsedRealtime() }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -390,6 +395,37 @@ class DeviceController(
                 } catch (e: Exception) {
                     _snapshot.update { it.copy(conn = ConnState.OFFLINE) }
                 }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ live view
+
+    private val _liveColors = MutableStateFlow<IntArray?>(null)
+    /** What its LEDs are showing right now (sampled on long strips), while [setLiveView] is on. */
+    val liveColors: StateFlow<IntArray?> = _liveColors.asStateFlow()
+    @Volatile private var liveWanted = false
+    @Volatile private var lastLiveAt = 0L
+    private var liveJob: Job? = null
+
+    /**
+     * Starts or stops the live view. Over the WebSocket the controller pushes frames; when there's
+     * no socket (or it stops sending), /json/live is polled instead.
+     */
+    fun setLiveView(on: Boolean) {
+        if (on == liveWanted) return
+        liveWanted = on
+        if (socketOpen.get()) socket?.send(if (on) """{"lv":true}""" else """{"lv":false}""")
+        liveJob?.cancel()
+        if (!on) { _liveColors.value = null; return }
+        liveJob = scope.launch {
+            while (currentCoroutineContext().isActive) {
+                val pushed = socketOpen.get() && SystemClock.elapsedRealtime() - lastLiveAt < 1500
+                if (!pushed && !viaMqtt) {
+                    runCatching { api.get(host, "/json/live") as? JsonObject }.getOrNull()
+                        ?.let(LiveView::parseJson)?.let { _liveColors.value = it }
+                }
+                delay(if (pushed) 1000 else 300)
             }
         }
     }
