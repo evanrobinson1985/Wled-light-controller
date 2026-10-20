@@ -7,6 +7,12 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -84,6 +90,7 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
     val anyOn = online.any { it.second.state?.on == true }
     val avgBri = online.mapNotNull { it.second.state?.bri }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 128f
     var effectQuery by rememberSaveable { mutableStateOf("") }
+    var effectSettingsOpen by rememberSaveable { mutableStateOf(true) }
     val profiles by container.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
 
     Scaffold(
@@ -158,19 +165,6 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
 
             if (lead != null) {
                 val seg = lead.state?.activeSegment
-                SectionTitle("Effect speed & intensity")
-                GradientSlider(
-                    value = (seg?.sx ?: 128) / 255f,
-                    onValueChange = { v -> online.forEach { it.first.setSegValue("sx", (v * 255).roundToInt()) } },
-                    label = "Speed", height = 34.dp,
-                )
-                Spacer(Modifier.height(10.dp))
-                GradientSlider(
-                    value = (seg?.ix ?: 128) / 255f,
-                    onValueChange = { v -> online.forEach { it.first.setSegValue("ix", (v * 255).roundToInt()) } },
-                    label = "Intensity", height = 34.dp,
-                )
-
                 SectionTitle("Effect")
                 SearchField(effectQuery, { effectQuery = it }, "Search effects")
                 Spacer(Modifier.height(8.dp))
@@ -180,10 +174,39 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
                 val currentName = seg?.let { lead.effects.getOrNull(it.fx) }
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     names.take(if (effectQuery.isBlank()) 40 else 200).forEach { name ->
-                        SelectableRow(selected = name == currentName, onClick = {
-                            // Effect ids can differ between firmware versions, so match by name.
-                            online.forEach { (c, s) -> s.effects.indexOf(name).takeIf { it >= 0 }?.let(c::setEffect) }
-                        }) { Text(name, Modifier.weight(1f)) }
+                        val playing = name == currentName
+                        SelectableRow(selected = playing, onClick = {
+                            if (playing) effectSettingsOpen = !effectSettingsOpen
+                            else {
+                                // Effect ids can differ between firmware versions, so match by name.
+                                online.forEach { (c, s) -> s.effects.indexOf(name).takeIf { it >= 0 }?.let(c::setEffect) }
+                                effectSettingsOpen = true
+                            }
+                        }) {
+                            Text(name, Modifier.weight(1f))
+                            if (playing) Icon(if (effectSettingsOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, Modifier.padding(end = 8.dp))
+                        }
+                        // The playing effect's settings, right under it.
+                        AnimatedVisibility(visible = playing && effectSettingsOpen) {
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                                modifier = Modifier.padding(bottom = 4.dp),
+                            ) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    GradientSlider(
+                                        value = (seg?.sx ?: 128) / 255f,
+                                        onValueChange = { v -> online.forEach { it.first.setSegValue("sx", (v * 255).roundToInt()) } },
+                                        label = "Speed", height = 34.dp,
+                                    )
+                                    GradientSlider(
+                                        value = (seg?.ix ?: 128) / 255f,
+                                        onValueChange = { v -> online.forEach { it.first.setSegValue("ix", (v * 255).roundToInt()) } },
+                                        label = "Intensity", height = 34.dp,
+                                    )
+                                }
+                            }
+                        }
                     }
                     if (effectQuery.isBlank() && names.size > 40) {
                         Text("Search to see all ${names.size} effects", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

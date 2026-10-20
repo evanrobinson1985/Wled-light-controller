@@ -20,6 +20,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -284,7 +289,6 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val seg = snap.state?.activeSegment ?: return NoSegments()
-    val meta = snap.effectMeta(seg.fx)
     val favorites by container.store.favoriteEffects.collectAsStateWithLifecycle(emptySet())
     val profiles by container.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
     val profile = profiles.profileFor(controller.id, seg.id)
@@ -309,14 +313,37 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
             .sortedWith(compareBy<IndexedValue<String>>({ it.index != 0 }, { it.value.lowercase() }))
     }
 
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    val listState = rememberLazyListState()
+    // The playing effect's settings open under it; tapping it again folds them away.
+    var settingsOpen by rememberSaveable { mutableStateOf(true) }
+    // Two items come before the effects: the "now playing" bar and the search.
+    fun listIndexOf(fx: Int) = items.indexOfFirst { it.index == fx }.takeIf { it >= 0 }?.plus(2)
+    /** Scrolls just enough to show the effect at [fx] with its settings under it. */
+    fun reveal(fx: Int) = scope.launch {
+        delay(260) // Let the settings finish opening.
+        val index = listIndexOf(fx) ?: return@launch
+        val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+        if (info == null || info.offset < 0 || info.offset + info.size > listState.layoutInfo.viewportEndOffset) listState.animateScrollToItem(index)
+    }
+    val playingVisible by remember(items, seg.fx) {
+        derivedStateOf { listIndexOf(seg.fx)?.let { idx -> listState.layoutInfo.visibleItemsInfo.any { it.index == idx } } ?: true }
+    }
+
+    LazyColumn(state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
-            EffectControlsCard(
-                effectName = snap.effects.getOrNull(seg.fx) ?: "Effect ${seg.fx}",
-                paletteName = if (meta.usesPalette) snap.palettes.getOrNull(seg.pal) else null,
-                seg = seg, meta = meta, controller = controller,
-            )
-            Spacer(Modifier.height(10.dp))
+            // What's playing, with a shortcut to its settings when they're scrolled out of sight.
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Playing: " + (snap.effects.getOrNull(seg.fx) ?: "Effect ${seg.fx}"),
+                    style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                )
+                if (!playingVisible || !settingsOpen) {
+                    TextButton(onClick = { settingsOpen = true; listIndexOf(seg.fx)?.let { scope.launch { listState.animateScrollToItem(it) } } }) {
+                        Icon(Icons.Filled.Tune, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Its settings")
+                    }
+                }
+            }
         }
         item {
             SearchField(query, { query = it }, "Search ${snap.effects.count(::isRealName)} effects")
@@ -331,22 +358,43 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
         }
         items(items, key = { it.index }) { (i, name) ->
             val m = snap.effectMeta(i)
-            SelectableRow(
-                selected = seg.fx == i,
-                onClick = {
-                    controller.setEffect(i)
-                    profile?.effectSpeed?.let { controller.setSegValue("sx", it) }
-                },
-            ) {
-                Text(name, Modifier.weight(1f), fontWeight = if (seg.fx == i) FontWeight.SemiBold else FontWeight.Normal)
-                if (m.is2D) Badge("2D")
-                if (m.isAudio) Badge("♪")
-                IconButton(onClick = { scope.launch { container.store.toggleFavoriteEffect(name) } }) {
-                    val fav = name in favorites
-                    Icon(
-                        if (fav) Icons.Filled.Star else Icons.Filled.StarBorder,
-                        if (fav) "Unfavourite" else "Favourite",
-                        tint = if (fav) Color(0xFFFFC107) else MaterialTheme.colorScheme.onSurfaceVariant,
+            Column {
+                SelectableRow(
+                    selected = seg.fx == i,
+                    onClick = {
+                        if (seg.fx == i) settingsOpen = !settingsOpen
+                        else {
+                            controller.setEffect(i)
+                            profile?.effectSpeed?.let { controller.setSegValue("sx", it) }
+                            settingsOpen = true
+                        }
+                        if (settingsOpen) reveal(i)
+                    },
+                ) {
+                    Text(name, Modifier.weight(1f), fontWeight = if (seg.fx == i) FontWeight.SemiBold else FontWeight.Normal)
+                    if (m.is2D) Badge("2D")
+                    if (m.isAudio) Badge("♪")
+                    IconButton(onClick = { scope.launch { container.store.toggleFavoriteEffect(name) } }) {
+                        val fav = name in favorites
+                        Icon(
+                            if (fav) Icons.Filled.Star else Icons.Filled.StarBorder,
+                            if (fav) "Unfavourite" else "Favourite",
+                            tint = if (fav) Color(0xFFFFC107) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (seg.fx == i) {
+                        Icon(
+                            if (settingsOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            if (settingsOpen) "Hide settings" else "Show settings",
+                            Modifier.padding(end = 8.dp),
+                        )
+                    }
+                }
+                AnimatedVisibility(visible = seg.fx == i && settingsOpen) {
+                    EffectControlsCard(
+                        paletteName = if (m.usesPalette) snap.palettes.getOrNull(seg.pal) else null,
+                        seg = seg, meta = m, controller = controller,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
                     )
                 }
             }
@@ -356,17 +404,16 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
 
 @Composable
 private fun EffectControlsCard(
-    effectName: String,
     paletteName: String?,
     seg: Segment,
     meta: EffectMeta,
     controller: DeviceController,
+    modifier: Modifier = Modifier,
 ) {
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        Column(Modifier.padding(16.dp)) {
-            Text(effectName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh), modifier = modifier) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)) {
             if (paletteName != null) {
-                Text("Palette: $paletteName", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Palette: $paletteName", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
             }
             val values = listOf(seg.sx, seg.ix, seg.c1, seg.c2, seg.c3)
             var any = false
