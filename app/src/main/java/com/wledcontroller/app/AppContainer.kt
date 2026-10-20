@@ -48,6 +48,8 @@ class AppContainer(context: Context) {
     val showRunner = ShowRunner(store, api, sequences, house, scope)
     val backup = com.wledcontroller.app.data.Backup(context, store, sequences)
     val simulator = com.wledcontroller.app.sim.Simulator(context, store, backup, sequences, house, player, devices)
+    /** Keeps the watch app's controller list up to date. */
+    val wear = com.wledcontroller.app.wear.WearBridge(context, store, scope)
 
     init {
         com.wledcontroller.app.show.AndroidRasters.install()

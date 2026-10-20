@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "WledLightController"
 include(":app")
+include(":wear")

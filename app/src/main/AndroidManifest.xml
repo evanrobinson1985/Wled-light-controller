@@ -70,6 +70,16 @@
                 android:value="Plays the user's scheduled light shows (music and synchronised lighting) on their WLED controllers" />
         </service>
 
+        <!-- The watch app's requests, passed on to the controllers. -->
+        <service
+            android:name=".wear.WearRelayService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.REQUEST_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/wled" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".show.BootReceiver"
             android:exported="true">
