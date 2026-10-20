@@ -36,4 +36,17 @@ class GhostsTest {
         val b = (0 until 80).map { HouseRenderer.color(p, it / 79f, 0.4f, 6f, it, it) }
         assertTrue(a != b)
     }
+
+    @Test
+    fun everyHolidayFigureCastsAMovingShadow() {
+        HouseEffect.entries.filter { it.figures.isNotEmpty() }.forEach { fx ->
+            val p = HouseEffectParams(effect = fx, colors = listOf(0xFFFFFF, 0xFFFFFF), count = 3, size = 0.6f, speed = 0.6f, brightness = 1f)
+            val shares = listOf(2f, 5f, 11f, 17f, 23f).map { darkShare(p, it) }
+            assertTrue("${fx.label} casts a shadow: $shares", shares.average() > 0.002)
+            assertTrue("${fx.label} leaves most of the house lit: $shares", shares.all { it < 0.6f })
+            val a = (0 until 80).map { i -> (0 until 50).map { j -> HouseRenderer.color(p, i / 79f, j / 49f, 3f, i, i) } }
+            val b = (0 until 80).map { i -> (0 until 50).map { j -> HouseRenderer.color(p, i / 79f, j / 49f, 8f, i, i) } }
+            assertTrue("${fx.label} moves", a != b)
+        }
+    }
 }

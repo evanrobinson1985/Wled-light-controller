@@ -8,7 +8,11 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 /** Effects computed from each LED's position on the house, so they flow across every controller. */
-enum class HouseEffect(val label: String) {
+/**
+ * Whole-house effects. [holiday] puts shadow-figure effects under their holiday; [figures] are
+ * the shapes whose shadows move about the lit house (several mix together in a parade).
+ */
+enum class HouseEffect(val label: String, val holiday: String? = null, val figures: List<Figure> = emptyList()) {
     WAVE("Colour wave"),
     RAINBOW("Rainbow sweep"),
     WIPE("Colour wipe"),
@@ -17,10 +21,25 @@ enum class HouseEffect(val label: String) {
     PULSE("Ripple from centre"),
     TWINKLE("Twinkle"),
     FIREWORKS("Fireworks"),
-    GHOSTS("Ghosts"),
     SNOW("Falling snow"),
     BREATHE("Breathe"),
     SOLID("Solid"),
+    GHOSTS("Ghosts", "Halloween", listOf(Figure.GHOST)),
+    CLOWNS("Clowns", "Halloween", listOf(Figure.CLOWN)),
+    SPIDERS("Crawling spiders", "Halloween", listOf(Figure.SPIDER)),
+    WITCHES("Flying witches", "Halloween", listOf(Figure.WITCH)),
+    HALLOWEEN_PARADE("Halloween parade", "Halloween", listOf(Figure.GHOST, Figure.WITCH, Figure.SPIDER, Figure.CLOWN)),
+    SLEIGH("Santa's sleigh", "Christmas", listOf(Figure.SLEIGH)),
+    BUNNIES("Hopping bunnies", "Easter", listOf(Figure.BUNNY)),
+    TURKEYS("Strutting turkeys", "Thanksgiving", listOf(Figure.TURKEY)),
+    HEARTS("Floating hearts", "Valentine's Day", listOf(Figure.HEART)),
+    SHAMROCKS("Drifting shamrocks", "St Patrick's Day", listOf(Figure.SHAMROCK)),
+    EAGLES("Soaring eagles", "Independence Day", listOf(Figure.EAGLE)),
+    ;
+
+    /** What the size / number / speed sliders call one of the figures, and several. */
+    val noun get() = figures.singleOrNull()?.noun ?: "figure"
+    val plural get() = figures.singleOrNull()?.plural ?: "figures"
 }
 
 data class HouseEffectParams(
@@ -127,6 +146,8 @@ object HouseRenderer {
                 maxRgb(scale(c.getOrElse(1) { c[0] }, 0.12f), scale(c[0], flake))
             }
             HouseEffect.BREATHE -> scale(palette(c, x * 0.5f), 0.15f + 0.85f * (0.5f + 0.5f * sin(t * sp * 1.5f).toFloat()))
+            // Clowns, spiders, witches and the other holiday shadows.
+            else -> ShadowFigures.render(p, p.effect.figures.ifEmpty { listOf(Figure.GHOST) }, c, x, y, t)
         }
         return scale(rgb, p.brightness)
     }

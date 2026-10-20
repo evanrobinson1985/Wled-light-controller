@@ -229,6 +229,7 @@ private val Pages = listOf(
         "Effects that flow across every controller at once, following the map.",
         listOf(
             "Home › Whole house: pick an effect and colours, set the speed.",
+            "Holiday shadows: the house glows while ghosts, clowns, spiders, witches, Santa's sleigh, bunnies and more drift across it as shadows; set their size, number and speed.",
             "Watch the preview, then press Play to send it to your lights.",
             "It keeps running with the screen off.",
         ),

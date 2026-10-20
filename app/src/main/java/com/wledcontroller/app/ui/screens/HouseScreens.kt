@@ -278,14 +278,22 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             )
 
             SectionTitle("Effect")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HouseEffect.entries.forEach { e ->
+            @Composable
+            fun effectChips(list: List<HouseEffect>) = FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                list.forEach { e ->
                     FilterChip(
                         selected = params.effect == e,
                         onClick = { container.house.params.value = params.copy(effect = e) },
                         label = { Text(e.label) },
                     )
                 }
+            }
+            effectChips(HouseEffect.entries.filter { it.holiday == null })
+            // Shadow figures moving about the lit house, by holiday.
+            SectionTitle("Holiday shadows")
+            HouseEffect.entries.filter { it.holiday != null }.groupBy { it.holiday!! }.forEach { (holiday, list) ->
+                Text(holiday, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                effectChips(list)
             }
 
             SectionTitle("Colours")
@@ -314,18 +322,19 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             }
 
             SectionTitle("Adjust")
-            val ghosts = params.effect == HouseEffect.GHOSTS
-            if (ghosts) {
-                // Ghosts: how big, how many and how fast.
-                GradientSlider(params.size, { container.house.params.value = params.copy(size = it) }, label = "Ghost size", valueText = "${(params.size * 100).toInt()}%", height = 34.dp)
+            val fx = params.effect
+            if (fx.figures.isNotEmpty()) {
+                // Shadow figures: how big, how many and how fast.
+                val noun = fx.noun.replaceFirstChar(Char::uppercase)
+                GradientSlider(params.size, { container.house.params.value = params.copy(size = it) }, label = "$noun size", valueText = "${(params.size * 100).toInt()}%", height = 34.dp)
                 Spacer(Modifier.height(10.dp))
                 GradientSlider(
                     (params.count - 1) / 7f,
                     { container.house.params.value = params.copy(count = 1 + (it * 7).roundToInt()) },
-                    label = "Number of ghosts", valueText = "${params.count}", height = 34.dp,
+                    label = "Number of ${fx.plural}", valueText = "${params.count}", height = 34.dp,
                 )
                 Spacer(Modifier.height(10.dp))
-                GradientSlider(params.speed, { container.house.params.value = params.copy(speed = it) }, label = "Ghost speed", valueText = "${(params.speed * 100).toInt()}%", height = 34.dp)
+                GradientSlider(params.speed, { container.house.params.value = params.copy(speed = it) }, label = "$noun speed", valueText = "${(params.speed * 100).toInt()}%", height = 34.dp)
             } else {
                 GradientSlider(params.speed, { container.house.params.value = params.copy(speed = it) }, label = "Speed", valueText = "${(params.speed * 100).toInt()}%", height = 34.dp)
                 Spacer(Modifier.height(10.dp))
