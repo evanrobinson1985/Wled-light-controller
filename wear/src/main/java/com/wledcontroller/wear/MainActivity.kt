@@ -18,6 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.wear.compose.material.ToggleChip
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Workspaces
+import androidx.compose.material.icons.filled.AutoAwesomeMosaic
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmarks
@@ -109,7 +115,15 @@ private fun WatchApp(link: WatchLink) {
     fun device(id: String?) = devices.firstOrNull { it.id == id }
 
     SwipeDismissableNavHost(navController = nav, startDestination = "home") {
-        composable("home") { HomeScreen(link, devices, onOpen = { nav.navigate("device/${it.id}") }) }
+        composable("home") {
+            HomeScreen(
+                link, devices, onOpen = { nav.navigate("device/${it.id}") },
+                onHouse = { nav.navigate("house") }, onScenes = { nav.navigate("scenes") }, onGroups = { nav.navigate("groups") },
+            )
+        }
+        composable("house") { HouseScreen(link) }
+        composable("scenes") { ScenesScreen(link) }
+        composable("groups") { GroupsScreen(link) }
         composable("device/{id}") { e ->
             device(e.arguments?.getString("id"))?.let { d ->
                 DeviceScreen(link, d, onEffects = { nav.navigate("effects/${d.id}") }, onColours = { nav.navigate("colours/${d.id}") }, onPresets = { nav.navigate("presets/${d.id}") })
@@ -131,8 +145,17 @@ private fun WatchList(content: androidx.wear.compose.foundation.lazy.ScalingLazy
 }
 
 @Composable
-private fun HomeScreen(link: WatchLink, devices: List<WatchDevice>, onOpen: (WatchDevice) -> Unit) {
+private fun HomeScreen(
+    link: WatchLink,
+    devices: List<WatchDevice>,
+    onOpen: (WatchDevice) -> Unit,
+    onHouse: () -> Unit,
+    onScenes: () -> Unit,
+    onGroups: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
+    val scenes by link.scenes.collectAsStateWithLifecycle()
+    val groups by link.groups.collectAsStateWithLifecycle()
     val states = remember { mutableStateMapOf<String, LightState?>() }
     LaunchedEffect(devices) {
         while (true) {
@@ -188,6 +211,168 @@ private fun HomeScreen(link: WatchLink, devices: List<WatchDevice>, onOpen: (Wat
                     },
                 )
             }
+            item { NavChip("Whole house", Icons.Filled.Home, onHouse) }
+            if (scenes.isNotEmpty()) item { NavChip("Scenes", Icons.Filled.AutoAwesomeMosaic, onScenes) }
+            if (groups.isNotEmpty()) item { NavChip("Groups", Icons.Filled.Workspaces, onGroups) }
+        }
+    }
+}
+
+@Composable
+private fun NavChip(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Chip(
+        label = { Text(label) },
+        icon = { Icon(icon, null) },
+        colors = ChipDefaults.secondaryChipColors(),
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * The whole-house effect, which runs on the phone: play or stop it, pick the effect (holiday
+ * shadows by holiday) and set its speed, size and (for shadow figures) how many.
+ */
+@Composable
+private fun HouseScreen(link: WatchLink) {
+    val scope = rememberCoroutineScope()
+    val effects by link.houseEffects.collectAsStateWithLifecycle()
+    var status by remember { mutableStateOf<HouseStatus?>(null) }
+    var noPhone by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val s = link.house()
+            if (s != null) { status = s; noPhone = false } else if (status == null) noPhone = true
+            delay(3000)
+        }
+    }
+    fun update(call: suspend () -> HouseStatus?) { scope.launch { call()?.let { status = it } } }
+    WatchList {
+        item { ListHeader { Text("Whole house") } }
+        val st = status
+        if (st == null) {
+            item {
+                if (noPhone) Text("Whole-house effects run on your phone: keep it nearby with the app installed.", textAlign = TextAlign.Center, style = MaterialTheme.typography.body2)
+                else CircularProgressIndicator(Modifier.size(28.dp))
+            }
+            return@WatchList
+        }
+        val fx = effects.firstOrNull { it.name == st.effect }
+        item {
+            Chip(
+                label = { Text(if (st.running) "Stop" else "Play") },
+                secondaryLabel = { Text(fx?.label ?: st.effect, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                icon = { Icon(if (st.running) Icons.Filled.Stop else Icons.Filled.PlayArrow, null) },
+                colors = if (st.running) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                onClick = { status = st.copy(running = !st.running); update { link.house(if (st.running) "stop" else "play") } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        val noun = fx?.noun?.replaceFirstChar(Char::uppercase)
+        item { Text(if (noun != null) "$noun speed" else "Speed", style = MaterialTheme.typography.caption2) }
+        item {
+            InlineSlider(
+                value = st.speed, onValueChange = { v -> status = st.copy(speed = v); update { link.house(speed = v) } },
+                valueRange = 0f..1f, steps = 9,
+                increaseIcon = { Icon(Icons.Filled.Add, "Faster") }, decreaseIcon = { Icon(Icons.Filled.Remove, "Slower") },
+            )
+        }
+        item { Text(if (noun != null) "$noun size" else "Size", style = MaterialTheme.typography.caption2) }
+        item {
+            InlineSlider(
+                value = st.size, onValueChange = { v -> status = st.copy(size = v); update { link.house(size = v) } },
+                valueRange = 0f..1f, steps = 9,
+                increaseIcon = { Icon(Icons.Filled.Add, "Bigger") }, decreaseIcon = { Icon(Icons.Filled.Remove, "Smaller") },
+            )
+        }
+        if (fx?.plural != null) {
+            item { Text("Number of ${fx.plural}: ${st.count}", style = MaterialTheme.typography.caption2) }
+            item {
+                InlineSlider(
+                    value = st.count.toFloat(), onValueChange = { v -> val n = v.roundToInt(); status = st.copy(count = n); update { link.house(count = n) } },
+                    valueRange = 1f..8f, steps = 6,
+                    increaseIcon = { Icon(Icons.Filled.Add, "More") }, decreaseIcon = { Icon(Icons.Filled.Remove, "Fewer") },
+                )
+            }
+        }
+        // Everyday effects first, then the holiday shadows by holiday.
+        effects.groupBy { it.holiday ?: "" }.forEach { (holiday, list) ->
+            item { ListHeader { Text(holiday.ifEmpty { "Effects" }) } }
+            items(list, key = { it.name }) { e ->
+                Chip(
+                    label = { Text(e.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    colors = if (e.name == st.effect) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                    onClick = { status = st.copy(effect = e.name, running = true); update { link.house("play", effect = e.name) } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/** The phone's scenes; tapping one brings back every controller's look. */
+@Composable
+private fun ScenesScreen(link: WatchLink) {
+    val scope = rememberCoroutineScope()
+    val scenes by link.scenes.collectAsStateWithLifecycle()
+    var applied by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    WatchList {
+        item { ListHeader { Text("Scenes") } }
+        items(scenes, key = { it.id }) { sc ->
+            val note: (@Composable androidx.compose.foundation.layout.RowScope.() -> Unit)? = when {
+                applied == sc.id && failed -> { { Text("Needs the phone nearby") } }
+                applied == sc.id -> { { Text("On") } }
+                else -> null
+            }
+            Chip(
+                label = { Text(sc.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                secondaryLabel = note,
+                colors = if (applied == sc.id && !failed) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                onClick = { applied = sc.id; failed = false; scope.launch { failed = !link.applyScene(sc.id) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** The phone's groups, each switched on or off together. */
+@Composable
+private fun GroupsScreen(link: WatchLink) {
+    val scope = rememberCoroutineScope()
+    val groups by link.groups.collectAsStateWithLifecycle()
+    val on = remember { mutableStateMapOf<String, Boolean>() }
+    LaunchedEffect(groups) { groups.forEach { g -> link.group(g.id)?.let { on[g.id] = it } } }
+    WatchList {
+        item { ListHeader { Text("Groups") } }
+        items(groups, key = { it.id }) { g ->
+            ToggleChip(
+                checked = on[g.id] == true,
+                onCheckedChange = { v -> on[g.id] = v; scope.launch { link.group(g.id, v) } },
+                label = { Text(g.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                secondaryLabel = { Text("${g.devices.size} controller${if (g.devices.size == 1) "" else "s"}") },
+                toggleControl = { Switch(checked = on[g.id] == true) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+private const val RING_DOTS = 48
+
+/** [colors] as dots round the edge of the watch face, clockwise from the top. */
+@Composable
+private fun PreviewRing(colors: IntArray) {
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+        if (colors.isEmpty()) return@Canvas
+        val r = size.minDimension / 2f - 5.dp.toPx()
+        val dot = 2.6.dp.toPx()
+        val cx = size.width / 2f; val cy = size.height / 2f
+        colors.forEachIndexed { i, c ->
+            val a = (i.toFloat() / colors.size) * 2f * kotlin.math.PI.toFloat() - kotlin.math.PI.toFloat() / 2f
+            val o = androidx.compose.ui.geometry.Offset(cx + r * kotlin.math.cos(a), cy + r * kotlin.math.sin(a))
+            if (c and 0xFFFFFF == 0) drawCircle(Color(0xFF2A2F3A), dot * 0.7f, o)
+            else drawCircle(Color(0xFF000000.toInt() or c), dot, o)
         }
     }
 }
@@ -218,8 +403,17 @@ private fun DeviceScreen(link: WatchLink, d: WatchDevice, onEffects: () -> Unit,
     }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
+    // What the lights show, as the phone app previews it: a ring of dots round the watch face.
+    var ring by remember { mutableStateOf<IntArray?>(null) }
+    LaunchedEffect(d.id) {
+        while (true) {
+            ring = runCatching { link.preview(d, RING_DOTS) }.getOrNull()
+            delay(150)
+        }
+    }
 
     Scaffold(timeText = { TimeText() }) {
+        ring?.let { PreviewRing(it) }
         Column(
             Modifier.fillMaxSize()
                 .onRotaryScrollEvent { e ->
