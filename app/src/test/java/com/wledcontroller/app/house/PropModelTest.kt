@@ -40,9 +40,21 @@ class PropModelTest {
         val m = PropModel(ModelKind.MEGA_TREE, strings = 3, nodes = 5, degrees = 180, zigzag = false)
         val p = m.layout(MapPoint(0f, 0f), MapPoint(1f, 1f), 1f)
         close(0.5f, 0f, p[0])     // every string starts at the top centre
-        close(0f, 1f, p[4])       // first string ends bottom left
-        close(0.5f, 1f, p[9])     // middle string straight down
-        close(1f, 1f, p[14])      // last string bottom right
+        val side = 1f - PropModel.TREE_TILT / 2f  // the base ring is seen a little from above
+        close(0f, side, p[4])     // first string ends bottom left
+        close(0.5f, 1f, p[9])     // middle string straight down, at the front
+        close(1f, side, p[14])    // last string bottom right
+    }
+
+    @Test
+    fun fullTreeSpacesItsStringsAllTheWayRound() {
+        val m = PropModel(ModelKind.MEGA_TREE, strings = 4, nodes = 2, degrees = 360, fromBottom = true, zigzag = false)
+        val p = m.layout(MapPoint(0f, 0f), MapPoint(1f, 1f), 1f)
+        close(0f, 1f - PropModel.TREE_TILT / 2f, p[0])  // string 1 starts at the base, left edge
+        close(0.5f, 0f, p[1])                            // and runs up to the top
+        close(0.5f, 1f, p[2])                            // string 2 at the front
+        close(1f, 1f - PropModel.TREE_TILT / 2f, p[4])  // string 3 on the right
+        close(0.5f, 1f - PropModel.TREE_TILT, p[6])     // string 4 at the back, not on top of string 1
     }
 
     @Test

@@ -60,6 +60,10 @@ object DemoSetup {
     private const val TREE_X = 0.12f
     private const val TREE_TOP = 0.30f
     private const val TREE_BASE = 0.85f
+    private const val TREE_HALF_W = 0.08f
+    /** The mega tree: 16 strings of 25 pixels round a pole, each fed from the base up. */
+    private val treeModel = PropModel(ModelKind.MEGA_TREE, strings = 16, nodes = 25, degrees = 360, fromBottom = true, zigzag = false)
+    private val TREE_LEDS = treeModel.ledCount
     private val arches = listOf(0.79f, 0.87f, 0.95f)
     private const val ARCH_BASE = 0.90f
     private val bushes = listOf(MapPoint(0.33f, 0.79f), MapPoint(0.63f, 0.79f))
@@ -95,7 +99,11 @@ object DemoSetup {
                 listOf(MapPoint(door.left, door.bottom), MapPoint(door.left, door.top), MapPoint(door.right, door.top), MapPoint(door.right, door.bottom)),
                 prop = PropType.WINDOW,
             ),
-            LightRun("run-tree", "Mega tree", treeDev.id, 0, 160, spiral(), prop = PropType.TREE),
+            LightRun(
+                "run-tree", "Mega tree", treeDev.id, 0, TREE_LEDS,
+                listOf(MapPoint(TREE_X - TREE_HALF_W, TREE_TOP), MapPoint(TREE_X + TREE_HALF_W, TREE_BASE)),
+                prop = PropType.TREE, model = treeModel,
+            ),
             LightRun("run-arch1", "Arch 1", yardDev.id, 0, 25, arch(arches[0]), prop = PropType.ARCH),
             LightRun("run-arch2", "Arch 2", yardDev.id, 25, 25, arch(arches[1]), prop = PropType.ARCH),
             LightRun("run-arch3", "Arch 3", yardDev.id, 50, 25, arch(arches[2]), prop = PropType.ARCH),
@@ -128,7 +136,7 @@ object DemoSetup {
         val sims = listOf(
             data(roofDev, 150, 11, segment(150, 67, listOf(red, green, gold), pal = 4, sx = 90)),
             data(windowDev, 100, 23, segment(100, 0, listOf(warm, 0, 0))),
-            data(treeDev, 160, 37, segment(160, 80, listOf(green, red, gold), pal = 4, sx = 110, ix = 170)),
+            data(treeDev, TREE_LEDS, 37, segment(TREE_LEDS, 80, listOf(green, red, gold), pal = 4, sx = 110, ix = 170)),
             data(yardDev, 130, 41, segment(130, 54, listOf(red, white, green), sx = 70, ix = 60)),
             // Set up as a 2D panel, so its own effects sweep across the door rather than along the wiring.
             data(garageDev, MATRIX_LEDS, 53, segment(MATRIX_LEDS, 9, listOf(red, green, gold), pal = 4, sx = 70))
@@ -253,15 +261,6 @@ object DemoSetup {
         MapPoint(r.left, r.top), MapPoint(r.right, r.top), MapPoint(r.right, r.bottom), MapPoint(r.left, r.bottom), MapPoint(r.left, r.top),
     )
 
-    private fun treeHalfWidth(y: Float) = 0.075f * (y - TREE_TOP) / (TREE_BASE - TREE_TOP)
-
-    /** Lights wound round the tree from the bottom up. */
-    private fun spiral(): List<MapPoint> = List(64) { i ->
-        val f = i / 63f
-        val y = TREE_BASE - 0.02f - f * (TREE_BASE - TREE_TOP - 0.03f)
-        MapPoint(TREE_X + treeHalfWidth(y) * sin(f * 7f * 2f * PI.toFloat()), y)
-    }
-
     private fun arch(cx: Float) = List(13) { i ->
         val a = PI.toFloat() * i / 12f
         MapPoint(cx - 0.032f * cos(a), ARCH_BASE - 0.13f * sin(a))
@@ -338,12 +337,22 @@ object DemoSetup {
         p.color = 0xFF4A2C22.toInt(); cv.drawRect(x(door.left), y(door.top), x(door.right), y(door.bottom), p)
         p.color = 0xFFC8A050.toInt(); cv.drawCircle(x(door.right - 0.008f), y(door.centerY() + 0.02f), 5f, p)
 
-        // Tree, bushes and arch frames.
-        p.color = 0xFF16281E.toInt()
-        cv.drawPath(Path().apply {
-            moveTo(x(TREE_X), y(TREE_TOP)); lineTo(x(TREE_X + 0.08f), y(TREE_BASE)); lineTo(x(TREE_X - 0.08f), y(TREE_BASE)); close()
-        }, p)
-        p.color = 0xFF3A2A20.toInt(); cv.drawRect(x(TREE_X - 0.008f), y(TREE_BASE), x(TREE_X + 0.008f), y(TREE_BASE + 0.04f), p)
+        // Mega tree: a pole with its strings pulled out from the top to a ring of stakes at the
+        // base (the same layout the lights use), then bushes and arch frames.
+        p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f; p.color = 0xFF2A3038.toInt()
+        val wires = treeModel.copy(nodes = 2, fromBottom = false).layout(
+            MapPoint(TREE_X - TREE_HALF_W, TREE_TOP), MapPoint(TREE_X + TREE_HALF_W, TREE_BASE), W / H.toFloat(),
+        )
+        for (k in 0 until treeModel.strings) {
+            val (top, base) = wires[2 * k] to wires[2 * k + 1]
+            cv.drawLine(x(top.x), y(top.y), x(base.x), y(base.y), p)
+        }
+        cv.drawOval(
+            x(TREE_X - TREE_HALF_W), y(TREE_BASE - (TREE_BASE - TREE_TOP) * PropModel.TREE_TILT),
+            x(TREE_X + TREE_HALF_W), y(TREE_BASE), p,
+        )
+        p.style = Paint.Style.FILL; p.color = 0xFF4A505A.toInt()
+        cv.drawRect(x(TREE_X - 0.003f), y(TREE_TOP - 0.025f), x(TREE_X + 0.003f), y(TREE_BASE - 0.03f), p)
         p.color = 0xFF1A3324.toInt()
         for (b in bushes) cv.drawOval(x(b.x - 0.06f), y(b.y - 0.045f), x(b.x + 0.06f), y(b.y + 0.04f), p)
         p.style = Paint.Style.STROKE; p.strokeWidth = 4f; p.color = 0xFF5A6070.toInt()

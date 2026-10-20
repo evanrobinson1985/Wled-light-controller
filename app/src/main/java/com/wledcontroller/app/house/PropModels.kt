@@ -88,18 +88,30 @@ data class PropModel(
             }
             ModelKind.MEGA_TREE -> {
                 val s = strings.coerceAtLeast(1); val n = nodes.coerceAtLeast(1)
-                // Seen from the front: strings fan from the top down to the base. Only the front
-                // [degrees] of the tree are spread across the width.
-                val spread = (degrees.coerceIn(90, 360) / 360f)
+                // Seen from the front, a little above: strings run from the top of the pole down
+                // to a ring at the base, starting on the left and going round the front. A full
+                // tree spaces its strings evenly all the way round (the last one sits next to the
+                // first, not on top of it); a part tree spans its [degrees] edge to edge.
+                val deg = degrees.coerceIn(90, 360)
                 List(s * n) { i ->
                     val str = i / n; var node = i % n
                     if (zigzag && str % 2 == 1) node = n - 1 - node
                     val down = if (n <= 1) 1f else node / (n - 1f)
                     val f = if (fromBottom) 1f - down else down
-                    val angle = (if (s <= 1) 0f else str / (s - 1f) - 0.5f) * spread * 2f * PI.toFloat()
-                    // Strings round the back of a full tree land behind the front ones.
+                    val turn = when {
+                        deg >= 360 -> str / s.toFloat()
+                        s <= 1 -> 0.5f * deg / 360f
+                        else -> str / (s - 1f) * deg / 360f
+                    }
+                    // 0 = straight towards you. A part tree is centred on the front; a full one
+                    // starts at its left edge.
+                    val first = if (deg >= 360) -0.25f else -deg / 720f
+                    val angle = (first + turn) * 2f * PI.toFloat()
+                    // The base ring seen from above is an ellipse: strings round the back end
+                    // higher up than the front ones, so they show between them.
                     val x = 0.5f + 0.5f * f * sin(angle)
-                    at(x, f)
+                    val y = f * (1f - TREE_TILT * (1f - cos(angle)) / 2f)
+                    at(x, y)
                 }
             }
             ModelKind.STAR -> {
@@ -179,6 +191,8 @@ data class PropModel(
 
     companion object {
         val FACE_PARTS = listOf("Eyes", "Mouth closed", "Mouth open", "Mouth wide")
+        /** How much higher than the front the back of a mega tree's base ring sits, as a fraction of its height. */
+        const val TREE_TILT = 0.12f
     }
 }
 
