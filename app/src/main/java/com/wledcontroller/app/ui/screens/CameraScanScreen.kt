@@ -132,7 +132,8 @@ fun CameraScanScreen(onBack: () -> Unit, onFinished: () -> Unit) {
     val settle = if (careful) 350L else 180L
     val chosen = devices.filter { it.id in selected }
     val totalLeds = chosen.sumOf { it.snapshot.value.info?.ledCount ?: 0 }
-    val estimateSec = (totalLeds * (settle + 45) / 1000 + chosen.size * 2).toInt()
+    // Each LED: on until seen, then off until it's seen to go dark.
+    val estimateSec = (totalLeds * (settle * 2 + 120) / 1000 + chosen.size * 2 + 5).toInt()
 
     fun startScan() {
         val t = chosen.mapNotNull { c ->
@@ -153,7 +154,11 @@ fun CameraScanScreen(onBack: () -> Unit, onFinished: () -> Unit) {
                     val ex = cam.cameraInfo.exposureState
                     if (ex.isExposureCompensationSupported) cam.cameraControl.setExposureCompensationIndex(ex.exposureCompensationRange.lower / 2)
                 }
-                results = scanner.scan(t, settle) { p -> progress = p }
+                // Every other controller is held dark too, so its effects can't be taken for LEDs.
+                val others = devices.filter { it.id !in selected && it.snapshot.value.online }
+                    .associate { it.device.host to (it.snapshot.value.info?.ledCount ?: 0) }
+                    .filterValues { it > 0 }
+                results = scanner.scan(t, settle, others) { p -> progress = p }
                 step = ScanStep.DONE
             } catch (e: CancellationException) {
                 step = ScanStep.SETUP
@@ -254,7 +259,7 @@ fun CameraScanScreen(onBack: () -> Unit, onFinished: () -> Unit) {
                                 modifier = Modifier.fillMaxWidth().height(52.dp),
                             ) { Text("Start scan") }
                             Text(
-                                "Each light flashes white in turn while the camera finds it. Your lights go back to normal when the scan ends.",
+                                "All your lights go off, then each LED flashes white on its own until the camera sees it light up and go dark again, so lamps, TVs and other lights in the picture are ignored. Turn off any lights you can and keep the phone still. Your lights go back to normal when the scan ends.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
