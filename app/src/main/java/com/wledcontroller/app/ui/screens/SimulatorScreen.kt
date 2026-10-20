@@ -160,12 +160,15 @@ private fun rememberSimLeds(map: HouseMap): List<SimLed> {
 
 /** Glowing lights: a soft halo added to the scene, then the bulb itself. */
 private fun DrawScope.glow(color: Int, center: Offset, radius: Float, bullet: Boolean) {
+    // Tiny, tightly packed lights (a pixel matrix) skip the wide halo and unlit outline: their
+    // neighbours' light fills in, and there can be thousands of them.
+    val dense = radius < 2.5f
     if (color and 0xFFFFFF == 0) {
-        drawCircle(Color.White.copy(alpha = 0.10f), radius * 0.6f, center)
+        if (!dense) drawCircle(Color.White.copy(alpha = 0.10f), radius * 0.6f, center)
         return
     }
     val c = Color(color or (0xFF shl 24))
-    drawCircle(c.copy(alpha = if (bullet) 0.26f else 0.20f), radius * (if (bullet) 3f else 2.5f), center, blendMode = BlendMode.Plus)
+    if (!dense) drawCircle(c.copy(alpha = if (bullet) 0.26f else 0.20f), radius * (if (bullet) 3f else 2.5f), center, blendMode = BlendMode.Plus)
     drawCircle(c.copy(alpha = 0.5f), radius * 1.5f, center, blendMode = BlendMode.Plus)
     drawCircle(c, radius, center)
 }
@@ -488,13 +491,13 @@ private fun Intro(enabled: Boolean, onStart: () -> Unit) {
             Icon(Icons.Filled.Science, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
             Text("Try everything on a virtual house", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
-                "The simulator lights up a virtual house with four simulated WLED controllers: a roofline strip, bullet lights round the windows and door, a mega tree, and arches and bushes in the yard. They behave like the real thing, so you can try every part of the app and watch the result live:",
+                "The simulator lights up a virtual house with five simulated WLED controllers: a roofline strip, bullet lights round the windows and door, a mega tree, arches and bushes in the yard, and a dense pixel matrix covering the garage door. They behave like the real thing, so you can try every part of the app and watch the result live:",
                 style = MaterialTheme.typography.bodyMedium,
             )
             listOf(
                 "Colours, effects, palettes, segments, presets and playlists",
                 "Holiday themes, light types, LED setup, nightlight and the power limiter",
-                "Groups and scenes across all four controllers",
+                "Groups and scenes across all five controllers",
                 "Whole-house effects, the house map, props and standalone mode",
                 "Shows in the sequencer, the show schedule and xLights imports",
             ).forEach { Text("•  $it", style = MaterialTheme.typography.bodyMedium) }
