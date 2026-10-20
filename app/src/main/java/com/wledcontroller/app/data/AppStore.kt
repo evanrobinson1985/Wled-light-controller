@@ -63,6 +63,7 @@ class AppStore(private val context: Context) {
         val OUTPUTS = stringPreferencesKey("outputs")
         val FIXTURES = stringPreferencesKey("dmx_fixtures")
         val MQTT = stringPreferencesKey("mqtt")
+        val EFFECT_SETTINGS = stringPreferencesKey("effect_settings")
         val KEEP_STARTUP = androidx.datastore.preferences.core.booleanPreferencesKey("keep_startup_look")
     }
 
@@ -191,6 +192,18 @@ class AppStore(private val context: Context) {
     fun setTutorialSeen() {
         flags.edit().putBoolean("tutorial_seen", true).apply()
         _tutorialSeen.value = true
+    }
+
+    /** Each effect's own settings per controller (key from [EffectMemory.key]). */
+    val effectSettings: Flow<Map<String, Map<String, Int>>> = context.dataStore.data.map { prefs ->
+        prefs[Keys.EFFECT_SETTINGS]?.let { runCatching { json.decodeFromString<Map<String, Map<String, Int>>>(it) }.getOrNull() } ?: emptyMap()
+    }
+
+    suspend fun saveEffectSettings(deviceId: String, fx: Int, values: Map<String, Int>) {
+        context.dataStore.edit { prefs ->
+            val cur = prefs[Keys.EFFECT_SETTINGS]?.let { runCatching { json.decodeFromString<Map<String, Map<String, Int>>>(it) }.getOrNull() } ?: emptyMap()
+            prefs[Keys.EFFECT_SETTINGS] = json.encodeToString(cur + (EffectMemory.key(deviceId, fx) to values))
+        }
     }
 
     /** Whether controllers start up with whatever was last chosen in the app. */

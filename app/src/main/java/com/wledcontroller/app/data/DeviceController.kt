@@ -533,6 +533,20 @@ class DeviceController(
     fun setSegFlag(key: String, value: Boolean) = send(buildJsonObject { putJsonObject("seg") { put(key, value) } })
 
     fun setEffect(fx: Int) = send(buildJsonObject { putJsonObject("seg") { put("fx", fx) }; put("on", true) })
+
+    /** Plays effect [fx] with the settings it had last time ([saved]), not WLED's defaults for it. */
+    fun playEffect(fx: Int, saved: Map<String, Int>?, defaultSpeed: Int? = null) = send(EffectMemory.patch(fx, saved, defaultSpeed))
+
+    /** Remembers the selected segment's effect settings, a moment after the user stops changing them. */
+    fun rememberEffectSettings(save: suspend (fx: Int, values: Map<String, Int>) -> Unit) {
+        effectSaveJob?.cancel()
+        effectSaveJob = scope.launch {
+            delay(700)
+            val seg = _snapshot.value.state?.activeSegment ?: return@launch
+            save(seg.fx, EffectMemory.values(seg))
+        }
+    }
+    private var effectSaveJob: Job? = null
     fun setPalette(pal: Int) = send(buildJsonObject { putJsonObject("seg") { put("pal", pal) } })
 
     /** Patches a specific segment by id. */

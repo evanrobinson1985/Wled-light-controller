@@ -43,6 +43,18 @@ object WledParse {
     fun devices(text: String?): List<WatchDevice> =
         text?.let { runCatching { json.decodeFromString<List<WatchDevice>>(it) }.getOrNull() } ?: emptyList()
 
+    fun effectSettings(text: String?): Map<String, Map<String, Int>> =
+        text?.let { runCatching { json.decodeFromString<Map<String, Map<String, Int>>>(it) }.getOrNull() } ?: emptyMap()
+
+    /** Plays effect [fx] with its remembered [saved] settings (speed, intensity, sliders, options). */
+    fun effectPatch(fx: Int, saved: Map<String, Int>?): JsonObject = buildJsonObject {
+        put("on", true)
+        put("seg", buildJsonObject {
+            put("fx", fx)
+            saved?.forEach { (k, v) -> if (k.startsWith("o")) put(k, v != 0) else put(k, v) }
+        })
+    }
+
     /** From /json/si: { "state": {...}, "info": {...} }. */
     fun state(text: String): LightState {
         val o = json.parseToJsonElement(text) as JsonObject
@@ -91,6 +103,9 @@ class WatchLink(private val context: Context) {
     val devices: StateFlow<List<WatchDevice>> = _devices.asStateFlow()
     private val _favorites = MutableStateFlow(prefs.getStringSet("favorites", emptySet()).orEmpty())
     val favorites: StateFlow<Set<String>> = _favorites.asStateFlow()
+    private val _effectSettings = MutableStateFlow(WledParse.effectSettings(prefs.getString("effectSettings", null)))
+    /** Each effect's settings as last set on the phone, by "deviceId#effect". */
+    val effectSettings: StateFlow<Map<String, Map<String, Int>>> = _effectSettings.asStateFlow()
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(2500, TimeUnit.MILLISECONDS)
@@ -102,9 +117,11 @@ class WatchLink(private val context: Context) {
     private fun take(map: com.google.android.gms.wearable.DataMap) {
         val list = map.getString("devices")
         val favs = map.getStringArrayList("favorites").orEmpty().toSet()
-        prefs.edit().putString("devices", list).putStringSet("favorites", favs).apply()
+        val settings = map.getString("effectSettings")
+        prefs.edit().putString("devices", list).putStringSet("favorites", favs).putString("effectSettings", settings).apply()
         _devices.value = WledParse.devices(list)
         _favorites.value = favs
+        _effectSettings.value = WledParse.effectSettings(settings)
     }
 
     /** Fetches the phone's latest controller list. */

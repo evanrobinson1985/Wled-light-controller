@@ -92,6 +92,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.DeviceController
+import com.wledcontroller.app.data.EffectMemory
 import com.wledcontroller.app.data.DeviceSnapshot
 import com.wledcontroller.app.data.EffectMeta
 import com.wledcontroller.app.data.LightProfile
@@ -292,6 +293,7 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
     val favorites by container.store.favoriteEffects.collectAsStateWithLifecycle(emptySet())
     val profiles by container.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
     val profile = profiles.profileFor(controller.id, seg.id)
+    val effectSettings by container.store.effectSettings.collectAsStateWithLifecycle(emptyMap())
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableIntStateOf(0) }
     val filters = EffectFilters + listOfNotNull(profile?.let { "Best for ${it.label.substringBefore(" /").lowercase()}" })
@@ -364,8 +366,8 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
                     onClick = {
                         if (seg.fx == i) settingsOpen = !settingsOpen
                         else {
-                            controller.setEffect(i)
-                            profile?.effectSpeed?.let { controller.setSegValue("sx", it) }
+                            // With the settings it had last time; the light type's speed only the first time.
+                            controller.playEffect(i, effectSettings[EffectMemory.key(controller.id, i)], profile?.effectSpeed)
                             settingsOpen = true
                         }
                         if (settingsOpen) reveal(i)
@@ -394,6 +396,7 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
                     EffectControlsCard(
                         paletteName = if (m.usesPalette) snap.palettes.getOrNull(seg.pal) else null,
                         seg = seg, meta = m, controller = controller,
+                        onChanged = { controller.rememberEffectSettings { fx, values -> container.store.saveEffectSettings(controller.id, fx, values) } },
                         modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
                     )
                 }
@@ -409,6 +412,7 @@ private fun EffectControlsCard(
     meta: EffectMeta,
     controller: DeviceController,
     modifier: Modifier = Modifier,
+    onChanged: () -> Unit = {},
 ) {
     Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh), modifier = modifier) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)) {
@@ -424,7 +428,7 @@ private fun EffectControlsCard(
                 Spacer(Modifier.height(14.dp))
                 GradientSlider(
                     value = values[i] / max,
-                    onValueChange = { controller.setSegValue(EffectMeta.SLIDER_KEYS[i], (it * max).roundToInt()) },
+                    onValueChange = { controller.setSegValue(EffectMeta.SLIDER_KEYS[i], (it * max).roundToInt()); onChanged() },
                     label = label,
                     valueText = "${(values[i] / max * 100).roundToInt()}%",
                     height = 34.dp,
@@ -436,7 +440,7 @@ private fun EffectControlsCard(
                 any = true
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(label, Modifier.weight(1f))
-                    Switch(checked = opts[i], onCheckedChange = { controller.setSegFlag(EffectMeta.OPTION_KEYS[i], it) })
+                    Switch(checked = opts[i], onCheckedChange = { controller.setSegFlag(EffectMeta.OPTION_KEYS[i], it); onChanged() })
                 }
             }
             if (!any) {

@@ -58,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.wledcontroller.app.data.EffectMemory
 import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.DeviceGroup
 import com.wledcontroller.app.data.WledColor
@@ -86,11 +87,16 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
     val members = all.filter { group != null && it.id in group.deviceIds }
     val snaps = members.map { it.snapshot.collectAsStateWithLifecycle().value }
     val online = members.zip(snaps).filter { it.second.online }
+    /** Remembers each controller's settings for the effect it's playing, once the sliders rest. */
+    fun rememberSettings() = online.forEach { (c, _) ->
+        c.rememberEffectSettings { fx, values -> container.store.saveEffectSettings(c.id, fx, values) }
+    }
     val lead = online.firstOrNull()?.second
     val anyOn = online.any { it.second.state?.on == true }
     val avgBri = online.mapNotNull { it.second.state?.bri }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 128f
     var effectQuery by rememberSaveable { mutableStateOf("") }
     var effectSettingsOpen by rememberSaveable { mutableStateOf(true) }
+    val effectSettings by container.store.effectSettings.collectAsStateWithLifecycle(emptyMap())
     val profiles by container.store.lightProfiles.collectAsStateWithLifecycle(emptyMap())
 
     Scaffold(
@@ -179,7 +185,10 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
                             if (playing) effectSettingsOpen = !effectSettingsOpen
                             else {
                                 // Effect ids can differ between firmware versions, so match by name.
-                                online.forEach { (c, s) -> s.effects.indexOf(name).takeIf { it >= 0 }?.let(c::setEffect) }
+                                // Each with the settings it had last time on that controller.
+                                online.forEach { (c, s) ->
+                                    s.effects.indexOf(name).takeIf { it >= 0 }?.let { fx -> c.playEffect(fx, effectSettings[EffectMemory.key(c.id, fx)]) }
+                                }
                                 effectSettingsOpen = true
                             }
                         }) {
@@ -196,12 +205,12 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     GradientSlider(
                                         value = (seg?.sx ?: 128) / 255f,
-                                        onValueChange = { v -> online.forEach { it.first.setSegValue("sx", (v * 255).roundToInt()) } },
+                                        onValueChange = { v -> online.forEach { it.first.setSegValue("sx", (v * 255).roundToInt()) }; rememberSettings() },
                                         label = "Speed", height = 34.dp,
                                     )
                                     GradientSlider(
                                         value = (seg?.ix ?: 128) / 255f,
-                                        onValueChange = { v -> online.forEach { it.first.setSegValue("ix", (v * 255).roundToInt()) } },
+                                        onValueChange = { v -> online.forEach { it.first.setSegValue("ix", (v * 255).roundToInt()) }; rememberSettings() },
                                         label = "Intensity", height = 34.dp,
                                     )
                                 }

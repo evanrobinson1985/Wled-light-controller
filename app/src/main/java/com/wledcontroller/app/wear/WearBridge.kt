@@ -8,6 +8,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.put
@@ -19,18 +21,21 @@ import kotlinx.serialization.json.put
 class WearBridge(private val context: Context, store: AppStore, scope: CoroutineScope) {
     init {
         scope.launch {
-            combine(store.devices, store.favoriteEffects) { devices, favorites -> devices to favorites }.collect { (devices, favorites) ->
-                val list = buildJsonArray {
-                    devices.forEach { d ->
-                        add(kotlinx.serialization.json.buildJsonObject { put("id", d.id); put("name", d.name); put("host", d.host) })
+            combine(store.devices, store.favoriteEffects, store.effectSettings) { devices, favorites, settings -> Triple(devices, favorites, settings) }
+                .collect { (devices, favorites, settings) ->
+                    val list = buildJsonArray {
+                        devices.forEach { d ->
+                            add(kotlinx.serialization.json.buildJsonObject { put("id", d.id); put("name", d.name); put("host", d.host) })
+                        }
                     }
+                    val request = PutDataMapRequest.create(DEVICES_PATH).apply {
+                        dataMap.putString("devices", list.toString())
+                        dataMap.putStringArrayList("favorites", ArrayList(favorites))
+                        // Each effect's remembered settings, so the watch plays effects as they were set.
+                        dataMap.putString("effectSettings", Json.encodeToString(settings))
+                    }.asPutDataRequest().setUrgent()
+                    runCatching { Wearable.getDataClient(context).putDataItem(request).await() }
                 }
-                val request = PutDataMapRequest.create(DEVICES_PATH).apply {
-                    dataMap.putString("devices", list.toString())
-                    dataMap.putStringArrayList("favorites", ArrayList(favorites))
-                }.asPutDataRequest().setUrgent()
-                runCatching { Wearable.getDataClient(context).putDataItem(request).await() }
-            }
         }
     }
 

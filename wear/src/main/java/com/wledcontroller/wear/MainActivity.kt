@@ -283,6 +283,7 @@ private fun SmallAction(icon: androidx.compose.ui.graphics.vector.ImageVector, l
 private fun EffectsScreen(link: WatchLink, d: WatchDevice, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     val favorites by link.favorites.collectAsStateWithLifecycle()
+    val effectSettings by link.effectSettings.collectAsStateWithLifecycle()
     var names by remember { mutableStateOf<List<String>?>(null) }
     var current by remember { mutableIntStateOf(-1) }
     LaunchedEffect(d.id) {
@@ -306,7 +307,7 @@ private fun EffectsScreen(link: WatchLink, d: WatchDevice, onDone: () -> Unit) {
                 onClick = {
                     current = i
                     scope.launch {
-                        runCatching { link.send(d, buildJsonObject { put("on", true); putJsonObject("seg") { put("fx", i) } }) }
+                        runCatching { link.send(d, WledParse.effectPatch(i, effectSettings["${d.id}#$i"])) }
                         onDone()
                     }
                 },
