@@ -1,6 +1,7 @@
 package com.wledcontroller.app.house
 
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -16,6 +17,7 @@ enum class HouseEffect(val label: String) {
     PULSE("Ripple from centre"),
     TWINKLE("Twinkle"),
     FIREWORKS("Fireworks"),
+    GHOSTS("Ghosts"),
     SNOW("Falling snow"),
     BREATHE("Breathe"),
     SOLID("Solid"),
@@ -31,6 +33,8 @@ data class HouseEffectParams(
     val size: Float = 0.5f,
     /** 0..1 */
     val brightness: Float = 0.8f,
+    /** How many there are, for effects with separate things moving about (ghosts). */
+    val count: Int = 3,
 )
 
 object HouseRenderer {
@@ -115,6 +119,7 @@ object HouseRenderer {
                 }
                 acc
             }
+            HouseEffect.GHOSTS -> ghosts(p, c, x, y, t)
             HouseEffect.SNOW -> {
                 val lane = floor(x * 40f).toInt()
                 val fall = frac(y * 0.8f - t * sp * (0.15f + hash(lane, 5) * 0.15f) + hash(lane, 9))
@@ -125,6 +130,55 @@ object HouseRenderer {
         }
         return scale(rgb, p.brightness)
     }
+
+    /**
+     * The whole house lit in the colours, except where ghosts' shadows drift about: each ghost
+     * is a dark shape with a round head and a wavy hem (with two faint eyes), wandering the
+     * house on its own path. [HouseEffectParams.size] sets their size, [HouseEffectParams.count]
+     * how many, and [HouseEffectParams.speed] how fast they float.
+     */
+    private fun ghosts(p: HouseEffectParams, c: List<Int>, x: Float, y: Float, t: Float): Int {
+        // The lit house: the colours spread gently across it, slowly shimmering.
+        val lit = palette(c, x * 0.6f + t * 0.02f)
+        val speed = 0.15f + p.speed * 1.6f
+        val w = 0.08f + p.size * 0.32f          // ghost width, in house widths
+        val h = w * 1.35f                        // a little taller than wide
+        var shadow = 0f
+        var eye = 0f
+        for (k in 0 until p.count.coerceIn(1, MAX_GHOSTS)) {
+            // Each ghost floats on its own slow, looping path, bobbing as it goes.
+            val ax = speed * (0.22f + hash(k, 1) * 0.18f)
+            val ay = speed * (0.17f + hash(k, 3) * 0.14f)
+            val gx = 0.5f + 0.45f * sin(t * ax + hash(k, 2) * 6.283f)
+            val gy = 0.08f + 0.62f * (0.5f + 0.5f * sin(t * ay + hash(k, 4) * 6.283f)) + 0.02f * sin(t * 2.6f + k)
+            val u = (x - gx) / w                 // −0.5 … 0.5 across the ghost
+            val v = (y - gy) / h                 // 0 at the top of its head, 1 at its hem
+            val inside = ghostShape(u, v, t + k)
+            // Soft edges: a little outside the shape is still in half-shadow.
+            val edge = maxOf(inside, 0.5f * ghostShape(u / 1.18f, (v - 0.5f) / 1.18f + 0.5f, t + k))
+            if (edge > shadow) shadow = edge
+            // Two eyes, faintly glowing in the dark.
+            val ex = abs(u) - 0.17f; val ey = v - 0.33f
+            if (inside > 0f && ex * ex + ey * ey < 0.009f) eye = 1f
+        }
+        val dark = scale(lit, 1f - shadow * 0.96f)
+        return if (eye > 0f) maxRgb(dark, scale(c.getOrElse(1) { c[0] }, 0.55f)) else dark
+    }
+
+    /** 1 inside a ghost (local coords: u across −0.5…0.5, v down 0…1), else 0. */
+    private fun ghostShape(u: Float, v: Float, t: Float): Float {
+        if (abs(u) > 0.5f || v < 0f) return 0f
+        if (v < 0.5f) {
+            // Round head.
+            val dv = (v - 0.5f) / 0.5f; val du = u / 0.5f
+            return if (du * du + dv * dv <= 1f) 1f else 0f
+        }
+        // Body down to a wavy, rippling hem.
+        val hem = 0.88f + 0.1f * sin(u * 6f * PI.toFloat() + t * 4f)
+        return if (v <= hem) 1f else 0f
+    }
+
+    private const val MAX_GHOSTS = 8
 
     internal fun maxRgb(a: Int, b: Int) =
         (maxOf((a shr 16) and 0xFF, (b shr 16) and 0xFF) shl 16) or

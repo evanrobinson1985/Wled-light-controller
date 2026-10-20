@@ -148,6 +148,7 @@ import com.wledcontroller.app.ui.components.themeBrush
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import java.util.UUID
 
 // ================================================================== shared canvas
@@ -313,9 +314,23 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             }
 
             SectionTitle("Adjust")
-            GradientSlider(params.speed, { container.house.params.value = params.copy(speed = it) }, label = "Speed", valueText = "${(params.speed * 100).toInt()}%", height = 34.dp)
-            Spacer(Modifier.height(10.dp))
-            GradientSlider(params.size, { container.house.params.value = params.copy(size = it) }, label = "Size", valueText = "${(params.size * 100).toInt()}%", height = 34.dp)
+            val ghosts = params.effect == HouseEffect.GHOSTS
+            if (ghosts) {
+                // Ghosts: how big, how many and how fast.
+                GradientSlider(params.size, { container.house.params.value = params.copy(size = it) }, label = "Ghost size", valueText = "${(params.size * 100).toInt()}%", height = 34.dp)
+                Spacer(Modifier.height(10.dp))
+                GradientSlider(
+                    (params.count - 1) / 7f,
+                    { container.house.params.value = params.copy(count = 1 + (it * 7).roundToInt()) },
+                    label = "Number of ghosts", valueText = "${params.count}", height = 34.dp,
+                )
+                Spacer(Modifier.height(10.dp))
+                GradientSlider(params.speed, { container.house.params.value = params.copy(speed = it) }, label = "Ghost speed", valueText = "${(params.speed * 100).toInt()}%", height = 34.dp)
+            } else {
+                GradientSlider(params.speed, { container.house.params.value = params.copy(speed = it) }, label = "Speed", valueText = "${(params.speed * 100).toInt()}%", height = 34.dp)
+                Spacer(Modifier.height(10.dp))
+                GradientSlider(params.size, { container.house.params.value = params.copy(size = it) }, label = "Size", valueText = "${(params.size * 100).toInt()}%", height = 34.dp)
+            }
             Spacer(Modifier.height(10.dp))
             GradientSlider(params.brightness, { container.house.params.value = params.copy(brightness = it) }, label = "Brightness", valueText = "${(params.brightness * 100).toInt()}%", height = 34.dp)
 
