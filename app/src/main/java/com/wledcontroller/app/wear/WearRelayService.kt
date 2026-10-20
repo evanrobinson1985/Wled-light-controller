@@ -46,6 +46,7 @@ class WearRelayService : WearableListenerService() {
                         WearBridge.SCENE_PATH -> scene(container, req)
                         WearBridge.GROUP_PATH -> group(container, req)
                         WearBridge.HOUSE_PATH -> house(container, req)
+                        WearBridge.SYNC_PATH -> container.wear.current().toString().toByteArray()
                         else -> throw IOException("Unknown request $path")
                     },
                 )

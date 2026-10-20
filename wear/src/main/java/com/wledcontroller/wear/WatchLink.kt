@@ -140,11 +140,19 @@ class WatchLink(private val context: Context) {
         .build()
 
     /** Takes in the phone's controller list from a data item. */
-    private fun take(map: com.google.android.gms.wearable.DataMap) {
-        val list = map.getString("devices")
-        val favs = map.getStringArrayList("favorites").orEmpty().toSet()
-        val settings = map.getString("effectSettings")
-        val scenes = map.getString("scenes"); val groups = map.getString("groups"); val house = map.getString("houseEffects")
+    private fun take(map: com.google.android.gms.wearable.DataMap) = take(
+        map.getString("devices"), map.getStringArrayList("favorites").orEmpty().toSet(), map.getString("effectSettings"),
+        map.getString("scenes"), map.getString("groups"), map.getString("houseEffects"),
+    )
+
+    /** The same, from the phone's direct answer. */
+    private fun take(o: JsonObject) {
+        fun str(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull
+        val favs = (o["favorites"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty().toSet()
+        take(str("devices"), favs, str("effectSettings"), str("scenes"), str("groups"), str("houseEffects"))
+    }
+
+    private fun take(list: String?, favs: Set<String>, settings: String?, scenes: String?, groups: String?, house: String?) {
         prefs.edit().putString("devices", list).putStringSet("favorites", favs).putString("effectSettings", settings)
             .putString("scenes", scenes).putString("groups", groups).putString("houseEffects", house).apply()
         _devices.value = WledParse.devices(list)
@@ -155,8 +163,11 @@ class WatchLink(private val context: Context) {
         _houseEffects.value = WledParse.list(house)
     }
 
-    /** Fetches the phone's latest controller list. */
-    suspend fun refreshDevices() {
+    /**
+     * Fetches the phone's latest controller list: what it last sent, or (with nothing yet) by
+     * asking the phone app directly, which also starts it if it isn't running.
+     */
+    suspend fun refreshDevices(askPhone: Boolean = false) {
         runCatching {
             val items = Wearable.getDataClient(context).getDataItems(Uri.parse("wear://*$DEVICES_PATH")).await()
             try {
@@ -165,7 +176,16 @@ class WatchLink(private val context: Context) {
                 items.release()
             }
         }
+        if (askPhone || _devices.value.isEmpty()) {
+            phone(SYNC_PATH, buildJsonObject { })?.let { answer ->
+                runCatching { take(WledParse.json.parseToJsonElement(String(answer)) as JsonObject) }
+            }
+        }
     }
+
+    /** Whether a phone is connected at all, for telling the user what's missing. */
+    suspend fun phoneConnected(): Boolean =
+        runCatching { Wearable.getNodeClient(context).connectedNodes.await().isNotEmpty() }.getOrDefault(false)
 
     /** Follows changes to the controller list while the app is open. */
     val listener = DataClient.OnDataChangedListener { events ->
@@ -231,5 +251,6 @@ class WatchLink(private val context: Context) {
     companion object {
         const val DEVICES_PATH = "/wled/devices"
         const val HTTP_PATH = "/wled/http"
+        const val SYNC_PATH = "/wled/sync"
     }
 }

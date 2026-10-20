@@ -163,17 +163,28 @@ private fun HomeScreen(
             delay(5000)
         }
     }
+    // With no controllers yet: ask the phone, and say what's missing if it can't answer.
+    var checking by remember { mutableStateOf(false) }
+    var hint by remember { mutableStateOf("Getting your controllers from the phone…") }
+    suspend fun check() {
+        checking = true
+        link.refreshDevices(askPhone = true)
+        hint = when {
+            link.devices.value.isNotEmpty() -> ""
+            !link.phoneConnected() -> "Your watch isn't connected to your phone. Check the Galaxy Wearable app, then try again."
+            else -> "No controllers yet. Open WLED Controller on your phone (the newest version), add your lights there, then try again."
+        }
+        checking = false
+    }
+    LaunchedEffect(devices.isEmpty()) { if (devices.isEmpty()) check() }
     WatchList {
-        item { ListHeader { Text("WLED") } }
+        item { ListHeader { Text("WLED Controller") } }
         if (devices.isEmpty()) {
             item {
-                Text(
-                    "Open WLED Controller on your phone to send your controllers here.",
-                    textAlign = TextAlign.Center, style = MaterialTheme.typography.body2,
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                )
+                if (checking) CircularProgressIndicator(Modifier.size(28.dp))
+                else Text(hint, textAlign = TextAlign.Center, style = MaterialTheme.typography.body2, modifier = Modifier.padding(horizontal = 8.dp))
             }
-            item { Chip(label = { Text("Check again") }, onClick = { scope.launch { link.refreshDevices() } }) }
+            item { Chip(label = { Text("Try again") }, enabled = !checking, onClick = { scope.launch { check() } }) }
         }
         items(devices, key = { it.id }) { d ->
             val st = states[d.id]
