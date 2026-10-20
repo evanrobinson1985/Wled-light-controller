@@ -42,8 +42,9 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * A ready-made virtual house: a night-time picture, five simulated controllers traced on it as
- * props (including a dense pixel matrix covering the garage door), groups, light types, presets,
+ * A ready-made virtual house: a night-time picture, six simulated controllers traced on it as
+ * props (including the rooflines of the house and garage on one strip, icicles along both eaves
+ * and a dense pixel matrix covering the garage door), groups, light types, presets,
  * a demo show, a playlist and a schedule.
  */
 object DemoSetup {
@@ -77,11 +78,29 @@ object DemoSetup {
     // The garage, joined on to the right of the house, with a 16 ft × 7 ft double door.
     private const val GARAGE_LEFT = 0.70f
     private const val GROUND = 0.758f
-    private val GARAGE_DOOR_LEFT = GARAGE_LEFT + ftAcross(0.6f)
+    private val GARAGE_DOOR_LEFT = GARAGE_LEFT + ftAcross(0.25f)
     private val garageDoor = RectF(GARAGE_DOOR_LEFT, GROUND - ftUp(7f), GARAGE_DOOR_LEFT + ftAcross(16f), GROUND)
-    private val GARAGE_RIGHT = garageDoor.right + ftAcross(0.6f)
-    private val GARAGE_EAVE = garageDoor.top - ftUp(1.2f)
+    private val GARAGE_RIGHT = garageDoor.right + ftAcross(0.4f)
+    // High enough above the door for icicles to hang clear of the matrix.
+    private val GARAGE_EAVE = garageDoor.top - ftUp(2.5f)
     private val GARAGE_PEAK = GARAGE_EAVE - ftUp(3.5f)
+    private const val GARAGE_OVERHANG = 0.008f
+
+    /** The garage's roofline: up one slope and down the other, like the house's. */
+    private val garageRoof get() = listOf(
+        MapPoint(GARAGE_LEFT - GARAGE_OVERHANG, GARAGE_EAVE),
+        MapPoint((GARAGE_LEFT + GARAGE_RIGHT) / 2f, GARAGE_PEAK),
+        MapPoint((GARAGE_RIGHT + GARAGE_OVERHANG).coerceAtMost(0.997f), GARAGE_EAVE),
+    )
+    /** The house roofline's 150 LEDs, then the garage's on the same controller, so they always match. */
+    private const val HOUSE_ROOF_LEDS = 150
+    private const val GARAGE_ROOF_LEDS = 85
+    private const val ROOF_LEDS = HOUSE_ROOF_LEDS + GARAGE_ROOF_LEDS
+
+    /** Icicle drops: how many LEDs each hangs, repeating, and how far apart they are. */
+    private val ICICLE_DROPS = intArrayOf(3, 5, 4, 6, 4)
+    private const val ICICLE_STEP_X = 0.0125f
+    private const val ICICLE_STEP_Y = 0.01f
     /** The matrix on the door: 96 × 42 pixels, about 2 in apart. */
     private const val MATRIX_W = 96
     private const val MATRIX_H = 42
@@ -96,9 +115,17 @@ object DemoSetup {
         val treeDev = SavedDevice("sim-tree", "Mega tree", "127.77.0.3")
         val yardDev = SavedDevice("sim-yard", "Yard props", "127.77.0.4")
         val garageDev = SavedDevice("sim-garage", "Garage matrix", "127.77.0.5")
+        val icicleDev = SavedDevice("sim-icicles", "Icicles", "127.77.0.6")
+        val houseIcicles = icicles(0.245f, 0.715f, EAVE_Y + 0.006f)
+        val garageIcicles = icicles(GARAGE_LEFT + 0.004f, GARAGE_RIGHT - 0.004f, GARAGE_EAVE + 0.006f)
+        val icicleLeds = houseIcicles.size + garageIcicles.size
 
         val runs = listOf(
-            LightRun("run-roof", "Roofline", roofDev.id, 0, 150, roof, prop = PropType.LINE),
+            LightRun("run-roof", "Roofline", roofDev.id, 0, HOUSE_ROOF_LEDS, roof, prop = PropType.LINE),
+            LightRun("run-garage-roof", "Garage roofline", roofDev.id, HOUSE_ROOF_LEDS, GARAGE_ROOF_LEDS, garageRoof, prop = PropType.LINE),
+            // Icicles hanging from the eaves, placed drop by drop.
+            LightRun("run-icicles", "House icicles", icicleDev.id, 0, houseIcicles.size, ledPoints = houseIcicles, prop = PropType.LINE),
+            LightRun("run-garage-icicles", "Garage icicles", icicleDev.id, houseIcicles.size, garageIcicles.size, ledPoints = garageIcicles, prop = PropType.LINE),
             LightRun("run-lwin", "Left window", windowDev.id, 0, 32, outline(leftWindow), prop = PropType.WINDOW),
             LightRun("run-rwin", "Right window", windowDev.id, 32, 32, outline(rightWindow), prop = PropType.WINDOW),
             LightRun(
@@ -126,6 +153,8 @@ object DemoSetup {
             PropGroup("grp-arches", "All arches", listOf("run-arch1", "run-arch2", "run-arch3")),
             PropGroup("grp-windows", "Windows & door", listOf("run-lwin", "run-rwin", "run-door")),
             PropGroup("grp-bushes", "Bushes", listOf("run-bush1", "run-bush2")),
+            PropGroup("grp-rooflines", "Rooflines", listOf("run-roof", "run-garage-roof")),
+            PropGroup("grp-icicles", "Icicles", listOf("run-icicles", "run-garage-icicles")),
         )
 
         val now = System.currentTimeMillis()
@@ -137,7 +166,9 @@ object DemoSetup {
             presets = presets(leds).toString(),
         )
         val sims = listOf(
-            data(roofDev, 150, 11, segment(150, 67, listOf(red, green, gold), pal = 4, sx = 90)),
+            data(roofDev, ROOF_LEDS, 11, segment(ROOF_LEDS, 67, listOf(red, green, gold), pal = 4, sx = 90)),
+            // Icicles twinkling in cool white.
+            data(icicleDev, icicleLeds, 61, segment(icicleLeds, SimCatalog.effects.indexOf("Twinklefox").coerceAtLeast(0), listOf(0xDDEEFF, 0x101830, 0), sx = 90, ix = 140)),
             data(windowDev, 100, 23, segment(100, 0, listOf(warm, 0, 0))),
             data(treeDev, 160, 37, segment(160, 80, listOf(green, red, gold), pal = 4, sx = 110, ix = 170)),
             data(yardDev, 130, 41, segment(130, 54, listOf(red, white, green), sx = 70, ix = 60)),
@@ -148,13 +179,14 @@ object DemoSetup {
         simFile.parentFile?.mkdirs()
         simFile.writeText(kotlinx.serialization.json.Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(SimDeviceData.serializer()), sims))
 
-        listOf(roofDev, windowDev, treeDev, yardDev, garageDev).forEach { store.upsertDevice(it) }
-        store.upsertGroup(DeviceGroup("sim-all", "Whole yard", listOf(roofDev.id, windowDev.id, treeDev.id, yardDev.id, garageDev.id)))
+        listOf(roofDev, windowDev, treeDev, yardDev, garageDev, icicleDev).forEach { store.upsertDevice(it) }
+        store.upsertGroup(DeviceGroup("sim-all", "Whole yard", listOf(roofDev.id, windowDev.id, treeDev.id, yardDev.id, garageDev.id, icicleDev.id)))
         store.setLightProfile(LightProfile.deviceKey(roofDev.id), LightProfile.STRIP)
         store.setLightProfile(LightProfile.deviceKey(windowDev.id), LightProfile.BULLETS)
         store.setLightProfile(LightProfile.deviceKey(treeDev.id), LightProfile.STRIP)
         store.setLightProfile(LightProfile.deviceKey(yardDev.id), LightProfile.BULLETS)
         store.setLightProfile(LightProfile.deviceKey(garageDev.id), LightProfile.MATRIX)
+        store.setLightProfile(LightProfile.deviceKey(icicleDev.id), LightProfile.BULLETS)
         // The front wall is 25 ft wide, which gives the map its scale.
         store.updateHouseMap {
             HouseMap(
@@ -214,7 +246,7 @@ object DemoSetup {
                 clip(24000, 8000, SeqEffect.RAINBOW, c(0xFFFFFF), speed = 0.6f),
                 clip(40000, 8000, SeqEffect.FIREWORKS, c(0xFFD27A, 0xFFFFFF, 0xC0C8FF), fadeOut = 1500),
             )),
-            Track("demo-t2", "Roofline", prop("run-roof"), listOf(
+            Track("demo-t2", "Rooflines", group("grp-rooflines"), listOf(
                 clip(11000, 8000, SeqEffect.COMET, c(0xFFFFFF), speed = 0.6f),
                 clip(32000, 8000, SeqEffect.COLOR_WAVE, c(0xFF1010, 0x10C020, 0xFFB040)),
             )),
@@ -246,6 +278,21 @@ object DemoSetup {
     }
 
     // ------------------------------------------------------------------ geometry
+
+    /**
+     * Icicle lights from [left] to [right] hanging below [top]: a drop every [ICICLE_STEP_X],
+     * each [ICICLE_DROPS] LEDs long in turn, wired down each drop and on along the eave.
+     */
+    private fun icicles(left: Float, right: Float, top: Float): List<MapPoint?> {
+        val out = ArrayList<MapPoint?>()
+        var x = left
+        var i = 0
+        while (x <= right) {
+            repeat(ICICLE_DROPS[i % ICICLE_DROPS.size]) { k -> out += MapPoint(x, top + k * ICICLE_STEP_Y) }
+            x += ICICLE_STEP_X; i++
+        }
+        return out
+    }
 
     /**
      * WLED's ledmap.json for the garage matrix: the panel's pixels in rows from the top left

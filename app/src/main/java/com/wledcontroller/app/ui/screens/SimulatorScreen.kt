@@ -491,13 +491,13 @@ private fun Intro(enabled: Boolean, onStart: () -> Unit) {
             Icon(Icons.Filled.Science, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
             Text("Try everything on a virtual house", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
-                "The simulator lights up a virtual house with five simulated WLED controllers: a roofline strip, bullet lights round the windows and door, a mega tree, arches and bushes in the yard, and a dense pixel matrix covering the garage door. They behave like the real thing, so you can try every part of the app and watch the result live:",
+                "The simulator lights up a virtual house with six simulated WLED controllers: a roofline strip along the house and garage, icicles hanging from both eaves, bullet lights round the windows and door, a mega tree, arches and bushes in the yard, and a dense pixel matrix covering the garage door. They behave like the real thing, so you can try every part of the app and watch the result live:",
                 style = MaterialTheme.typography.bodyMedium,
             )
             listOf(
                 "Colours, effects, palettes, segments, presets and playlists",
                 "Holiday themes, light types, LED setup, nightlight and the power limiter",
-                "Groups and scenes across all five controllers",
+                "Groups and scenes across all six controllers",
                 "Whole-house effects, the house map, props and standalone mode",
                 "Shows in the sequencer, the show schedule and xLights imports",
             ).forEach { Text("•  $it", style = MaterialTheme.typography.bodyMedium) }
