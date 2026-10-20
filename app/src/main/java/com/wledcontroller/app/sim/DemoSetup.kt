@@ -52,33 +52,59 @@ object DemoSetup {
     private const val W = 1600
     private const val H = 1000
 
-    // House geometry, as fractions of the picture.
-    private const val EAVE_Y = 0.42f
-    private val roof = listOf(MapPoint(0.23f, EAVE_Y), MapPoint(0.48f, 0.17f), MapPoint(0.73f, EAVE_Y))
-    private val leftWindow = RectF(0.31f, 0.50f, 0.39f, 0.62f)
-    private val rightWindow = RectF(0.57f, 0.50f, 0.65f, 0.62f)
-    private val door = RectF(0.45f, 0.56f, 0.51f, 0.75f)
-    private const val TREE_X = 0.12f
-    private const val TREE_TOP = 0.30f
-    private const val TREE_BASE = 0.85f
-    private const val TREE_HALF_W = 0.08f
+    // Everything is laid out from real sizes in feet, all to one scale: the picture is 80 ft
+    // wide (and 50 ft high), with the front of the house standing on [GROUND].
+    private const val PICTURE_FT = 80f
+    private const val GROUND = 0.76f
+    /** Feet from the left edge, as a fraction of the picture's width. */
+    private fun ftX(ft: Float) = ft / PICTURE_FT
+    /** Feet above the ground, as a fraction of the picture's height. */
+    private fun ftY(ft: Float) = GROUND - ft * W / H / PICTURE_FT
+
+    // A 36 ft single-storey house: 9 ft walls under an 8/12 gable roof with a 1 ft overhang,
+    // a 3 ft × 6 ft 8 in front door in the middle and 4 ft × 3 ft 6 in windows either side.
+    private const val HOUSE_LEFT_FT = 14f
+    private const val HOUSE_RIGHT_FT = 50f
+    private const val HOUSE_MID_FT = (HOUSE_LEFT_FT + HOUSE_RIGHT_FT) / 2f
+    private val HOUSE_LEFT = ftX(HOUSE_LEFT_FT)
+    private val HOUSE_RIGHT = ftX(HOUSE_RIGHT_FT)
+    private val EAVE_Y = ftY(9f)
+    private val roof = listOf(
+        MapPoint(ftX(HOUSE_LEFT_FT - 1f), ftY(9f - 8f / 12f)),
+        MapPoint(ftX(HOUSE_MID_FT), ftY(9f + (HOUSE_MID_FT - HOUSE_LEFT_FT) * 8f / 12f)),
+        MapPoint(ftX(HOUSE_RIGHT_FT + 1f), ftY(9f - 8f / 12f)),
+    )
+    private fun window(midFt: Float) = RectF(ftX(midFt - 2f), ftY(6.67f), ftX(midFt + 2f), ftY(3.17f))
+    private val leftWindow = window(HOUSE_LEFT_FT + 7f)
+    private val rightWindow = window(HOUSE_RIGHT_FT - 7f)
+    private val door = RectF(ftX(HOUSE_MID_FT - 1.5f), ftY(6.67f), ftX(HOUSE_MID_FT + 1.5f), ftY(0f))
+
+    // An 18 ft mega tree, 10 ft across at the base, in the yard left of the house.
+    private val TREE_X = ftX(6.5f)
+    private val TREE_BASE = 0.80f
+    private val TREE_TOP = TREE_BASE - 18f * W / H / PICTURE_FT
+    private val TREE_HALF_W = ftX(5f)
     /** The mega tree: 16 strings of 25 pixels round a pole, each fed from the base up. */
     private val treeModel = PropModel(ModelKind.MEGA_TREE, strings = 16, nodes = 25, degrees = 360, fromBottom = true, zigzag = false)
     private val TREE_LEDS = treeModel.ledCount
-    /** Icicles along the front eave: 3 strings of 90 pixels in drops of 3, 5, 4 and 6. */
-    private val icicleModel = PropModel(ModelKind.ICICLES, strings = 3, nodes = 90, dropPattern = listOf(3, 5, 4, 6), zigzag = true)
+    /** Icicles along the front eave: 3 strings of 90 pixels 3 in apart, in drops of 3, 5, 4 and 6. */
+    private val icicleModel = PropModel(ModelKind.ICICLES, strings = 3, nodes = 90, dropPattern = listOf(3, 5, 4, 6), dropSpacingCm = 7.62f, zigzag = true)
     private val ICICLE_LEDS = icicleModel.ledCount
+    // 5 ft × 6 ft 6 in arches in the yard, and 3 ft bushes under the windows.
     private val arches = listOf(0.79f, 0.87f, 0.95f)
     private const val ARCH_BASE = 0.90f
-    private val bushes = listOf(MapPoint(0.33f, 0.79f), MapPoint(0.63f, 0.79f))
+    private val bushes = listOf(MapPoint(leftWindow.centerX(), 0.79f), MapPoint(rightWindow.centerX(), 0.79f))
 
-    // The garage, joined on to the right of the house. Its double door is 16 ft × 7 ft at the
-    // house's scale (the 40 ft front wall spans 0.44 of the picture).
-    private const val GARAGE_LEFT = 0.70f
-    private const val GARAGE_RIGHT = 0.92f
-    private const val GARAGE_EAVE = 0.53f
-    private const val GARAGE_PEAK = 0.445f
-    private val garageDoor = RectF(0.722f, 0.636f, 0.898f, 0.758f)
+    // A 24 ft two-car garage joined on to the right of the house: 9 ft walls, a 6/12 gable roof
+    // and a 16 ft × 7 ft double door.
+    private const val GARAGE_LEFT_FT = HOUSE_RIGHT_FT
+    private const val GARAGE_RIGHT_FT = GARAGE_LEFT_FT + 24f
+    private const val GARAGE_MID_FT = (GARAGE_LEFT_FT + GARAGE_RIGHT_FT) / 2f
+    private val GARAGE_LEFT = ftX(GARAGE_LEFT_FT)
+    private val GARAGE_RIGHT = ftX(GARAGE_RIGHT_FT)
+    private val GARAGE_EAVE = ftY(9f)
+    private val GARAGE_PEAK = ftY(9f + 12f * 6f / 12f)
+    private val garageDoor = RectF(ftX(GARAGE_MID_FT - 8f), ftY(7f), ftX(GARAGE_MID_FT + 8f), ftY(0f))
     /** The matrix on the door: 96 × 42 pixels, about 2 in apart. */
     private const val MATRIX_W = 96
     private const val MATRIX_H = 42
@@ -112,7 +138,7 @@ object DemoSetup {
             // Hung from the eave, wired from the left.
             LightRun(
                 "run-icicles", "Icicles", icicleDev.id, 0, ICICLE_LEDS,
-                listOf(MapPoint(0.265f, EAVE_Y + 0.004f), MapPoint(0.695f, EAVE_Y + 0.004f)),
+                listOf(MapPoint(HOUSE_LEFT + 0.004f, EAVE_Y + 0.004f), MapPoint(HOUSE_RIGHT - 0.004f, EAVE_Y + 0.004f)),
                 prop = PropType.ICICLES, model = icicleModel,
             ),
             LightRun("run-arch1", "Arch 1", yardDev.id, 0, 25, arch(arches[0]), prop = PropType.ARCH),
@@ -165,11 +191,11 @@ object DemoSetup {
         store.setLightProfile(LightProfile.deviceKey(yardDev.id), LightProfile.BULLETS)
         store.setLightProfile(LightProfile.deviceKey(garageDev.id), LightProfile.MATRIX)
         store.setLightProfile(LightProfile.deviceKey(icicleDev.id), LightProfile.BULLETS)
-        // The front wall is 40 ft wide, which gives the map its scale.
+        // The front wall is 36 ft wide, which gives the map its scale.
         store.updateHouseMap {
             HouseMap(
                 photoPath = photo, aspect = aspect, runs = runs, groups = groups,
-                scaleA = MapPoint(0.26f, 0.76f), scaleB = MapPoint(0.70f, 0.76f), scaleCm = 40 * 30.48f,
+                scaleA = MapPoint(HOUSE_LEFT, GROUND), scaleB = MapPoint(HOUSE_RIGHT, GROUND), scaleCm = (HOUSE_RIGHT_FT - HOUSE_LEFT_FT) * 30.48f,
             )
         }
 
@@ -284,7 +310,7 @@ object DemoSetup {
     }
 
     private fun bush(c: MapPoint) = List(7) { j ->
-        MapPoint(c.x - 0.045f + j * 0.015f, c.y + if (j % 2 == 0) 0.02f else -0.02f)
+        MapPoint(c.x - 0.0225f + j * 0.0075f, c.y + if (j % 2 == 0) 0.012f else -0.012f)
     }
 
     // ------------------------------------------------------------------ picture
@@ -312,14 +338,14 @@ object DemoSetup {
         p.shader = null
 
         // The garage, joined on to the right of the house: wall, gable roof and its big door.
-        p.color = 0xFF30303A.toInt(); cv.drawRect(x(GARAGE_LEFT), y(GARAGE_EAVE), x(GARAGE_RIGHT), y(0.76f), p)
+        p.color = 0xFF30303A.toInt(); cv.drawRect(x(GARAGE_LEFT), y(GARAGE_EAVE), x(GARAGE_RIGHT), y(GROUND), p)
         p.color = 0xFF221C26.toInt()
         cv.drawPath(Path().apply {
-            moveTo(x(GARAGE_LEFT - 0.012f), y(GARAGE_EAVE) + 4); lineTo(x((GARAGE_LEFT + GARAGE_RIGHT) / 2f), y(GARAGE_PEAK))
-            lineTo(x(GARAGE_RIGHT + 0.012f), y(GARAGE_EAVE) + 4); close()
+            moveTo(x(GARAGE_LEFT - ftX(1f)), y(GARAGE_EAVE) + 4); lineTo(x((GARAGE_LEFT + GARAGE_RIGHT) / 2f), y(GARAGE_PEAK))
+            lineTo(x(GARAGE_RIGHT + ftX(1f)), y(GARAGE_EAVE) + 4); close()
         }, p)
         p.color = 0xFFDCE3F2.toInt(); p.alpha = 60
-        cv.drawRect(x(GARAGE_LEFT - 0.012f), y(GARAGE_EAVE) - 3, x(GARAGE_RIGHT + 0.012f), y(GARAGE_EAVE) + 5, p)
+        cv.drawRect(x(GARAGE_LEFT - ftX(1f)), y(GARAGE_EAVE) - 3, x(GARAGE_RIGHT + ftX(1f)), y(GARAGE_EAVE) + 5, p)
         p.alpha = 255
         p.color = 0xFF1C1E26.toInt(); cv.drawRect(x(garageDoor.left), y(garageDoor.top), x(garageDoor.right), y(garageDoor.bottom), p)
         // The door's panels, faint under the matrix.
@@ -331,19 +357,24 @@ object DemoSetup {
         // Driveway.
         p.color = 0xFF2C3346.toInt()
         cv.drawPath(Path().apply {
-            moveTo(x(garageDoor.left), y(0.76f)); lineTo(x(garageDoor.right), y(0.76f)); lineTo(x(garageDoor.right + 0.06f), y(1f)); lineTo(x(garageDoor.left - 0.03f), y(1f)); close()
+            moveTo(x(garageDoor.left), y(GROUND)); lineTo(x(garageDoor.right), y(GROUND)); lineTo(x(garageDoor.right + 0.06f), y(1f)); lineTo(x(garageDoor.left - 0.03f), y(1f)); close()
         }, p)
 
         // House.
-        p.color = 0xFF34343E.toInt(); cv.drawRect(x(0.26f), y(EAVE_Y), x(0.70f), y(0.76f), p)
+        p.color = 0xFF34343E.toInt(); cv.drawRect(x(HOUSE_LEFT), y(EAVE_Y), x(HOUSE_RIGHT), y(GROUND), p)
         p.color = 0xFF2A2330.toInt()
-        cv.drawRect(x(0.58f), y(0.20f), x(0.62f), y(0.32f), p) // chimney
+        cv.drawRect(x(ftX(HOUSE_RIGHT_FT - 8f)), y(ftY(19f)), x(ftX(HOUSE_RIGHT_FT - 6f)), y(ftY(12f)), p) // chimney
         val roofPath = Path().apply {
             moveTo(x(roof[0].x), y(roof[0].y) + 4); lineTo(x(roof[1].x), y(roof[1].y)); lineTo(x(roof[2].x), y(roof[2].y) + 4); close()
         }
         p.color = 0xFF221C26.toInt(); cv.drawPath(roofPath, p)
         p.color = 0xFFDCE3F2.toInt(); p.alpha = 70
-        cv.drawPath(Path().apply { moveTo(x(0.25f), y(EAVE_Y)); lineTo(x(0.48f), y(0.19f)); lineTo(x(0.71f), y(EAVE_Y)); lineTo(x(0.66f), y(EAVE_Y)); lineTo(x(0.48f), y(0.23f)); lineTo(x(0.30f), y(EAVE_Y)); close() }, p)
+        // Snow along the roof's edges.
+        val (rl, peak, rr) = roof
+        cv.drawPath(Path().apply {
+            moveTo(x(rl.x + 0.005f), y(rl.y)); lineTo(x(peak.x), y(peak.y + 0.015f)); lineTo(x(rr.x - 0.005f), y(rr.y))
+            lineTo(x(rr.x - 0.04f), y(rr.y)); lineTo(x(peak.x), y(peak.y + 0.045f)); lineTo(x(rl.x + 0.04f), y(rl.y)); close()
+        }, p)
         p.alpha = 255
         for (w in listOf(leftWindow, rightWindow)) {
             p.color = 0xFF5A4628.toInt(); cv.drawRect(x(w.left), y(w.top), x(w.right), y(w.bottom), p)
@@ -371,7 +402,7 @@ object DemoSetup {
         p.style = Paint.Style.FILL; p.color = 0xFF4A505A.toInt()
         cv.drawRect(x(TREE_X - 0.003f), y(TREE_TOP - 0.025f), x(TREE_X + 0.003f), y(TREE_BASE - 0.03f), p)
         p.color = 0xFF1A3324.toInt()
-        for (b in bushes) cv.drawOval(x(b.x - 0.06f), y(b.y - 0.045f), x(b.x + 0.06f), y(b.y + 0.04f), p)
+        for (b in bushes) cv.drawOval(x(b.x - ftX(2.5f)), y(b.y - 0.03f), x(b.x + ftX(2.5f)), y(b.y + 0.025f), p)
         p.style = Paint.Style.STROKE; p.strokeWidth = 4f; p.color = 0xFF5A6070.toInt()
         for (a in arches) cv.drawArc(x(a - 0.032f), y(ARCH_BASE - 0.13f), x(a + 0.032f), y(ARCH_BASE + 0.13f), 180f, 180f, false, p)
         p.style = Paint.Style.FILL
