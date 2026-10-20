@@ -3,6 +3,7 @@ package com.wledcontroller.app.house
 import kotlinx.serialization.Serializable
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 
 /** Shapes whose LEDs are laid out from how they're wired, like xLights models. */
@@ -12,6 +13,7 @@ enum class ModelKind(val label: String) {
     MEGA_TREE("Mega tree"),
     STAR("Star"),
     FACE("Singing face"),
+    ICICLES("Icicles"),
     CUSTOM("Custom (xLights)"),
 }
 
@@ -24,6 +26,9 @@ enum class StartCorner(val label: String) { TOP_LEFT("Top left"), TOP_RIGHT("Top
  * and forth when [zigzag]. Mega tree: [strings] strings of [nodes] from the top (or the bottom
  * when [fromBottom]), fanned across [degrees] of the tree. Star: [points] points with [nodes] LEDs
  * each, round the outline from the top going clockwise (or not, when [clockwise] is false).
+ * Icicles: [strings] strings of [nodes] LEDs, split into drops of [dropPattern] LEDs (repeating,
+ * like xLights) that hang from a traced line [dropSpacingCm] apart, every other drop wired back
+ * up when [zigzag].
  */
 @Serializable
 data class PropModel(
@@ -43,9 +48,13 @@ data class PropModel(
     val customW: Int = 0,
     val customH: Int = 0,
     val customCells: List<Int> = emptyList(),
+    /** Icicles: LEDs in each drop, repeating along the line. */
+    val dropPattern: List<Int> = DEFAULT_DROPS,
+    /** Icicles: how far apart the LEDs in a drop are. */
+    val dropSpacingCm: Float = 10f,
 ) {
     val ledCount: Int get() = when (kind) {
-        ModelKind.MATRIX, ModelKind.MEGA_TREE -> strings.coerceAtLeast(1) * nodes.coerceAtLeast(1)
+        ModelKind.MATRIX, ModelKind.MEGA_TREE, ModelKind.ICICLES -> strings.coerceAtLeast(1) * nodes.coerceAtLeast(1)
         ModelKind.STAR -> points.coerceAtLeast(3) * nodes.coerceAtLeast(2)
         ModelKind.FACE -> FACE_PARTS.size * nodes.coerceAtLeast(2)
         ModelKind.CUSTOM -> customCells.size
@@ -56,6 +65,53 @@ data class PropModel(
         ModelKind.CUSTOM -> customW.coerceAtLeast(1).toFloat() / customH.coerceAtLeast(1)
         ModelKind.MEGA_TREE -> 0.6f
         else -> 1f
+    }
+
+    /** Hangs from a traced line (icicles), rather than filling a box. */
+    val tracesLine: Boolean get() = kind == ModelKind.ICICLES
+
+    /** Icicles: how many LEDs each drop holds, in wiring order (the last may be cut short). */
+    fun drops(): List<Int> {
+        val pattern = dropPattern.filter { it > 0 }.ifEmpty { DEFAULT_DROPS }
+        val out = ArrayList<Int>()
+        var left = ledCount
+        while (left > 0) { val n = minOf(pattern[out.size % pattern.size], left); out += n; left -= n }
+        return out
+    }
+
+    /**
+     * Icicles hanging from [line] (normalised photo points, x scaled by [aspect] for true
+     * distances): drops evenly spaced along it, each hanging straight down with its LEDs
+     * [ledGap] picture heights apart (null = as far apart as the drops are).
+     */
+    fun hang(line: List<MapPoint>, aspect: Float, ledGap: Float? = null): List<MapPoint> {
+        val drops = drops()
+        if (line.isEmpty() || drops.isEmpty()) return emptyList()
+        val segs = line.zipWithNext { a, b -> hypot((b.x - a.x) * aspect, b.y - a.y) }
+        val total = segs.sum()
+        fun along(d: Float): MapPoint {
+            var rest = d
+            for (k in segs.indices) {
+                if (rest <= segs[k] || k == segs.lastIndex) {
+                    val f = if (segs[k] > 0f) (rest / segs[k]).coerceIn(0f, 1f) else 0f
+                    val a = line[k]; val b = line[k + 1]
+                    return MapPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
+                }
+                rest -= segs[k]
+            }
+            return line.first()
+        }
+        val pitch = total / drops.size
+        val gap = ledGap ?: pitch
+        val out = ArrayList<MapPoint>(ledCount)
+        drops.forEachIndexed { d, n ->
+            val top = along(pitch * (d + 0.5f))
+            for (j in 0 until n) {
+                val k = if (zigzag && d % 2 == 1) n - 1 - j else j
+                out += MapPoint(top.x, top.y + gap * (k + 0.5f))
+            }
+        }
+        return out
     }
 
     /** For a singing face: which part LED [i] is (0 eyes, 1 mouth closed, 2 open, 3 wide); else null. */
@@ -141,6 +197,10 @@ data class PropModel(
                     at(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)
                 }
             }
+            // Normally hung from a traced line; in a box, from its top edge, the longest drop
+            // reaching the bottom.
+            ModelKind.ICICLES -> hang(listOf(MapPoint(left, top), MapPoint(right, top)), aspect,
+                (bottom - top) / (dropPattern.maxOrNull() ?: 1).coerceAtLeast(1))
             ModelKind.CUSTOM -> {
                 val w = customW.coerceAtLeast(1); val h = customH.coerceAtLeast(1)
                 customCells.map { cell ->
@@ -182,6 +242,10 @@ data class PropModel(
             val p = points.coerceAtLeast(3); val n = nodes.coerceAtLeast(2)
             List(p) { pt -> Submodel("Point ${pt + 1}", listOf(pt * n until (pt + 1) * n)) }
         }
+        ModelKind.ICICLES -> {
+            var at = 0
+            drops().mapIndexed { d, n -> Submodel("Drop ${d + 1}", listOf(at until at + n)).also { at += n } }
+        }
         ModelKind.CUSTOM -> emptyList() // An imported model brings its own parts as the run's submodels.
         ModelKind.FACE -> {
             val n = nodes.coerceAtLeast(2)
@@ -191,6 +255,7 @@ data class PropModel(
 
     companion object {
         val FACE_PARTS = listOf("Eyes", "Mouth closed", "Mouth open", "Mouth wide")
+        val DEFAULT_DROPS = listOf(3, 5, 4, 6)
         /** How much higher than the front the back of a mega tree's base ring sits, as a fraction of its height. */
         const val TREE_TILT = 0.12f
     }

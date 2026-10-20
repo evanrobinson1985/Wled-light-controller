@@ -42,8 +42,9 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * A ready-made virtual house: a night-time picture, five simulated controllers traced on it as
- * props (including a dense pixel matrix covering the garage door), groups, light types, presets,
+ * A ready-made virtual house: a night-time picture, six simulated controllers traced on it as
+ * props (including icicles along the eave and a dense pixel matrix covering the garage door),
+ * groups, light types, presets,
  * a demo show, a playlist and a schedule.
  */
 object DemoSetup {
@@ -64,6 +65,9 @@ object DemoSetup {
     /** The mega tree: 16 strings of 25 pixels round a pole, each fed from the base up. */
     private val treeModel = PropModel(ModelKind.MEGA_TREE, strings = 16, nodes = 25, degrees = 360, fromBottom = true, zigzag = false)
     private val TREE_LEDS = treeModel.ledCount
+    /** Icicles along the front eave: 3 strings of 90 pixels in drops of 3, 5, 4 and 6. */
+    private val icicleModel = PropModel(ModelKind.ICICLES, strings = 3, nodes = 90, dropPattern = listOf(3, 5, 4, 6), zigzag = true)
+    private val ICICLE_LEDS = icicleModel.ledCount
     private val arches = listOf(0.79f, 0.87f, 0.95f)
     private const val ARCH_BASE = 0.90f
     private val bushes = listOf(MapPoint(0.33f, 0.79f), MapPoint(0.63f, 0.79f))
@@ -89,6 +93,7 @@ object DemoSetup {
         val treeDev = SavedDevice("sim-tree", "Mega tree", "127.77.0.3")
         val yardDev = SavedDevice("sim-yard", "Yard props", "127.77.0.4")
         val garageDev = SavedDevice("sim-garage", "Garage matrix", "127.77.0.5")
+        val icicleDev = SavedDevice("sim-icicles", "Icicles", "127.77.0.6")
 
         val runs = listOf(
             LightRun("run-roof", "Roofline", roofDev.id, 0, 150, roof, prop = PropType.LINE),
@@ -103,6 +108,12 @@ object DemoSetup {
                 "run-tree", "Mega tree", treeDev.id, 0, TREE_LEDS,
                 listOf(MapPoint(TREE_X - TREE_HALF_W, TREE_TOP), MapPoint(TREE_X + TREE_HALF_W, TREE_BASE)),
                 prop = PropType.TREE, model = treeModel,
+            ),
+            // Hung from the eave, wired from the left.
+            LightRun(
+                "run-icicles", "Icicles", icicleDev.id, 0, ICICLE_LEDS,
+                listOf(MapPoint(0.265f, EAVE_Y + 0.004f), MapPoint(0.695f, EAVE_Y + 0.004f)),
+                prop = PropType.ICICLES, model = icicleModel,
             ),
             LightRun("run-arch1", "Arch 1", yardDev.id, 0, 25, arch(arches[0]), prop = PropType.ARCH),
             LightRun("run-arch2", "Arch 2", yardDev.id, 25, 25, arch(arches[1]), prop = PropType.ARCH),
@@ -137,6 +148,7 @@ object DemoSetup {
             data(roofDev, 150, 11, segment(150, 67, listOf(red, green, gold), pal = 4, sx = 90)),
             data(windowDev, 100, 23, segment(100, 0, listOf(warm, 0, 0))),
             data(treeDev, TREE_LEDS, 37, segment(TREE_LEDS, 80, listOf(green, red, gold), pal = 4, sx = 110, ix = 170)),
+            data(icicleDev, ICICLE_LEDS, 61, segment(ICICLE_LEDS, 51, listOf(0xDCEBFF, 0x8CC8FF, white), sx = 60, ix = 140)),
             data(yardDev, 130, 41, segment(130, 54, listOf(red, white, green), sx = 70, ix = 60)),
             // Set up as a 2D panel, so its own effects sweep across the door rather than along the wiring.
             data(garageDev, MATRIX_LEDS, 53, segment(MATRIX_LEDS, 9, listOf(red, green, gold), pal = 4, sx = 70))
@@ -145,13 +157,14 @@ object DemoSetup {
         simFile.parentFile?.mkdirs()
         simFile.writeText(kotlinx.serialization.json.Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(SimDeviceData.serializer()), sims))
 
-        listOf(roofDev, windowDev, treeDev, yardDev, garageDev).forEach { store.upsertDevice(it) }
-        store.upsertGroup(DeviceGroup("sim-all", "Whole yard", listOf(roofDev.id, windowDev.id, treeDev.id, yardDev.id, garageDev.id)))
+        listOf(roofDev, windowDev, treeDev, yardDev, garageDev, icicleDev).forEach { store.upsertDevice(it) }
+        store.upsertGroup(DeviceGroup("sim-all", "Whole yard", listOf(roofDev.id, windowDev.id, treeDev.id, yardDev.id, garageDev.id, icicleDev.id)))
         store.setLightProfile(LightProfile.deviceKey(roofDev.id), LightProfile.STRIP)
         store.setLightProfile(LightProfile.deviceKey(windowDev.id), LightProfile.BULLETS)
         store.setLightProfile(LightProfile.deviceKey(treeDev.id), LightProfile.STRIP)
         store.setLightProfile(LightProfile.deviceKey(yardDev.id), LightProfile.BULLETS)
         store.setLightProfile(LightProfile.deviceKey(garageDev.id), LightProfile.MATRIX)
+        store.setLightProfile(LightProfile.deviceKey(icicleDev.id), LightProfile.BULLETS)
         // The front wall is 40 ft wide, which gives the map its scale.
         store.updateHouseMap {
             HouseMap(
@@ -234,6 +247,10 @@ object DemoSetup {
             Track("demo-t7", "Garage door", prop("run-garage"), listOf(
                 clip(11000, 13000, SeqEffect.TEXT, c(0xFF2020, 0x20C040), speed = 0.45f).copy(text = "Merry Christmas!"),
                 clip(32000, 8000, SeqEffect.PLASMA, c(0xFF1010, 0x10C020, 0xFFB040), speed = 0.5f),
+            )),
+            Track("demo-t8", "Icicles", prop("run-icicles"), listOf(
+                clip(11000, 13000, SeqEffect.SNOW, c(0xDCEBFF, 0x8CC8FF)),
+                clip(32000, 8000, SeqEffect.TWINKLE, c(0xFFFFFF, 0x8CC8FF)),
             )),
         )
         return Sequence(

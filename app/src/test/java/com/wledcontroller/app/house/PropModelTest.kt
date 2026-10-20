@@ -58,6 +58,35 @@ class PropModelTest {
     }
 
     @Test
+    fun iciclesHangFromTheTracedLine() {
+        // 10 LEDs in drops of 2 and 3: 2, 3, 2, 3, every other drop wired back up.
+        val m = PropModel(ModelKind.ICICLES, strings = 1, nodes = 10, dropPattern = listOf(2, 3), zigzag = true)
+        assertEquals(listOf(2, 3, 2, 3), m.drops())
+        assertEquals(listOf("Drop 1", "Drop 2", "Drop 3", "Drop 4"), m.submodels().map { it.name })
+        assertEquals(2..4, m.submodels()[1].ranges.single())
+        // A line 0.8 long: drops every 0.2, LEDs 0.1 apart hanging below it.
+        val p = m.hang(listOf(MapPoint(0.1f, 0.5f), MapPoint(0.9f, 0.5f)), aspect = 1f, ledGap = 0.1f)
+        assertEquals(10, p.size)
+        close(0.2f, 0.55f, p[0])  // first drop, top LED just under the line
+        close(0.2f, 0.65f, p[1])
+        close(0.4f, 0.75f, p[2])  // second drop starts at its bottom (zig-zag)
+        close(0.4f, 0.55f, p[4])
+        close(0.6f, 0.55f, p[5])  // third drop from the top again
+        close(0.8f, 0.55f, p[9])  // the last, wired back up, ends at the top
+    }
+
+    @Test
+    fun iciclesAreTracedNotBoxed() {
+        val m = PropModel(ModelKind.ICICLES, strings = 1, nodes = 4, dropPattern = listOf(2))
+        val run = LightRun("i", "Icicles", "d", 0, 4, points = listOf(MapPoint(0f, 0.2f), MapPoint(0.5f, 0.2f), MapPoint(1f, 0.4f)), model = m)
+        assertTrue(!run.isBoxModel)
+        // Without a map scale, LEDs down a drop are as far apart as the drops.
+        val pos = run.ledPositions(aspect = 1f)
+        assertEquals(4, pos.count { it != null })
+        assertTrue(pos[0]!!.y > 0.2f)
+    }
+
+    @Test
     fun starPointsHoldTheirOwnLeds() {
         val m = PropModel(ModelKind.STAR, points = 5, nodes = 10)
         val p = m.layout(MapPoint(0f, 0f), MapPoint(1f, 1f), 1f)

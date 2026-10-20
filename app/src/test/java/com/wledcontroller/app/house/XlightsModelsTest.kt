@@ -100,4 +100,16 @@ class XlightsModelsTest {
         assertEquals("Tree Controller" to 800, starts["Star"])  // channel 2401 = LED 800
         assertEquals("Default" to 1500, starts["Panel"])        // absolute channel 4501
     }
+
+    @Test
+    fun iciclesKeepTheirDropPattern() {
+        val xml = """<models><model name="Eave icicles" DisplayAs="Icicles" parm1="2" parm2="50" DropPattern="3,4,5,4"/></models>"""
+        val m = XlightsModels.parseXmodel(xml.byteInputStream())
+        assertEquals(PropType.ICICLES, m.prop)
+        assertEquals(100, m.ledCount)
+        val model = m.model!!
+        assertEquals(ModelKind.ICICLES, model.kind)
+        assertEquals(listOf(3, 4, 5, 4), model.dropPattern)
+        assertEquals(true, model.tracesLine)
+    }
 }

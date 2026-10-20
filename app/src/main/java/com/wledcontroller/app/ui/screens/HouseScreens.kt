@@ -267,7 +267,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                 leds.forEachIndexed { i, led ->
                     if (led.hidden) return@forEachIndexed // Out of sight in the photo.
                     val o = Offset(led.x * size.width, led.y * size.height)
-                    drawPixel(HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun), o, pixelRadius(pixel, gaps[i]))
+                    drawPixel(HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun), o, pixelRadius(pixel, gaps[i]), pixel.glowAmount())
                 }
             }
             Text(
@@ -630,9 +630,9 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                 onTap = if (drawingRun != null) { { p ->
                     // A model needs just the two corners of its box; one with a real size, just its centre.
                     val w = drawingRun.realWidthCm; val h = drawingRun.realHeightCm
-                    val sized = if (drawingRun.model != null && w != null && h != null) map.boxAround(p, w, h) else null
+                    val sized = if (drawingRun.isBoxModel && w != null && h != null) map.boxAround(p, w, h) else null
                     if (sized != null) { draft.clear(); draft.addAll(sized) }
-                    else if (drawingRun.model == null || draft.size < 2) draft.add(p)
+                    else if (!drawingRun.isBoxModel || draft.size < 2) draft.add(p)
                     if (drawingRun.model == null && nextHidden && draft.size >= 2) {
                         val k = draft.size - 2
                         draftHidden.add(HiddenStretch(k)); askHidden = k; nextHidden = false
@@ -652,7 +652,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     val positions = map.positions(run)
                     val placed = positions.filterNotNull()
                     if (run.isPlacedPerLed) drawRun(placed, col, stroke, dashed = false)
-                    else if (run.model != null) drawBox(run.points, col.copy(alpha = 0.5f), stroke)
+                    else if (run.isBoxModel) drawBox(run.points, col.copy(alpha = 0.5f), stroke)
                     else drawTracedRun(run.points, run.hidden.map { it.after }.toSet(), col, stroke)
                     val runGaps = neighbourGaps(positions, map.aspect)
                     val hiddenLed = run.hiddenFlags(map.aspect, map.cmPerHeight)
@@ -669,7 +669,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                     }
                 }
                 if (drawingRun != null) {
-                    if (drawingRun.model != null) drawBox(draft.toList(), Color.White, stroke)
+                    if (drawingRun.isBoxModel) drawBox(draft.toList(), Color.White, stroke)
                     else drawTracedRun(draft.toList(), draftHidden.map { it.after }.toSet(), Color.White, stroke)
                     val previewRun = drawingRun.copy(points = draft.toList(), ledPoints = null, hidden = draftHidden.toList())
                     val preview = map.positions(previewRun)
@@ -701,7 +701,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
 
             ScaleSummary(map, onSet = { scaling = true; scaleDraft.clear() })
 
-            if (drawingRun != null && drawingRun.model != null) {
+            if (drawingRun != null && drawingRun.isBoxModel) {
                 val w = drawingRun.realWidthCm; val h = drawingRun.realHeightCm
                 Text(
                     when {
@@ -709,7 +709,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                             "Tap where the middle of the prop goes. It's placed at its real size, ${formatLength(w, true)} × ${formatLength(h, true)}; tap again to move it."
                         w != null && h != null ->
                             "Set the house scale (ruler button) to place this prop at its real size, ${formatLength(w, true)} × ${formatLength(h, true)}. For now, tap two opposite corners."
-                        else -> "Tap two opposite corners of the ${drawingRun.model.kind.label.lowercase()} on the photo. Its ${drawingRun.count} lights are laid out inside from how it's wired."
+                        else -> "Tap two opposite corners of the ${drawingRun.model?.kind?.label?.lowercase()} on the photo. Its ${drawingRun.count} lights are laid out inside from how it's wired."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(vertical = 8.dp),
@@ -728,19 +728,23 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
 
             if (drawingRun != null) {
                 Text(
-                    if (drawingRun.count == 1) "Tap where this light is on the photo, then Done."
-                    else "Tap along the lights, starting at the end where LED ${drawingRun.startLed} is (usually the end nearest the controller). Add a point at every corner.",
+                    when {
+                        drawingRun.model?.tracesLine == true ->
+                            "Tap along the line the icicles hang from (the gutter or eave), starting at the end where LED ${drawingRun.startLed} is. Add a point at every corner; the drops hang straight down from it."
+                        drawingRun.count == 1 -> "Tap where this light is on the photo, then Done."
+                        else -> "Tap along the lights, starting at the end where LED ${drawingRun.startLed} is (usually the end nearest the controller). Add a point at every corner."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(vertical = 8.dp),
                 )
-                FilterChip(
+                if (drawingRun.model == null) FilterChip(
                     selected = nextHidden,
                     enabled = draft.isNotEmpty(),
                     onClick = { nextHidden = !nextHidden },
                     label = { Text(if (nextHidden) "Tap where the lights come back into view" else "Lights go out of sight here") },
                     leadingIcon = { Icon(Icons.Filled.VisibilityOff, null, Modifier.size(18.dp)) },
                 )
-                Text(
+                if (drawingRun.model == null) Text(
                     "Lights wrap round a corner or go behind something? Tap the last point you can see, turn this on, then tap where they reappear. You'll be asked how long the hidden part is.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -809,7 +813,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                             TextButton(onClick = { startTracing(run.id) }) {
                                 Text(
                                     when {
-                                        run.model != null -> if (run.points.size < 2) "Place" else "Move"
+                                        run.isBoxModel -> if (run.points.size < 2) "Place" else "Move"
                                         run.points.size < 2 && !run.isPlacedPerLed -> "Trace"
                                         else -> "Retrace"
                                     }
@@ -818,7 +822,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                             TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { saveRun(run.copy(points = run.points.reversed(), hidden = run.hidden.map { it.copy(after = run.points.size - 2 - it.after) })) }) {
                                 Icon(Icons.Filled.SwapHoriz, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Flip start")
                             }
-                            if (run.model != null) {
+                            if (run.isBoxModel) {
                                 TextButton(onClick = { saveRun(run.copy(mirrored = !run.mirrored)) }) {
                                     Icon(Icons.Filled.Flip, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(if (run.mirrored) "Unmirror" else "Mirror")
                                 }
@@ -1095,6 +1099,7 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
     var mirrored by remember { mutableStateOf(run.mirrored) }
     var upsideDown by remember { mutableStateOf(run.upsideDown) }
     val activeModel = modelKind?.takeIf { !isFixture }?.let { model.copy(kind = it) }
+    val boxModel = activeModel?.tracesLine == false
     val valid = name.isNotBlank() && device != null && s != null && (activeModel != null || (c != null && c > 0)) && (!fixedSpacing || spacingCm != null)
 
     AlertDialog(
@@ -1108,27 +1113,34 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                     FilterChip(selected = modelKind == null, onClick = { modelKind = null }, label = { Text("Traced line") })
                     ModelKind.entries.filter { it != ModelKind.CUSTOM || run.model?.kind == ModelKind.CUSTOM }.forEach { k ->
                         FilterChip(selected = modelKind == k, onClick = {
+                            // Icicles start as one string holding this run's LEDs.
+                            if (k == ModelKind.ICICLES && modelKind != k) model = model.copy(strings = 1, nodes = c?.takeIf { it > 0 } ?: 100)
                             modelKind = k
-                            prop = when (k) { ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR; ModelKind.FACE -> PropType.BUSH; ModelKind.CUSTOM -> PropType.MATRIX }
+                            prop = when (k) {
+                                ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR
+                                ModelKind.FACE -> PropType.BUSH; ModelKind.CUSTOM -> PropType.MATRIX; ModelKind.ICICLES -> PropType.ICICLES
+                            }
                         }, label = { Text(k.label) })
                     }
                 }
                 if (activeModel != null) {
                     ModelEditor(activeModel) { model = it }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(realW, { realW = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) }, label = { Text("Real width (in)") },
-                            singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                        OutlinedTextField(realH, { realH = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) }, label = { Text("Real height (in)") },
-                            singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                    }
-                    Text(
-                        "With a real size and the house scale set, it's placed at true size with one tap.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(selected = mirrored, onClick = { mirrored = !mirrored }, label = { Text("Mirror (left ↔ right)") })
-                        FilterChip(selected = upsideDown, onClick = { upsideDown = !upsideDown }, label = { Text("Upside down") })
+                    if (boxModel) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(realW, { realW = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) }, label = { Text("Real width (in)") },
+                                singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                            OutlinedTextField(realH, { realH = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) }, label = { Text("Real height (in)") },
+                                singleLine = true, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                        }
+                        Text(
+                            "With a real size and the house scale set, it's placed at true size with one tap.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip(selected = mirrored, onClick = { mirrored = !mirrored }, label = { Text("Mirror (left ↔ right)") })
+                            FilterChip(selected = upsideDown, onClick = { upsideDown = !upsideDown }, label = { Text("Upside down") })
+                        }
                     }
                 }
                 Text("Prop type", style = MaterialTheme.typography.labelLarge)
@@ -1247,13 +1259,13 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                         hidden = if (activeModel == null) hiddenList.toList() else emptyList(),
                         model = activeModel,
                         // Switching to or from a model starts its placement afresh.
-                        points = if ((activeModel == null) != (run.model == null)) emptyList() else run.points,
+                        points = if ((activeModel?.tracesLine == false) != run.isBoxModel) emptyList() else run.points,
                         ledPoints = if (activeModel != null) null else run.ledPoints,
                         submodels = customSubs.toList(),
-                        realWidthCm = realW.toFloatOrNull()?.takeIf { it > 0f && activeModel != null }?.times(2.54f),
-                        realHeightCm = realH.toFloatOrNull()?.takeIf { it > 0f && activeModel != null }?.times(2.54f),
-                        mirrored = activeModel != null && mirrored,
-                        upsideDown = activeModel != null && upsideDown,
+                        realWidthCm = realW.toFloatOrNull()?.takeIf { it > 0f && boxModel }?.times(2.54f),
+                        realHeightCm = realH.toFloatOrNull()?.takeIf { it > 0f && boxModel }?.times(2.54f),
+                        mirrored = boxModel && mirrored,
+                        upsideDown = boxModel && upsideDown,
                     )
                 ) }) {
                 Text(if (run.count == 0) "Next: trace it" else "Save")
@@ -1759,7 +1771,7 @@ private fun ScaleDialog(inches: Boolean, current: Float?, onDismiss: () -> Unit,
     )
 }
 
-/** The wiring settings for a matrix, mega tree or star. */
+/** The wiring settings for a matrix, mega tree, star or icicles. */
 @Composable
 private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
     @Composable
@@ -1773,7 +1785,7 @@ private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         when (model.kind) {
-            ModelKind.MATRIX, ModelKind.MEGA_TREE -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ModelKind.MATRIX, ModelKind.MEGA_TREE, ModelKind.ICICLES -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 number("Strings", model.strings, 1..512, Modifier.weight(1f)) { onChange(model.copy(strings = it)) }
                 number("LEDs per string", model.nodes, 1..2048, Modifier.weight(1f)) { onChange(model.copy(nodes = it)) }
             }
@@ -1816,10 +1828,40 @@ private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
                 Text("Clockwise from the top point", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 Switch(checked = model.clockwise, onCheckedChange = { onChange(model.copy(clockwise = it)) })
             }
+            ModelKind.ICICLES -> {
+                var pattern by remember { mutableStateOf(model.dropPattern.joinToString(", ")) }
+                OutlinedTextField(
+                    pattern,
+                    { t ->
+                        pattern = t.filter { it.isDigit() || it == ',' || it == ' ' }.take(60)
+                        val drops = pattern.split(',').mapNotNull { it.trim().toIntOrNull()?.takeIf { n -> n in 1..200 } }
+                        if (drops.isNotEmpty()) onChange(model.copy(dropPattern = drops))
+                    },
+                    label = { Text("LEDs per drop (repeats, e.g. 3, 5, 4, 6)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                )
+                var gap by remember { mutableStateOf("%.1f".format(model.dropSpacingCm / 2.54f).removeSuffix(".0")) }
+                OutlinedTextField(
+                    gap,
+                    { t ->
+                        gap = t.filter { it.isDigit() || it == '.' }.take(5)
+                        gap.toFloatOrNull()?.takeIf { it > 0f }?.let { onChange(model.copy(dropSpacingCm = it * 2.54f)) }
+                    },
+                    label = { Text("LED spacing down a drop (in)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                )
+                Text(
+                    "${model.drops().size} drops, spread evenly along the line you trace and hanging straight down from it.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             ModelKind.FACE, ModelKind.CUSTOM -> Unit
         }
-        if (model.kind == ModelKind.MATRIX || model.kind == ModelKind.MEGA_TREE) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Zig-zag (each string runs back the other way)", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+        if (model.kind == ModelKind.MATRIX || model.kind == ModelKind.MEGA_TREE || model.kind == ModelKind.ICICLES) Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (model.kind == ModelKind.ICICLES) "Zig-zag (every other drop is wired bottom to top)" else "Zig-zag (each string runs back the other way)",
+                Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+            )
             Switch(checked = model.zigzag, onCheckedChange = { onChange(model.copy(zigzag = it)) })
         }
         Text("${model.ledCount} LEDs in all.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)

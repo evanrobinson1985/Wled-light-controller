@@ -170,11 +170,17 @@ object XlightsModels {
                 prop = PropType.STAR
                 count = model.ledCount
             }
+            type.startsWith("icicle") -> {
+                // "DropPattern" is how many lights each drop holds, repeating along the model.
+                val drops = e.getAttribute("DropPattern").split(',').mapNotNull { it.trim().toIntOrNull()?.takeIf { n -> n > 0 } }
+                model = PropModel(ModelKind.ICICLES, strings = p1, nodes = p2, dropPattern = drops.ifEmpty { PropModel.DEFAULT_DROPS }, zigzag = true)
+                prop = PropType.ICICLES
+            }
             type.startsWith("arch") -> prop = PropType.ARCH
             type.startsWith("candy") -> prop = PropType.CANDY_CANE
             type.startsWith("window") -> { prop = PropType.WINDOW; count = p1 * 2 + p2 + p3 }
             type.startsWith("circle") || type.startsWith("wreath") || type.startsWith("sphere") || type.startsWith("spinner") -> prop = PropType.STAR
-            else -> prop = PropType.LINE // single line, poly line, icicles, cube …
+            else -> prop = PropType.LINE // single line, poly line, cube …
         }
         if (count <= 0) return null
 

@@ -158,8 +158,8 @@ private fun rememberSimLeds(map: HouseMap): List<SimLed> {
     }
 }
 
-/** Glowing lights: a soft halo added to the scene, then the bulb itself. */
-private fun DrawScope.glow(color: Int, center: Offset, radius: Float, bullet: Boolean) {
+/** Glowing lights: a soft halo added to the scene (unless [halo] is off), then the bulb itself. */
+private fun DrawScope.glow(color: Int, center: Offset, radius: Float, bullet: Boolean, halo: Boolean) {
     // Tiny, tightly packed lights (a pixel matrix) skip the wide halo and unlit outline: their
     // neighbours' light fills in, and there can be thousands of them.
     val dense = radius < 2.5f
@@ -168,8 +168,10 @@ private fun DrawScope.glow(color: Int, center: Offset, radius: Float, bullet: Bo
         return
     }
     val c = Color(color or (0xFF shl 24))
-    if (!dense) drawCircle(c.copy(alpha = if (bullet) 0.26f else 0.20f), radius * (if (bullet) 3f else 2.5f), center, blendMode = BlendMode.Plus)
-    drawCircle(c.copy(alpha = 0.5f), radius * 1.5f, center, blendMode = BlendMode.Plus)
+    if (halo) {
+        if (!dense) drawCircle(c.copy(alpha = if (bullet) 0.26f else 0.20f), radius * (if (bullet) 3f else 2.5f), center, blendMode = BlendMode.Plus)
+        drawCircle(c.copy(alpha = 0.5f), radius * 1.5f, center, blendMode = BlendMode.Plus)
+    }
     drawCircle(c, radius, center)
 }
 
@@ -248,7 +250,7 @@ fun SimHouseView(
             for (l in leds) {
                 val f = frames.getOrPut(l.device) { l.device.frame(now) }
                 val r = pixelRadius(pixel, l.gap, scale = bulbSize)
-                glow(f.getOrElse(l.index) { 0 }, Offset(l.x * size.width, l.y * size.height), r, l.bullet)
+                glow(f.getOrElse(l.index) { 0 }, Offset(l.x * size.width, l.y * size.height), r, l.bullet, pixel.glow)
             }
             if (arranging) {
                 // A dashed frame round the picked prop.
@@ -295,7 +297,7 @@ private fun SimStrip(device: SimDevice, modifier: Modifier = Modifier) {
             val r = pixel.sizeDp.dp.toPx() / 2f
             for (i in 0 until count) {
                 val o = Offset((i % perRow) * pitch + pitch / 2, top + (i / perRow) * rowH + rowH / 2)
-                drawPixel(f[i], o, r, glow = 0.6f)
+                drawPixel(f[i], o, r, glow = pixel.glowAmount(0.6f))
             }
         }
     }
@@ -491,13 +493,13 @@ private fun Intro(enabled: Boolean, onStart: () -> Unit) {
             Icon(Icons.Filled.Science, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
             Text("Try everything on a virtual house", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text(
-                "The simulator lights up a virtual house with five simulated WLED controllers: a roofline strip, bullet lights round the windows and door, a mega tree, arches and bushes in the yard, and a dense pixel matrix covering the garage door. They behave like the real thing, so you can try every part of the app and watch the result live:",
+                "The simulator lights up a virtual house with six simulated WLED controllers: a roofline strip, icicles along the eave, bullet lights round the windows and door, a mega tree, arches and bushes in the yard, and a dense pixel matrix covering the garage door. They behave like the real thing, so you can try every part of the app and watch the result live:",
                 style = MaterialTheme.typography.bodyMedium,
             )
             listOf(
                 "Colours, effects, palettes, segments, presets and playlists",
                 "Holiday themes, light types, LED setup, nightlight and the power limiter",
-                "Groups and scenes across all five controllers",
+                "Groups and scenes across all six controllers",
                 "Whole-house effects, the house map, props and standalone mode",
                 "Shows in the sequencer, the show schedule and xLights imports",
             ).forEach { Text("•  $it", style = MaterialTheme.typography.bodyMedium) }
@@ -558,7 +560,7 @@ private fun ActiveSimulator(
                 }
                 Button(onClick = { onArrange(false) }) { Text("Done") }
             }
-            if (picked?.model != null) {
+            if (picked?.isBoxModel == true) {
                 val scope = rememberCoroutineScope()
                 Row(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(onClick = {

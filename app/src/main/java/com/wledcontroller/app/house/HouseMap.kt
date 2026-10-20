@@ -47,6 +47,8 @@ data class LightRun(
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
+    /** A model placed by the corners of its box (not one hung from a traced line, like icicles). */
+    val isBoxModel get() = model != null && !model.tracesLine
     val placedCount get() = ledPoints?.count { it != null } ?: if (points.size >= 2) count else 0
 }
 
@@ -138,6 +140,7 @@ enum class PropType(val label: String, val natural: Direction) {
     STAR("Star", Direction.CENTER_OUT),
     MATRIX("Matrix / panel", Direction.LEFT_RIGHT),
     BUSH("Bush / cluster", Direction.CENTER_OUT),
+    ICICLES("Icicles", Direction.ALONG),
 }
 
 /**
@@ -156,6 +159,11 @@ data class PlacedLed(
  */
 fun LightRun.ledPositions(aspect: Float, cmPerHeight: Float? = null): List<MapPoint?> {
     ledPoints?.let { lp -> return List(count) { lp.getOrNull(it) } }
+    model?.takeIf { it.tracesLine }?.let { m ->
+        if (points.size < 2) return List(count) { null }
+        val pos = m.hang(points, aspect, cmPerHeight?.let { m.dropSpacingCm / it })
+        return List(count) { pos.getOrNull(it) }
+    }
     model?.let { m ->
         if (points.size < 2) return List(count) { null }
         var pos = m.layout(points[0], points[1], aspect)

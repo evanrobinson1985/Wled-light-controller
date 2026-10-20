@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,7 +36,7 @@ import com.wledcontroller.app.ui.components.pixelRadius
 import kotlinx.coroutines.launch
 
 /**
- * Light size, used by every preview that draws lights (house map, effects, shows,
+ * Light size and glow, used by every preview that draws lights (house map, effects, shows,
  * xLights previews, camera scan and the simulator). Changes apply live.
  */
 @Composable
@@ -49,7 +50,7 @@ internal fun PixelStyleSetting() {
     val sizeRange = PixelStyle.MAX_SIZE - PixelStyle.MIN_SIZE
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Light size", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text("Light size & glow", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             TextButton(onClick = { set(PixelStyle()) }) { Text("Reset") }
         }
         Text(
@@ -62,6 +63,17 @@ internal fun PixelStyleSetting() {
             { set(local.copy(sizeDp = PixelStyle.MIN_SIZE + it * sizeRange)) },
             label = "Light size", valueText = "%.1f dp".format(local.sizeDp), height = 30.dp,
         )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Glow", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "A soft halo round lit lights. Turn it off to see each light as a crisp dot.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = local.glow, onCheckedChange = { set(local.copy(glow = it)) })
+        }
         PixelSample(local)
     }
 }
@@ -73,6 +85,6 @@ private fun PixelSample(style: PixelStyle) {
         val pitch = style.rowPitchDp.dp.toPx()
         val n = (size.width / pitch).toInt().coerceAtLeast(1)
         val r = pixelRadius(style)
-        for (i in 0 until n) drawPixel(SimEffects.hsv(i / n.toFloat()), Offset(pitch * (i + 0.5f), size.height / 2), r)
+        for (i in 0 until n) drawPixel(SimEffects.hsv(i / n.toFloat()), Offset(pitch * (i + 0.5f), size.height / 2), r, style.glowAmount())
     }
 }

@@ -121,7 +121,7 @@ internal fun LayoutImportDialog(layout: XlLayout, map: HouseMap, targets: List<L
                     val existing = runs.indexOfFirst { same(it.name, m.name) }
                     val old = runs.getOrNull(existing)
                     // A replaced prop keeps where it's placed if its kind of layout hasn't changed.
-                    val keepPlace = old != null && (old.model == null) == (m.model == null)
+                    val keepPlace = old != null && (old.model?.tracesLine ?: true) == (m.model?.tracesLine ?: true)
                     val run = LightRun(
                         id = old?.id ?: UUID.randomUUID().toString(),
                         name = m.name, deviceId = deviceId, startLed = first, count = m.ledCount,
