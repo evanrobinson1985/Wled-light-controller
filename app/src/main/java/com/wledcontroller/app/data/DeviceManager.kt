@@ -23,10 +23,17 @@ class DeviceManager(
     val list: StateFlow<List<DeviceController>> = _list.asStateFlow()
 
     private var foreground = false
+    @Volatile private var keepStartupLook = true
     private var stopJob: Job? = null
 
     init {
         scope.launch { store.devices.collect { sync(it) } }
+        scope.launch {
+            store.keepStartupLook.collect { on ->
+                keepStartupLook = on
+                synchronized(this@DeviceManager) { controllers.values.forEach { it.keepStartupLook = on } }
+            }
+        }
     }
 
     fun get(id: String): DeviceController? = synchronized(this) { controllers[id] }
@@ -45,6 +52,7 @@ class DeviceManager(
             } else {
                 existing?.dispose()
                 val c = DeviceController(d, api, wsClient, scope, mqtt, cache)
+                c.keepStartupLook = keepStartupLook
                 controllers[d.id] = c
                 if (foreground) c.start()
             }

@@ -37,6 +37,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -113,6 +115,21 @@ fun SettingsScreen(onBack: () -> Unit) {
                         }
                     }
                     message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                }
+            }
+
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                val keep by container.store.keepStartupLook.collectAsStateWithLifecycle(true)
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Start up with the last effect", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "When a controller is powered on it shows whatever you last chose in the app: the effect with its colours, palette and speed, or the preset or playlist you picked. Saved to the controller a few seconds after you stop changing things.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = keep, onCheckedChange = { on -> scope.launch { container.store.setKeepStartupLook(on) } })
                 }
             }
 

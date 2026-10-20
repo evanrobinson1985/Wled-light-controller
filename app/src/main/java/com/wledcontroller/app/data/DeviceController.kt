@@ -341,6 +341,7 @@ class DeviceController(
      * every ~70 ms. Pass [optimistic] = false for commands whose result can't be predicted locally.
      */
     fun send(patch: JsonObject, optimistic: Boolean = true) {
+        StartupPreset.actionFor(patch)?.let(::rememberForStartup)
         synchronized(lock) {
             if (optimistic) {
                 rawState = StatePatch.apply(rawState, patch)
@@ -393,6 +394,53 @@ class DeviceController(
         }
     }
 
+    // ------------------------------------------------------------------ start-up look
+
+    /** Whether the controller should start up with what was last chosen here. */
+    @Volatile var keepStartupLook = true
+    private var startupJob: Job? = null
+    @Volatile private var pendingStartup: StartupPreset.Action? = null
+    /** The boot preset the controller has, once known, so it's only written when it changes. */
+    @Volatile private var bootPreset: Int? = null
+
+    /**
+     * Makes [action] the start-up look once the user has stopped changing things for a few
+     * seconds, so dragging a slider doesn't wear the controller's flash with a save per step.
+     */
+    private fun rememberForStartup(action: StartupPreset.Action) {
+        if (!keepStartupLook) return
+        pendingStartup = action
+        startupJob?.cancel()
+        startupJob = scope.launch {
+            delay(STARTUP_SAVE_DELAY_MS)
+            val a = pendingStartup ?: return@launch
+            pendingStartup = null
+            runCatching { applyStartup(a) }
+        }
+    }
+
+    private suspend fun applyStartup(action: StartupPreset.Action) {
+        val id = when (action) {
+            is StartupPreset.UsePreset -> action.id
+            StartupPreset.SaveCurrent -> {
+                if (_snapshot.value.presets == null) loadPresets()
+                val slot = StartupPreset.slot(_snapshot.value.presets)
+                // Brightness and segment layout too, so it comes back exactly as it was.
+                send(buildJsonObject {
+                    put("psave", slot); put("n", StartupPreset.NAME); put("ib", true); put("sb", true)
+                }, optimistic = false)
+                slot
+            }
+        }
+        // The boot preset is in the controller's settings, which only HTTP reaches.
+        if (viaMqtt) return
+        val current = bootPreset ?: api.config(host).obj("def")?.int("ps")
+        if (current != id) {
+            api.postConfig(host, buildJsonObject { putJsonObject("def") { put("ps", id) } })
+        }
+        bootPreset = id
+    }
+
     suspend fun refreshState() {
         if (viaMqtt) return
         runCatching { handleMessage(api.get(host, "/json/si").jsonObject) }
@@ -421,6 +469,10 @@ class DeviceController(
     }
 
     // ------------------------------------------------------------------ convenience commands
+
+    private companion object {
+        const val STARTUP_SAVE_DELAY_MS = 4000L
+    }
 
     private val withWhite get() = _snapshot.value.info?.hasWhite == true
 

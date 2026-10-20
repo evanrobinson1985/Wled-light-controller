@@ -63,6 +63,7 @@ class AppStore(private val context: Context) {
         val OUTPUTS = stringPreferencesKey("outputs")
         val FIXTURES = stringPreferencesKey("dmx_fixtures")
         val MQTT = stringPreferencesKey("mqtt")
+        val KEEP_STARTUP = androidx.datastore.preferences.core.booleanPreferencesKey("keep_startup_look")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -181,6 +182,10 @@ class AppStore(private val context: Context) {
     suspend fun streamTargets(): Map<String, String> =
         devices.first().associate { it.id to it.host } + outputs.first().associate { it.id to it.address } +
             fixtures.first().associate { it.id to DmxRegistry.address(it.id) }
+
+    /** Whether controllers start up with whatever was last chosen in the app. */
+    val keepStartupLook: Flow<Boolean> = context.dataStore.data.map { it[Keys.KEEP_STARTUP] ?: true }
+    suspend fun setKeepStartupLook(on: Boolean) { context.dataStore.edit { it[Keys.KEEP_STARTUP] = on } }
 
     /** The MQTT broker for remote control, if set up. */
     val mqtt: Flow<MqttSettings?> = context.dataStore.data.map { prefs ->
