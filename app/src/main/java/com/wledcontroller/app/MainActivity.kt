@@ -31,6 +31,7 @@ import com.wledcontroller.app.ui.screens.SettingsScreen
 import com.wledcontroller.app.ui.screens.ShowsScreen
 import com.wledcontroller.app.ui.screens.SimMiniView
 import com.wledcontroller.app.ui.screens.SimulatorScreen
+import com.wledcontroller.app.ui.screens.TutorialScreen
 import com.wledcontroller.app.ui.screens.WebUiScreen
 import com.wledcontroller.app.ui.theme.WledTheme
 
@@ -54,8 +55,21 @@ class MainActivity : ComponentActivity() {
                     val simActive by container.simulator.active.collectAsStateWithLifecycle()
                     val miniView by container.simulator.miniView.collectAsStateWithLifecycle()
                     val route = nav.currentBackStackEntryAsState().value?.destination?.route
+                    // First time the app is opened: the walk-through.
+                    androidx.compose.runtime.LaunchedEffect(Unit) {
+                        if (!container.store.tutorialSeen.value) {
+                            nav.navigate("tutorial")
+                            container.store.setTutorialSeen()
+                        }
+                    }
                     Box(Modifier.fillMaxSize()) {
                     NavHost(navController = nav, startDestination = "home") {
+                        composable("tutorial") {
+                            TutorialScreen(
+                                onClose = { nav.popBackStack() },
+                                onTry = { r -> if (r == "home") nav.popBackStack("home", inclusive = false) else nav.navigate(r) },
+                            )
+                        }
                         composable("home") {
                             HomeScreen(
                                 onOpenDevice = { nav.navigate("device/$it") },
@@ -64,6 +78,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenSchedule = { nav.navigate("schedule") },
                                 onOpenSettings = { nav.navigate("settings") },
                                 onOpenSimulator = { nav.navigate("sim") },
+                                onOpenTutorial = { nav.navigate("tutorial") },
                             )
                         }
                         composable("sim") {
@@ -78,7 +93,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenMap = { nav.navigate("house/map") },
                             )
                         }
-                        composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
+                        composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }) }
                         composable("house") {
                             HouseScreen(
                                 onBack = { nav.popBackStack() },

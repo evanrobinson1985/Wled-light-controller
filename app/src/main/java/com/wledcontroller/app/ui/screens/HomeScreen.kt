@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
@@ -85,6 +86,7 @@ fun HomeScreen(
     onOpenSchedule: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSimulator: () -> Unit,
+    onOpenTutorial: () -> Unit = {},
 ) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
@@ -113,6 +115,7 @@ fun HomeScreen(
                     IconButton(onClick = onOpenSimulator) {
                         Icon(Icons.Filled.Science, "Light show simulator", tint = if (simActive) MaterialTheme.colorScheme.primary else LocalContentColor.current)
                     }
+                    IconButton(onClick = onOpenTutorial) { Icon(Icons.AutoMirrored.Filled.HelpOutline, "Tutorial") }
                     IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
                 },
                 scrollBehavior = scrollBehavior,

@@ -183,6 +183,16 @@ class AppStore(private val context: Context) {
         devices.first().associate { it.id to it.host } + outputs.first().associate { it.id to it.address } +
             fixtures.first().associate { it.id to DmxRegistry.address(it.id) }
 
+    // Kept apart from the settings above, which backups and the simulator swap in and out.
+    private val flags = context.getSharedPreferences("app_flags", Context.MODE_PRIVATE)
+    private val _tutorialSeen = kotlinx.coroutines.flow.MutableStateFlow(flags.getBoolean("tutorial_seen", false))
+    /** Whether the walk-through has been shown (it opens by itself on first launch). */
+    val tutorialSeen: kotlinx.coroutines.flow.StateFlow<Boolean> = _tutorialSeen
+    fun setTutorialSeen() {
+        flags.edit().putBoolean("tutorial_seen", true).apply()
+        _tutorialSeen.value = true
+    }
+
     /** Whether controllers start up with whatever was last chosen in the app. */
     val keepStartupLook: Flow<Boolean> = context.dataStore.data.map { it[Keys.KEEP_STARTUP] ?: true }
     suspend fun setKeepStartupLook(on: Boolean) { context.dataStore.edit { it[Keys.KEEP_STARTUP] = on } }
