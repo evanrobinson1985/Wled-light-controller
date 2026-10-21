@@ -162,9 +162,10 @@ object XsqImport {
         "twinkle" -> SeqEffect.TWINKLE
         "sparkle", "glediator" -> SeqEffect.SPARKLE
         "vu meter", "vumeter" -> SeqEffect.VU_METER
-        "music" -> SeqEffect.MUSIC_PULSE
+        "music" -> SeqEffect.MUSIC
         "faces" -> SeqEffect.SING
-        "pictures", "video" -> SeqEffect.PICTURE
+        "pictures" -> SeqEffect.PICTURE
+        "video" -> SeqEffect.VIDEO
         "rainbow" -> SeqEffect.RAINBOW
         "pulse" -> SeqEffect.PULSE
         else -> null

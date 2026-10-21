@@ -126,6 +126,8 @@ object EffectFit {
             SeqEffect.WARP -> setOf(m, t)
             SeqEffect.WAVE -> setOf(m, t)
             SeqEffect.PIANO -> setOf(m, s)
+            SeqEffect.VIDEO -> setOf(m, t)
+            SeqEffect.MUSIC -> setOf(m, t, a)
         }
     }
 

@@ -73,10 +73,12 @@ enum class SeqEffect(val label: String) {
     WARP("Warp"),
     WAVE("Wave"),
     PIANO("Piano (music)"),
+    VIDEO("Video"),
+    MUSIC("Music (spectrum)"),
     ;
 
     /** Effects that follow the song's loudness (need a song on the show). */
-    val musical get() = this == VU_METER || this == MUSIC_PULSE || this == BEAT_FLASH || this == SING || this == PIANO
+    val musical get() = this == VU_METER || this == MUSIC_PULSE || this == BEAT_FLASH || this == SING || this == PIANO || this == MUSIC
 }
 
 /** How a track mixes with the tracks below it in the list. */
@@ -174,6 +176,8 @@ data class Clip(
     val text: String? = null,
     /** Image in app storage for the Picture effect. */
     val imageFile: String? = null,
+    /** Frames in app storage for the Video effect (see [VideoFrames]). */
+    val videoFile: String? = null,
     /** Where moving heads under this effect point (0..1, 0.5 = straight ahead); null leaves them. */
     val pan: Float? = null,
     val tilt: Float? = null,

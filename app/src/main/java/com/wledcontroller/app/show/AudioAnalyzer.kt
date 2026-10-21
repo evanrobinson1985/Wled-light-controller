@@ -12,10 +12,20 @@ import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.sqrt
 
-/** Loudness of a song over time (one value per [HOP_MS]), normalised to 0..1. */
-class AudioEnvelope(val values: FloatArray) {
+/**
+ * Loudness of a song over time (one value per [HOP_MS]), normalised to 0..1, and when known how
+ * loud each band from bass to treble is ([bands]: one row per band, same hops).
+ */
+class AudioEnvelope(val values: FloatArray, val bands: Array<FloatArray>? = null) {
     val hopMs get() = HOP_MS
     fun at(ms: Long): Float = values.getOrElse((ms / HOP_MS).toInt()) { 0f }
+
+    /** Every band's level (0..1) at [ms], bass first; null without a spectrum. */
+    fun bandsAt(ms: Long): FloatArray? {
+        val b = bands ?: return null
+        val i = (ms / HOP_MS).toInt()
+        return FloatArray(b.size) { b[it].getOrElse(i) { 0f } }
+    }
 
     companion object { const val HOP_MS = 10 }
 }
@@ -25,19 +35,28 @@ data class BeatResult(val bpm: Float, val beats: List<Long>)
 /** Decodes songs to a loudness envelope and finds the beat grid in it. */
 object AudioAnalyzer {
 
-    /** Envelope for [path], cached next to it so reopening a show is instant. Blocking. */
+    /** Envelope (and spectrum) for [path], cached next to it so reopening a show is instant. Blocking. */
     fun envelope(path: String): AudioEnvelope {
         val cache = File("$path.env")
-        if (cache.exists()) runCatching {
-            DataInputStream(cache.inputStream().buffered()).use { inp ->
-                val n = inp.readInt()
-                return AudioEnvelope(FloatArray(n) { inp.readFloat() })
+        val specCache = File("$path.spec")
+        if (cache.exists() && specCache.exists()) runCatching {
+            val values = DataInputStream(cache.inputStream().buffered()).use { inp -> FloatArray(inp.readInt()) { inp.readFloat() } }
+            val bands = DataInputStream(specCache.inputStream().buffered()).use { inp ->
+                val nb = inp.readInt(); val n = inp.readInt()
+                Array(nb) { ByteArray(n).also { inp.readFully(it) }.let { row -> FloatArray(n) { (row[it].toInt() and 0xFF) / 255f } } }
             }
+            return AudioEnvelope(values, bands)
         }
         val env = decode(path)
         runCatching {
             DataOutputStream(cache.outputStream().buffered()).use { out ->
                 out.writeInt(env.values.size); env.values.forEach { out.writeFloat(it) }
+            }
+            env.bands?.let { bands ->
+                DataOutputStream(specCache.outputStream().buffered()).use { out ->
+                    out.writeInt(bands.size); out.writeInt(bands.firstOrNull()?.size ?: 0)
+                    bands.forEach { row -> out.write(ByteArray(row.size) { (row[it] * 255f).toInt().coerceIn(0, 255).toByte() }) }
+                }
             }
         }
         return env
@@ -62,6 +81,14 @@ object AudioAnalyzer {
         var acc = 0.0
         var accCount = 0
         var hopFrames = sampleRate * AudioEnvelope.HOP_MS / 1000
+        var analyzer: BandAnalyzer? = null
+        val bandRows = ArrayList<FloatArray>(40_000)
+        // Two hops share one spectrum reading: plenty for lights, half the work.
+        fun hop(level: Float) {
+            rms += level
+            val a = analyzer ?: BandAnalyzer(sampleRate).also { analyzer = it }
+            bandRows += if (rms.size % 2 == 1 || bandRows.isEmpty()) a.bands() else bandRows.last()
+        }
 
         val info = MediaCodec.BufferInfo()
         var inputDone = false
@@ -91,6 +118,7 @@ object AudioAnalyzer {
                         isFloat = of.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
                             of.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
                         hopFrames = sampleRate * AudioEnvelope.HOP_MS / 1000
+                        analyzer = null
                     }
                     outIdx >= 0 -> {
                         val out = codec.getOutputBuffer(outIdx)!!.order(ByteOrder.nativeOrder())
@@ -102,7 +130,8 @@ object AudioAnalyzer {
                                 repeat(channels) { m += fb.get() }
                                 m /= channels
                                 acc += m * m; accCount++
-                                if (accCount >= hopFrames) { rms += sqrt(acc / accCount).toFloat(); acc = 0.0; accCount = 0 }
+                                (analyzer ?: BandAnalyzer(sampleRate).also { analyzer = it }).push(m)
+                                if (accCount >= hopFrames) { hop(sqrt(acc / accCount).toFloat()); acc = 0.0; accCount = 0 }
                             }
                         } else {
                             val sb = out.asShortBuffer()
@@ -111,7 +140,8 @@ object AudioAnalyzer {
                                 repeat(channels) { m += sb.get() / 32768f }
                                 m /= channels
                                 acc += m * m; accCount++
-                                if (accCount >= hopFrames) { rms += sqrt(acc / accCount).toFloat(); acc = 0.0; accCount = 0 }
+                                (analyzer ?: BandAnalyzer(sampleRate).also { analyzer = it }).push(m)
+                                if (accCount >= hopFrames) { hop(sqrt(acc / accCount).toFloat()); acc = 0.0; accCount = 0 }
                             }
                         }
                         codec.releaseOutputBuffer(outIdx, false)
@@ -125,7 +155,7 @@ object AudioAnalyzer {
             ex.release()
         }
         val max = rms.maxOrNull()?.takeIf { it > 0f } ?: 1f
-        return AudioEnvelope(FloatArray(rms.size) { rms[it] / max })
+        return AudioEnvelope(FloatArray(rms.size) { rms[it] / max }, BandAnalyzer.normalise(bandRows))
     }
 
     /**

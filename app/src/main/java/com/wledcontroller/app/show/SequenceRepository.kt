@@ -127,4 +127,51 @@ class SequenceRepository(context: Context, scope: CoroutineScope) {
         if (duration <= 0) { file.delete(); throw IllegalArgumentException("That doesn't look like a playable song") }
         Triple(file.absolutePath, title.substringBeforeLast('.'), duration)
     }
+
+    /**
+     * Shrinks a video to frames for the Video effect: [fps] frames a second (up to [maxSeconds]),
+     * each at most 96 pixels on its longer side. [onProgress] gets 0..1. Returns the file.
+     */
+    suspend fun importVideo(
+        context: Context, uri: android.net.Uri, fps: Float = 10f, maxSeconds: Int = 180,
+        onProgress: (Float) -> Unit = {},
+    ): String = withContext(Dispatchers.IO) {
+        val mmr = android.media.MediaMetadataRetriever()
+        try {
+            mmr.setDataSource(context, uri)
+            val durMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                ?: throw IllegalArgumentException("That doesn't look like a video")
+            val vw = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 160
+            val vh = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 90
+            val rot = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            val (sw, sh) = if (rot == 90 || rot == 270) vh to vw else vw to vh
+            val (w, h) = VideoFrames.fit(sw, sh)
+            val count = ((minOf(durMs, maxSeconds * 1000L) / 1000f) * fps).toInt().coerceAtLeast(1)
+            val dir = File(dir.parentFile, "pictures").apply { mkdirs() }
+            val file = File(dir, "${java.util.UUID.randomUUID()}.vid")
+            val px = IntArray(w * h)
+            val row = ByteArray(w * h * 3)
+            file.outputStream().buffered().use { out ->
+                VideoFrames.writeHeader(out, w, h, fps, count)
+                var last: android.graphics.Bitmap? = null
+                for (i in 0 until count) {
+                    val us = (i * 1_000_000L / fps).toLong()
+                    val frame = mmr.getFrameAtTime(us, android.media.MediaMetadataRetriever.OPTION_CLOSEST)
+                    val bmp = frame?.let { android.graphics.Bitmap.createScaledBitmap(it, w, h, true).also { s -> if (s !== it) it.recycle() } } ?: last
+                    if (bmp != null) {
+                        bmp.getPixels(px, 0, w, 0, 0, w, h)
+                        for (p in px.indices) { row[p * 3] = (px[p] shr 16).toByte(); row[p * 3 + 1] = (px[p] shr 8).toByte(); row[p * 3 + 2] = px[p].toByte() }
+                    }
+                    out.write(row)
+                    if (last !== bmp) last?.recycle()
+                    last = bmp
+                    onProgress((i + 1f) / count)
+                }
+                last?.recycle()
+            }
+            file.absolutePath
+        } finally {
+            mmr.release()
+        }
+    }
 }

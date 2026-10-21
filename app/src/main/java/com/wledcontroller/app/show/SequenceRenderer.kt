@@ -141,6 +141,7 @@ object SequenceRenderer {
         motion?.fill(0.5f)
         val level = audio?.at(timeMs)?.coerceIn(0f, 1f) ?: 0f
         val beat = audio?.let { beatStrength(it, timeMs) } ?: 0f
+        val spectrum = audio?.bandsAt(timeMs)
         // With lyrics, singing faces follow the words; without, the song's loudness.
         val lyrics = seq.lyrics?.takeIf { it.phonemes.isNotEmpty() }
         val mouth = lyrics?.let { l -> l.phonemeAt(timeMs)?.mouth?.ordinal ?: Phoneme.Mouth.CLOSED.ordinal } ?: -1
@@ -199,7 +200,7 @@ object SequenceRenderer {
                 val dir = if (clip.direction == Direction.AUTO) tl.natural[k] else clip.direction
                 val pos = position(dir, along, lx, ly)
                 val reveal = transition(clip, local, pos, lx, ly, li)
-                var color = if (reveal <= 0f) 0 else effectColor(clip, pos, lx, ly, t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 }, mouth, singing)
+                var color = if (reveal <= 0f) 0 else effectColor(clip, pos, lx, ly, t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 }, mouth, singing, spectrum)
                 if (layered && reveal > 0f) {
                     if (clip.hueShift != 0f && color != 0) color = hueShift(color, clip.hueShift)
                     if (clip.sparkles > 0f && HouseRenderer.hash(li, sparkleStep) > 1f - clip.sparkles * 0.2f) color = 0xFFFFFF
@@ -400,6 +401,8 @@ object SequenceRenderer {
         aspect: Float = 1f, level: Float = 0f, beat: Float = 0f, part: Int = -1,
         /** From the lyrics: 0 closed, 1 open, 2 wide; -1 without lyrics. */
         mouth: Int = -1, singing: Boolean = false,
+        /** Each band's loudness (bass first), when the song's spectrum is known. */
+        spectrum: FloatArray? = null,
     ): Int {
         val cols = c.colors.ifEmpty { listOf(0xFFFFFF) }
         val rate = 0.1f + c.speed * 2.9f         // cycles per second-ish
@@ -573,6 +576,24 @@ object SequenceRenderer {
                     FACE_OPEN -> if (level in 0.15f..0.45f) cols.getOrElse(1) { cols[0] } else 0
                     FACE_WIDE -> if (level > 0.45f) cols.getOrElse(1) { cols[0] } else 0
                     else -> HouseRenderer.scale(cols[0], level)
+                }
+            }
+            SeqEffect.VIDEO -> {
+                // Plays at normal speed with the speed slider in the middle (0 … 2×), looping.
+                val v = c.videoFile?.let { Rasters.video(it) } ?: return 0
+                val r = v.at(t * c.speed * 2f)
+                val vidAspect = v.width.toFloat() / v.height
+                val (w, h) = if (vidAspect > aspect) 1f to aspect / vidAspect else vidAspect / aspect to 1f
+                r.sample((lx - (1f - w) / 2f) / w, ((1f - ly) - (1f - h) / 2f) / h) and 0xFFFFFF
+            }
+            SeqEffect.MUSIC -> {
+                // A spectrum analyser: a bar per band, bass on the left, as tall as that band is loud.
+                val s = spectrum
+                if (s == null) {
+                    if (level > 0.02f && ly <= level) HouseRenderer.palette(cols, ly * 0.999f) else 0
+                } else {
+                    val b = (lx * s.size).toInt().coerceIn(0, s.lastIndex)
+                    if (s[b] > 0.02f && ly <= s[b]) HouseRenderer.palette(cols, (b / s.size.toFloat()) * 0.999f) else 0
                 }
             }
             SeqEffect.OFF -> 0
@@ -763,7 +784,10 @@ object SequenceRenderer {
                 val keys = 12 + ((1f - c.size) * 24).toInt()
                 val key = floor(lx * keys).toInt()
                 val step = floor(t * (2f + rate * 6f)).toInt()
-                val pressed = HouseRenderer.hash(key, step) < level * 0.7f + beat * 0.2f
+                // With the spectrum, keys play when their part of the sound is loud.
+                val band = spectrum?.let { it[(key * it.size / keys).coerceIn(0, it.lastIndex)] }
+                val pressed = if (band != null) band > 0.55f + 0.3f * HouseRenderer.hash(key, step) * 0.5f
+                else HouseRenderer.hash(key, step) < level * 0.7f + beat * 0.2f
                 val black = (key % 12) in intArrayOf(1, 3, 6, 8, 10)
                 when {
                     pressed -> cols[0]

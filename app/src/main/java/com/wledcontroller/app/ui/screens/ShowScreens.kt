@@ -1237,6 +1237,17 @@ private fun ClipInspector(
     val container = LocalAppContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var videoProgress by remember { mutableStateOf<Float?>(null) }
+    var videoError by remember { mutableStateOf<String?>(null) }
+    val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) container.scope.launch {
+            videoProgress = 0f; videoError = null
+            runCatching { container.sequences.importVideo(context, uri) { videoProgress = it } }
+                .onSuccess { onChange(clip.copy(videoFile = it)) }
+                .onFailure { videoError = it.message ?: "Couldn't read that video." }
+            videoProgress = null
+        }
+    }
     val pickPicture = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch {
             runCatching { container.sequences.importPicture(context, uri) }.onSuccess { onChange(clip.copy(imageFile = it)) }
@@ -1291,6 +1302,24 @@ private fun ClipInspector(
                     "Fits the lights; speed above 0 scrolls it across. Best on matrices and big groups.",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            clip.effect == SeqEffect.VIDEO -> Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        enabled = videoProgress == null,
+                        onClick = { pickVideo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                    ) { Text(if (clip.videoFile == null) "Choose video" else "Change video") }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Fits the lights. Speed in the middle plays it at normal speed. Best on matrices and mega trees.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                videoProgress?.let { p ->
+                    androidx.compose.material3.LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    Text("Preparing the video for the lights… ${(p * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
+                }
+                videoError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
             }
             clip.effect.musical && !hasSong -> Text(
                 "This effect follows the song — add one with the ♪ button.",

@@ -26,4 +26,12 @@ object Rasters {
 
     @Synchronized
     fun image(path: String): Raster? = cache["i:$path"] ?: imageLoader?.invoke(path)?.also { cache["i:$path"] = it }
+
+    private val videos = object : LinkedHashMap<String, VideoFrames>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, VideoFrames>?) = size > 3
+    }
+
+    /** A video's frames for the Video effect (read once, then kept while it's in use). */
+    @Synchronized
+    fun video(path: String): VideoFrames? = videos[path] ?: VideoFrames.read(java.io.File(path))?.also { videos[path] = it }
 }
