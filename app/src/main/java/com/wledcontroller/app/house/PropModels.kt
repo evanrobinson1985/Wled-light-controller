@@ -12,6 +12,7 @@ enum class ModelKind(val label: String) {
     MEGA_TREE("Mega tree"),
     STAR("Star"),
     FACE("Singing face"),
+    SINGING_FACE("Singing face (xLights mouths)"),
     CUSTOM("Custom (xLights)"),
 }
 
@@ -48,6 +49,7 @@ data class PropModel(
         ModelKind.MATRIX, ModelKind.MEGA_TREE -> strings.coerceAtLeast(1) * nodes.coerceAtLeast(1)
         ModelKind.STAR -> points.coerceAtLeast(3) * nodes.coerceAtLeast(2)
         ModelKind.FACE -> FACE_PARTS.size * nodes.coerceAtLeast(2)
+        ModelKind.SINGING_FACE -> XL_FACE_PARTS.size * nodes.coerceAtLeast(2)
         ModelKind.CUSTOM -> customCells.size
     }
 
@@ -136,6 +138,38 @@ data class PropModel(
                     else at(((cell % w) + 0.5f) / w, ((cell / w) + 0.5f) / h)
                 }
             }
+            ModelKind.SINGING_FACE -> {
+                val n = nodes.coerceAtLeast(2)
+                fun ring(cx: Float, cy: Float, rx: Float, ry: Float, k: Int, of: Int): MapPoint {
+                    val a = (k / of.toFloat()) * 2f * PI.toFloat()
+                    return at(cx + rx * cos(a), cy + ry * sin(a))
+                }
+                fun line(x0: Float, x1: Float, y: Float, k: Int, of: Int) = at(x0 + (x1 - x0) * k / (of - 1f).coerceAtLeast(1f), y)
+                fun eyes(k: Int, open: Boolean): MapPoint {
+                    val half = n / 2; val left = k < half; val kk = if (left) k else k - half; val of = if (left) half else n - half
+                    val cx = if (left) 0.32f else 0.68f
+                    return if (open) ring(cx, 0.33f, 0.08f, 0.08f, kk, of.coerceAtLeast(1)) else line(cx - 0.08f, cx + 0.08f, 0.35f, kk, of.coerceAtLeast(1))
+                }
+                // In XL_FACE_PARTS order: eyes open, eyes closed, outline, then the mouths.
+                List(XL_FACE_PARTS.size * n) { i ->
+                    val k = i % n
+                    when (XL_FACE_PARTS[i / n]) {
+                        "Eyes-Open" -> eyes(k, true)
+                        "Eyes-Closed" -> eyes(k, false)
+                        "Outline" -> ring(0.5f, 0.5f, 0.46f, 0.47f, k, n)
+                        "Mouth-AI" -> ring(0.5f, 0.72f, 0.22f, 0.13f, k, n)
+                        "Mouth-E" -> ring(0.5f, 0.72f, 0.24f, 0.06f, k, n)
+                        "Mouth-etc" -> ring(0.5f, 0.72f, 0.16f, 0.07f, k, n)
+                        "Mouth-FV" -> ring(0.5f, 0.73f, 0.17f, 0.035f, k, n)
+                        "Mouth-L" -> ring(0.5f, 0.72f, 0.17f, 0.09f, k, n)
+                        "Mouth-MBP" -> line(0.36f, 0.64f, 0.72f, k, n)
+                        "Mouth-O" -> ring(0.5f, 0.72f, 0.1f, 0.11f, k, n)
+                        "Mouth-rest" -> line(0.32f, 0.68f, 0.73f, k, n)
+                        "Mouth-U" -> ring(0.5f, 0.72f, 0.065f, 0.075f, k, n)
+                        else -> ring(0.5f, 0.72f, 0.045f, 0.05f, k, n) // WQ
+                    }
+                }
+            }
             ModelKind.FACE -> {
                 val n = nodes.coerceAtLeast(2)
                 // Eyes (half each), then three mouth shapes: closed line, open "O", wide open.
@@ -175,10 +209,19 @@ data class PropModel(
             val n = nodes.coerceAtLeast(2)
             FACE_PARTS.mapIndexed { i, name -> Submodel(name, listOf(i * n until (i + 1) * n)) }
         }
+        ModelKind.SINGING_FACE -> {
+            val n = nodes.coerceAtLeast(2)
+            XL_FACE_PARTS.mapIndexed { i, name -> Submodel(name, listOf(i * n until (i + 1) * n)) }
+        }
     }
 
     companion object {
         val FACE_PARTS = listOf("Eyes", "Mouth closed", "Mouth open", "Mouth wide")
+        /** The parts of an xLights singing face, named as xLights names them. */
+        val XL_FACE_PARTS = listOf(
+            "Eyes-Open", "Eyes-Closed", "Outline",
+            "Mouth-AI", "Mouth-E", "Mouth-etc", "Mouth-FV", "Mouth-L", "Mouth-MBP", "Mouth-O", "Mouth-rest", "Mouth-U", "Mouth-WQ",
+        )
     }
 }
 

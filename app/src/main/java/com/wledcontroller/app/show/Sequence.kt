@@ -193,8 +193,9 @@ data class Clip(
     val spin: Float = 0f,
     /** 1 = as is; above 1 zooms in, below zooms out. */
     val zoom: Float = 1f,
-    /** When set, zoom goes from [zoom] at the start to this at the end. */
+    /** When set, zoom goes from [zoom] at the start to this at the end, following [zoomShape]. */
     val zoomEnd: Float? = null,
+    val zoomShape: CurveShape = CurveShape.RAMP,
     /** 0..1 round the colour wheel. */
     val hueShift: Float = 0f,
     /** 0..1: white sparkles over the effect. */
@@ -207,6 +208,9 @@ data class Clip(
     /** Curves for the hue shift and rotation over the effect. */
     val hueCurve: ValueCurve? = null,
     val rotationCurve: ValueCurve? = null,
+    /** Curves for blur and sparkles over the effect. */
+    val blurCurve: ValueCurve? = null,
+    val sparklesCurve: ValueCurve? = null,
     /** For the State effect: the timing track whose labels pick which part of the prop lights. */
     val timingTrackId: String? = null,
     /** For the Sketch effect: the drawn path, points 0..1 across and up the lights' area. */
@@ -217,7 +221,7 @@ data class Clip(
     val colorsEnd: List<Int>? = null,
 ) {
     /** Whether any layer setting changes the effect. */
-    val hasLayerSettings get() = rotation != 0f || spin != 0f || zoom != 1f || zoomEnd != null || hueShift != 0f || sparkles > 0f || mirrorX || mirrorY || blur > 0f || hueCurve != null || rotationCurve != null
+    val hasLayerSettings get() = rotation != 0f || spin != 0f || zoom != 1f || zoomEnd != null || hueShift != 0f || sparkles > 0f || mirrorX || mirrorY || blur > 0f || hueCurve != null || rotationCurve != null || blurCurve != null || sparklesCurve != null
 
     val speedCurveOrRamp get() = speedCurve ?: speedEnd?.let { ValueCurve(CurveShape.RAMP, it) }
     val intensityCurveOrRamp get() = intensityCurve ?: intensityEnd?.let { ValueCurve(CurveShape.RAMP, it) }

@@ -41,7 +41,46 @@ class TrackLayout(
     val part: IntArray = IntArray(0),
     /** For the State effect: the (lower-case) names of the prop parts each LED is in. */
     val states: Array<Set<String>> = emptyArray(),
-)
+) {
+    /** For xLights-style faces: what each LED is (see [FaceRole]), from its parts' names. */
+    val faceRole: IntArray = IntArray(states.size) { FaceRole.of(states[it]) }
+}
+
+/** Parts of an xLights singing face, worked out from part names like "Mouth-AI" or "Eyes-Open". */
+object FaceRole {
+    const val NONE = -1
+    const val EYES_OPEN = 0
+    const val EYES_CLOSED = 1
+    const val OUTLINE = 2
+    /** Mouths are MOUTH + the phoneme's ordinal. */
+    const val MOUTH = 100
+
+    fun of(names: Set<String>): Int {
+        var role = NONE
+        for (raw in names) {
+            val n = raw.lowercase().replace(Regex("[^a-z]"), "")
+            val r = when {
+                n.startsWith("mouth") -> Phoneme.parse(n.removePrefix("mouth"))?.let { MOUTH + it.ordinal }
+                n.startsWith("eye") && (n.contains("closed") || n.contains("shut") || n.contains("blink")) -> EYES_CLOSED
+                n == "eyesopen" || n == "eyeopen" -> EYES_OPEN
+                n.contains("outline") -> OUTLINE
+                else -> null
+            }
+            // A mouth wins over eyes or outline if an LED is somehow in both.
+            if (r != null && (role == NONE || r >= MOUTH)) role = r
+        }
+        return role
+    }
+
+    /** The mouth for a moment of singing when there are no lyrics: from how loud it is. */
+    fun fromLoudness(level: Float, beat: Float): Phoneme = when {
+        level < 0.08f -> Phoneme.REST
+        level < 0.22f -> Phoneme.MBP
+        level < 0.4f -> if (beat > 0.3f) Phoneme.O else Phoneme.E
+        level < 0.6f -> Phoneme.O
+        else -> Phoneme.AI
+    }
+}
 
 object SequenceRenderer {
 
@@ -156,6 +195,8 @@ object SequenceRenderer {
         val lyrics = seq.lyrics?.takeIf { it.phonemes.isNotEmpty() }
         val mouth = lyrics?.let { l -> l.phonemeAt(timeMs)?.mouth?.ordinal ?: Phoneme.Mouth.CLOSED.ordinal } ?: -1
         val singing = lyrics?.phonemeAt(timeMs)?.let { it != Phoneme.REST } ?: false
+        // The sound being sung now, for faces with a mouth for every sound.
+        val phoneme = if (lyrics != null) lyrics.phonemeAt(timeMs) ?: Phoneme.REST else FaceRole.fromLoudness(level, beat)
         for (ti in seq.tracks.indices.reversed()) {
             val track = seq.tracks[ti]
             if (track.muted) continue
@@ -189,18 +230,20 @@ object SequenceRenderer {
             val layered = clip.hasLayerSettings
             val rotation = clip.rotationCurve?.at(clip.rotation, progress) ?: clip.rotation
             val hue = clip.hueCurve?.at(clip.hueShift, progress) ?: clip.hueShift
+            val blurAmount = clip.blurCurve?.at(clip.blur, progress) ?: clip.blur
+            val sparkleAmount = clip.sparklesCurve?.at(clip.sparkles, progress) ?: clip.sparkles
             val angle = (rotation + clip.spin * progress) * 2f * PI.toFloat()
             // The State effect's label at this moment, from its timing track.
             val stateLabels = if (clip.effect == SeqEffect.STATE) {
                 seq.timingTracks.firstOrNull { it.id == clip.timingTrackId }?.labelAt(timeMs)
                     ?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet()
             } else null
-            val zoom = (clip.zoomEnd?.let { clip.zoom + (it - clip.zoom) * progress } ?: clip.zoom).coerceAtLeast(0.05f)
+            val zoom = (clip.zoomEnd?.let { clip.zoom + (it - clip.zoom) * ValueCurve(clip.zoomShape, 1f, 2f).at(0f, progress) } ?: clip.zoom).coerceAtLeast(0.05f)
             val cosA = cos(angle); val sinA = sin(angle)
             val turned = angle != 0f || zoom != 1f
             val sparkleStep = floor(t * 12f).toInt()
             // Blurred effects are drawn first, softened, then mixed in.
-            val blurred = if (clip.blur > 0f) IntArray(tl.ledIndex.size) else null
+            val blurred = if (blurAmount > 0f) IntArray(tl.ledIndex.size) else null
             for (k in tl.ledIndex.indices) {
                 val li = tl.ledIndex[k]
                 var lx = tl.lx[k]; var ly = tl.ly[k]; var along = tl.along[k]
@@ -223,16 +266,26 @@ object SequenceRenderer {
                     val labels = stateLabels ?: emptySet()
                     val hit = labels.firstOrNull { it in mine || it == "all" }
                     if (hit == null) 0 else clip.colors.ifEmpty { listOf(0xFFFFFF) }.let { cs -> cs[labels.indexOf(hit).coerceAtLeast(0) % cs.size] }
+                } else if (clip.effect == SeqEffect.SING && tl.faceRole.getOrElse(k) { FaceRole.NONE } != FaceRole.NONE && tl.part.getOrElse(k) { -1 } < 0) {
+                    // An xLights-style face: the mouth for this sound, eyes that blink, the outline.
+                    val cs = clip.colors.ifEmpty { listOf(0xFFFFFF) }
+                    val blink = HouseRenderer.frac(t / 3.7f) > 0.96f
+                    when (val role = tl.faceRole[k]) {
+                        FaceRole.EYES_OPEN -> if (blink) 0 else cs[0]
+                        FaceRole.EYES_CLOSED -> if (blink) cs[0] else 0
+                        FaceRole.OUTLINE -> cs.getOrElse(2) { cs[0] }
+                        else -> if (role - FaceRole.MOUTH == phoneme.ordinal) cs.getOrElse(1) { cs[0] } else 0
+                    }
                 } else effectColor(clip, pos, lx, ly, t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 }, mouth, singing, spectrum)
                 if (layered && reveal > 0f) {
                     if (hue != 0f && color != 0) color = hueShift(color, hue)
-                    if (clip.sparkles > 0f && HouseRenderer.hash(li, sparkleStep) > 1f - clip.sparkles * 0.2f) color = 0xFFFFFF
+                    if (sparkleAmount > 0f && HouseRenderer.hash(li, sparkleStep) > 1f - sparkleAmount * 0.2f) color = 0xFFFFFF
                 }
                 val c = if (reveal <= 0f) 0 else HouseRenderer.scale(color, intensity * reveal)
                 if (blurred != null) blurred[k] = c else out[li] = mix(track.blend, out[li], c)
             }
             if (blurred != null) {
-                val soft = blur(blurred, 1 + (clip.blur * 6f).toInt())
+                val soft = blur(blurred, 1 + (blurAmount * 6f).toInt())
                 for (k in tl.ledIndex.indices) { val li = tl.ledIndex[k]; out[li] = mix(track.blend, out[li], soft[k]) }
             }
         }

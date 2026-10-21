@@ -202,6 +202,20 @@ object XlightsModels {
             if (ranges.isNotEmpty()) subs += Submodel(smName, ranges)
         }
 
+        // A singing face defined by node ranges: each mouth, the eyes and the outline become parts.
+        e.children("faceInfo").firstOrNull { it.getAttribute("Type").equals("NodeRange", true) }?.let { face ->
+            val attrs = face.attributes
+            for (k in 0 until attrs.length) {
+                val name = attrs.item(k).nodeName
+                if (!(name.startsWith("Mouth-") || name.startsWith("Eyes-") || name == "FaceOutline") || name.endsWith("-Color")) continue
+                val ranges = attrs.item(k).nodeValue.split(',').mapNotNull { part ->
+                    val bits = part.split('-').mapNotNull { it.trim().toIntOrNull() }
+                    if (bits.isEmpty()) null else (minOf(bits.first(), bits.last()) - 1).coerceAtLeast(0)..(maxOf(bits.first(), bits.last()) - 1).coerceAtMost(count - 1)
+                }.filter { !it.isEmpty() }
+                if (ranges.isNotEmpty() && subs.none { it.name == name }) subs += Submodel(if (name == "FaceOutline") "Outline" else name, ranges)
+            }
+        }
+
         // StartChannel: "!Controller:ch", ">Model:ch" (after another model), "#universe:ch" or a plain channel.
         val start = e.getAttribute("StartChannel").trim()
         var controller: String? = e.getAttribute("Controller").takeIf { it.isNotBlank() && it != "Use Start Channel" }

@@ -1530,6 +1530,8 @@ private fun ClipInspector(
             "tilt" -> Triple("Tilt", clip.tilt ?: 0.5f, clip.tiltCurve)
             "hue" -> Triple("Hue shift", clip.hueShift, clip.hueCurve)
             "rotation" -> Triple("Rotate", clip.rotation, clip.rotationCurve)
+            "blur" -> Triple("Blur", clip.blur, clip.blurCurve)
+            "sparkles" -> Triple("Sparkles", clip.sparkles, clip.sparklesCurve)
             else -> Triple("Brightness", clip.intensity, clip.intensityCurveOrRamp)
         }
         CurveDialog(label, start, curve, onDismiss = { editingCurve = null }) { c ->
@@ -1541,6 +1543,8 @@ private fun ClipInspector(
                     "tilt" -> clip.copy(tiltCurve = c)
                     "hue" -> clip.copy(hueCurve = c)
                     "rotation" -> clip.copy(rotationCurve = c)
+                    "blur" -> clip.copy(blurCurve = c)
+                    "sparkles" -> clip.copy(sparklesCurve = c)
                     else -> clip.copy(intensityCurve = c, intensityEnd = null)
                 }
             )
@@ -1639,15 +1643,20 @@ private fun LayerSettings(clip: Clip, onChange: (Clip) -> Unit, onEditCurve: (St
     }
     clip.zoomEnd?.let { end ->
         GradientSlider(zoomToSlider(end), { onChange(clip.copy(zoomEnd = sliderToZoom(it))) }, label = "Zoom at the end", valueText = "%.2f×".format(end), height = 30.dp)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CurveShape.entries.filter { it != CurveShape.RANDOM }.forEach { sh ->
+                FilterChip(selected = clip.zoomShape == sh, onClick = { onChange(clip.copy(zoomShape = sh)) }, label = { Text(sh.label) })
+            }
+        }
     }
     CurvedSlider("Hue shift", clip.hueShift, clip.hueCurve, { onChange(clip.copy(hueShift = it)) }) { onEditCurve("hue") }
-    GradientSlider(clip.sparkles, { onChange(clip.copy(sparkles = it)) }, label = "Sparkles", valueText = "${(clip.sparkles * 100).roundToInt()}%", height = 30.dp)
-    GradientSlider(clip.blur, { onChange(clip.copy(blur = it)) }, label = "Blur", valueText = "${(clip.blur * 100).roundToInt()}%", height = 30.dp)
+    CurvedSlider("Sparkles", clip.sparkles, clip.sparklesCurve, { onChange(clip.copy(sparkles = it)) }) { onEditCurve("sparkles") }
+    CurvedSlider("Blur", clip.blur, clip.blurCurve, { onChange(clip.copy(blur = it)) }) { onEditCurve("blur") }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         FilterChip(selected = clip.mirrorX, onClick = { onChange(clip.copy(mirrorX = !clip.mirrorX)) }, label = { Text("Mirror ↔") })
         FilterChip(selected = clip.mirrorY, onClick = { onChange(clip.copy(mirrorY = !clip.mirrorY)) }, label = { Text("Flip ↕") })
         if (clip.hasLayerSettings) TextButton(onClick = {
-            onChange(clip.copy(rotation = 0f, spin = 0f, zoom = 1f, zoomEnd = null, hueShift = 0f, sparkles = 0f, mirrorX = false, mirrorY = false, blur = 0f, hueCurve = null, rotationCurve = null))
+            onChange(clip.copy(rotation = 0f, spin = 0f, zoom = 1f, zoomEnd = null, hueShift = 0f, sparkles = 0f, mirrorX = false, mirrorY = false, blur = 0f, hueCurve = null, rotationCurve = null, blurCurve = null, sparklesCurve = null))
         }) { Text("Reset") }
     }
 }

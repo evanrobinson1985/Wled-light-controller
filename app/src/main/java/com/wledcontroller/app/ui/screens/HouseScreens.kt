@@ -1208,7 +1208,7 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                     ModelKind.entries.filter { it != ModelKind.CUSTOM || run.model?.kind == ModelKind.CUSTOM }.forEach { k ->
                         FilterChip(selected = modelKind == k, onClick = {
                             modelKind = k
-                            prop = when (k) { ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR; ModelKind.FACE -> PropType.BUSH; ModelKind.CUSTOM -> PropType.MATRIX }
+                            prop = when (k) { ModelKind.MATRIX -> PropType.MATRIX; ModelKind.MEGA_TREE -> PropType.TREE; ModelKind.STAR -> PropType.STAR; ModelKind.FACE, ModelKind.SINGING_FACE -> PropType.BUSH; ModelKind.CUSTOM -> PropType.MATRIX }
                         }, label = { Text(k.label) })
                     }
                 }
@@ -1885,6 +1885,14 @@ private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
                 "Imported from xLights: ${model.customW} × ${model.customH} grid, ${model.ledCount} LEDs. Import it again to change it.",
                 style = MaterialTheme.typography.bodySmall,
             )
+            ModelKind.SINGING_FACE -> {
+                number("LEDs per part", model.nodes, 2..500, Modifier.fillMaxWidth()) { onChange(model.copy(nodes = it)) }
+                Text(
+                    "Wired in this order, the same number of LEDs each: eyes open, eyes closed, outline, then the mouths AI, E, etc, FV, L, MBP, O, rest, U, WQ — as xLights faces are. The Sing effect shows the mouth for each sound of the lyrics.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             ModelKind.FACE -> {
                 number("LEDs per part", model.nodes, 2..500, Modifier.fillMaxWidth()) { onChange(model.copy(nodes = it)) }
                 Text(
@@ -1916,7 +1924,7 @@ private fun ModelEditor(model: PropModel, onChange: (PropModel) -> Unit) {
                 Text("Clockwise from the top point", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 Switch(checked = model.clockwise, onCheckedChange = { onChange(model.copy(clockwise = it)) })
             }
-            ModelKind.FACE, ModelKind.CUSTOM -> Unit
+            ModelKind.FACE, ModelKind.SINGING_FACE, ModelKind.CUSTOM -> Unit
         }
         if (model.kind == ModelKind.MATRIX || model.kind == ModelKind.MEGA_TREE) Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Zig-zag (each string runs back the other way)", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
