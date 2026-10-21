@@ -51,20 +51,31 @@ class GhostsTest {
     }
 
     @Test
-    fun jackOLanternFacesGlow() {
-        // Lit white-to-red; a carved face shows as dim red inside the dark pumpkin (lit red is full brightness).
-        fun glowing(fx: HouseEffect) = listOf(2f, 5f, 11f, 17f).sumOf { t ->
-            val p = HouseEffectParams(effect = fx, colors = listOf(0xFFFFFF, 0xFF0000), count = 3, size = 0.8f, brightness = 1f)
-            var n = 0
-            for (i in 0 until 80) for (j in 0 until 50) {
-                val c = HouseRenderer.color(p, i / 79f, j / 49f, t, i * 50 + j, i)
-                val r = (c shr 16) and 0xFF; val g = (c shr 8) and 0xFF
-                if (r in 60..200 && g < 20) n++
-            }
-            n
+    fun jackOLanternFacesGlowAndSkullsHaveHoles() {
+        // On a plain white house a pumpkin's carved face shows red (the second colour, dimmer than the lit house) inside
+        // its shadow, and a skull's eye sockets let the lit house show through its shadow.
+        fun frame(fx: HouseEffect, t: Float) = HouseEffectParams(effect = fx, colors = listOf(0xFFFFFF, 0xFF0000), count = 1, size = 1f, brightness = 1f).let { p ->
+            (0 until 100).map { i -> (0 until 40).map { j -> HouseRenderer.color(p, i / 99f, j / 39f, t, 0, i) } }
         }
-        val pumpkins = glowing(HouseEffect.PUMPKINS)
-        assertTrue("pumpkin faces glow: $pumpkins", pumpkins > 20)
-        assertTrue("far more than a ghost's eyes", pumpkins > glowing(HouseEffect.GHOSTS) * 2)
+        fun red(c: Int) = ((c shr 16) and 0xFF) in 50..200 && ((c shr 8) and 0xFF) < 30
+        fun dark(c: Int) = ((c shr 16) and 0xFF) + ((c shr 8) and 0xFF) + (c and 0xFF) < 60
+        fun lit(c: Int) = ((c shr 16) and 0xFF) + ((c shr 8) and 0xFF) + (c and 0xFF) > 200
+
+        val pumpkin = frame(HouseEffect.PUMPKINS, 9f)
+        val glow = pumpkin.sumOf { col -> col.count(::red) }
+        val shadow = pumpkin.sumOf { col -> col.count(::dark) }
+        assertTrue("the pumpkin casts a shadow: $shadow", shadow > 50)
+        assertTrue("its face glows: $glow", glow > 20)
+
+        // Somewhere a lit pixel has the skull's shadow both above and below it, and both sides.
+        val skull = frame(HouseEffect.SKULLS, 3f)
+        var holes = 0
+        for (i in 6 until 94) for (j in 6 until 34) {
+            if (!lit(skull[i][j])) continue
+            val enclosed = (1..6).any { dark(skull[i - it][j]) } && (1..6).any { dark(skull[i + it][j]) } &&
+                (1..6).any { dark(skull[i][j - it]) } && (1..6).any { dark(skull[i][j + it]) }
+            if (enclosed) holes++
+        }
+        assertTrue("the skull has eye sockets: $holes", holes > 4)
     }
 }
