@@ -175,7 +175,7 @@ object XsqImport {
         "sketch" -> SeqEffect.SKETCH
         "shader" -> SeqEffect.SHADER
         "guitar" -> SeqEffect.GUITAR
-        "servo", "dmx" -> SeqEffect.SERVO
+        "servo" -> SeqEffect.SERVO
         "duplicate" -> SeqEffect.DUPLICATE
         "glediator" -> SeqEffect.GLEDIATOR
         "rainbow" -> SeqEffect.RAINBOW
