@@ -36,7 +36,7 @@ class HouseEngine(private val context: Context, private val store: AppStore, pri
     init {
         // The effect and its settings are remembered: put back the last ones, then save each change.
         scope.launch {
-            store.houseEffect.first()?.let { saved -> if (params.value == HouseEffectParams()) params.value = saved }
+            store.houseEffect.first()?.let { saved -> if (params.value == HouseEffectParams()) params.value = saved.normalized() }
             params.drop(1).debounce(400).collect { store.setHouseEffect(it) }
         }
     }

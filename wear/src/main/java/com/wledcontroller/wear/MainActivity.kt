@@ -269,18 +269,18 @@ private fun HouseScreen(link: WatchLink) {
             return@WatchList
         }
         val fx = effects.firstOrNull { it.name == st.effect }
+        val shadow = st.shadow?.let { s -> effects.firstOrNull { it.name == s } }
         item {
             Chip(
                 label = { Text(if (st.running) "Stop" else "Play") },
-                secondaryLabel = { Text(fx?.label ?: st.effect, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                secondaryLabel = { Text((fx?.label ?: st.effect) + (shadow?.let { " + ${it.label}" } ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 icon = { Icon(if (st.running) Icons.Filled.Stop else Icons.Filled.PlayArrow, null) },
                 colors = if (st.running) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
                 onClick = { status = st.copy(running = !st.running); update { link.house(if (st.running) "stop" else "play") } },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        val noun = fx?.noun?.replaceFirstChar(Char::uppercase)
-        item { Text(if (noun != null) "$noun speed" else "Speed", style = MaterialTheme.typography.caption2) }
+        item { Text("Speed", style = MaterialTheme.typography.caption2) }
         item {
             InlineSlider(
                 value = st.speed, onValueChange = { v -> status = st.copy(speed = v); update { link.house(speed = v) } },
@@ -288,7 +288,7 @@ private fun HouseScreen(link: WatchLink) {
                 increaseIcon = { Icon(Icons.Filled.Add, "Faster") }, decreaseIcon = { Icon(Icons.Filled.Remove, "Slower") },
             )
         }
-        item { Text(if (noun != null) "$noun size" else "Size", style = MaterialTheme.typography.caption2) }
+        item { Text("Size", style = MaterialTheme.typography.caption2) }
         item {
             InlineSlider(
                 value = st.size, onValueChange = { v -> status = st.copy(size = v); update { link.house(size = v) } },
@@ -296,8 +296,26 @@ private fun HouseScreen(link: WatchLink) {
                 increaseIcon = { Icon(Icons.Filled.Add, "Bigger") }, decreaseIcon = { Icon(Icons.Filled.Remove, "Smaller") },
             )
         }
-        if (fx?.plural != null) {
-            item { Text("Number of ${fx.plural}: ${st.count}", style = MaterialTheme.typography.caption2) }
+        if (shadow?.plural != null) {
+            // The holiday shadow's figures, apart from the effect underneath.
+            val noun = (shadow.noun ?: "figure").replaceFirstChar(Char::uppercase)
+            item { Text("$noun size", style = MaterialTheme.typography.caption2) }
+            item {
+                InlineSlider(
+                    value = st.shadowSize, onValueChange = { v -> status = st.copy(shadowSize = v); update { link.house(shadowSize = v) } },
+                    valueRange = 0f..1f, steps = 9,
+                    increaseIcon = { Icon(Icons.Filled.Add, "Bigger") }, decreaseIcon = { Icon(Icons.Filled.Remove, "Smaller") },
+                )
+            }
+            item { Text("$noun speed", style = MaterialTheme.typography.caption2) }
+            item {
+                InlineSlider(
+                    value = st.shadowSpeed, onValueChange = { v -> status = st.copy(shadowSpeed = v); update { link.house(shadowSpeed = v) } },
+                    valueRange = 0f..1f, steps = 9,
+                    increaseIcon = { Icon(Icons.Filled.Add, "Faster") }, decreaseIcon = { Icon(Icons.Filled.Remove, "Slower") },
+                )
+            }
+            item { Text("Number of ${shadow.plural}: ${st.count}", style = MaterialTheme.typography.caption2) }
             item {
                 InlineSlider(
                     value = st.count.toFloat(), onValueChange = { v -> val n = v.roundToInt(); status = st.copy(count = n); update { link.house(count = n) } },
@@ -306,14 +324,19 @@ private fun HouseScreen(link: WatchLink) {
                 )
             }
         }
-        // Everyday effects first, then the holiday shadows by holiday.
+        // Everyday effects first, then the holiday shadows by holiday, which play over the effect
+        // (tap one again to turn it off).
         effects.groupBy { it.holiday ?: "" }.forEach { (holiday, list) ->
-            item { ListHeader { Text(holiday.ifEmpty { "Effects" }) } }
+            item { ListHeader { Text(if (holiday.isEmpty()) "Effects" else "$holiday shadows") } }
             items(list, key = { it.name }) { e ->
                 Chip(
                     label = { Text(e.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    colors = if (e.name == st.effect) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
-                    onClick = { status = st.copy(effect = e.name, running = true); update { link.house("play", effect = e.name) } },
+                    colors = if (e.name == st.effect || e.name == st.shadow) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                    onClick = {
+                        status = if (e.holiday == null) st.copy(effect = e.name, running = true)
+                        else st.copy(shadow = if (st.shadow == e.name) null else e.name, running = true)
+                        update { link.house("play", effect = e.name) }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

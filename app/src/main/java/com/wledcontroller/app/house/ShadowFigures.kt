@@ -48,15 +48,18 @@ internal object ShadowFigures {
     /** Where one figure is: its origin on the house, whether it faces left, and its turn (radians). */
     private class Pose(val gx: Float, val gy: Float, val flip: Boolean, val rot: Float = 0f, val dangle: Boolean = false)
 
-    fun render(p: HouseEffectParams, figures: List<Figure>, c: List<Int>, x: Float, y: Float, t: Float): Int {
-        val lit = HouseRenderer.palette(c, x * 0.6f + t * 0.02f)
-        val speed = 0.15f + p.speed * 1.6f
-        val w = 0.06f + p.size * 0.26f
+    /**
+     * [lit] (what the effect underneath shows at this LED) with the figures' shadows over it:
+     * [count] of them, [size] and [speed] 0..1. Eyes and carved faces glow in the second of [c].
+     */
+    fun render(figures: List<Figure>, lit: Int, c: List<Int>, count: Int, size: Float, speed01: Float, x: Float, y: Float, t: Float): Int {
+        val speed = 0.15f + speed01 * 1.6f
+        val w = 0.06f + size * 0.26f
         val tt = t * (0.6f + speed)
         val s = Shape()
         var shade = 0f
         var glow = 0f
-        for (k in 0 until p.count.coerceIn(1, MAX_FIGURES)) {
+        for (k in 0 until count.coerceIn(1, MAX_FIGURES)) {
             val fig = figures[k % figures.size]
             val pose = pose(fig.move, k, t, speed, w, fig.foot)
             var u = (x - pose.gx) / w

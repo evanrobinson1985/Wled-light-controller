@@ -122,6 +122,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.HolidayThemes
 import com.wledcontroller.app.house.HouseEffect
+import com.wledcontroller.app.house.HouseEffectParams
 import com.wledcontroller.app.house.HouseEffectService
 import com.wledcontroller.app.house.HiddenStretch
 import com.wledcontroller.app.house.ModelKind
@@ -285,19 +286,27 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             )
 
             SectionTitle("Effect")
+            // Older settings had the shadow as the effect itself; show them the new way.
+            val shown = params.normalized()
             @Composable
             fun effectChips(list: List<HouseEffect>) = FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 list.forEach { e ->
                     FilterChip(
-                        selected = params.effect == e,
-                        onClick = { container.house.params.value = params.copy(effect = e) },
+                        selected = shown.effect == e || shown.shadow == e,
+                        onClick = { container.house.params.value = params.pick(e) },
                         label = { Text(e.label) },
                     )
                 }
             }
             effectChips(HouseEffect.entries.filter { it.holiday == null })
-            // Shadow figures moving about the lit house, by holiday.
+            // Shadow figures moving about over the effect, by holiday.
             SectionTitle("Holiday shadows")
+            Text(
+                if (shown.shadow != null) "${shown.shadow.label} over ${shown.effect.label}. Pick any effect above to change what's underneath; tap the shadow again to turn it off."
+                else "Pick one to play its shadows over the effect above (tap again to turn it off).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             HouseEffect.entries.filter { it.holiday != null }.groupBy { it.holiday!! }.forEach { (holiday, list) ->
                 Text(holiday, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                 effectChips(list)
@@ -329,26 +338,27 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             }
 
             SectionTitle("Adjust")
-            val fx = params.effect
-            if (fx.figures.isNotEmpty()) {
-                // Shadow figures: how big, how many and how fast.
+            fun set(change: (HouseEffectParams) -> HouseEffectParams) { container.house.params.value = change(shown) }
+            val label = if (shown.shadow != null) "${shown.effect.label} " else ""
+            GradientSlider(shown.speed, { v -> set { it.copy(speed = v) } }, label = "${label}speed".replaceFirstChar(Char::uppercase), valueText = "${(shown.speed * 100).toInt()}%", height = 34.dp)
+            Spacer(Modifier.height(10.dp))
+            GradientSlider(shown.size, { v -> set { it.copy(size = v) } }, label = "${label}size".replaceFirstChar(Char::uppercase), valueText = "${(shown.size * 100).toInt()}%", height = 34.dp)
+            shown.shadow?.let { fx ->
+                // The shadow figures: how big, how many and how fast.
                 val noun = fx.noun.replaceFirstChar(Char::uppercase)
-                GradientSlider(params.size, { container.house.params.value = params.copy(size = it) }, label = "$noun size", valueText = "${(params.size * 100).toInt()}%", height = 34.dp)
+                Spacer(Modifier.height(10.dp))
+                GradientSlider(shown.shadowSize, { v -> set { it.copy(shadowSize = v) } }, label = "$noun size", valueText = "${(shown.shadowSize * 100).toInt()}%", height = 34.dp)
                 Spacer(Modifier.height(10.dp))
                 GradientSlider(
-                    (params.count - 1) / 7f,
-                    { container.house.params.value = params.copy(count = 1 + (it * 7).roundToInt()) },
-                    label = "Number of ${fx.plural}", valueText = "${params.count}", height = 34.dp,
+                    (shown.count - 1) / 7f,
+                    { v -> set { it.copy(count = 1 + (v * 7).roundToInt()) } },
+                    label = "Number of ${fx.plural}", valueText = "${shown.count}", height = 34.dp,
                 )
                 Spacer(Modifier.height(10.dp))
-                GradientSlider(params.speed, { container.house.params.value = params.copy(speed = it) }, label = "$noun speed", valueText = "${(params.speed * 100).toInt()}%", height = 34.dp)
-            } else {
-                GradientSlider(params.speed, { container.house.params.value = params.copy(speed = it) }, label = "Speed", valueText = "${(params.speed * 100).toInt()}%", height = 34.dp)
-                Spacer(Modifier.height(10.dp))
-                GradientSlider(params.size, { container.house.params.value = params.copy(size = it) }, label = "Size", valueText = "${(params.size * 100).toInt()}%", height = 34.dp)
+                GradientSlider(shown.shadowSpeed, { v -> set { it.copy(shadowSpeed = v) } }, label = "$noun speed", valueText = "${(shown.shadowSpeed * 100).toInt()}%", height = 34.dp)
             }
             Spacer(Modifier.height(10.dp))
-            GradientSlider(params.brightness, { container.house.params.value = params.copy(brightness = it) }, label = "Brightness", valueText = "${(params.brightness * 100).toInt()}%", height = 34.dp)
+            GradientSlider(shown.brightness, { v -> set { it.copy(brightness = v) } }, label = "Brightness", valueText = "${(params.brightness * 100).toInt()}%", height = 34.dp)
 
             Spacer(Modifier.height(16.dp))
             Card(onClick = onShows, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {

@@ -1,5 +1,6 @@
 package com.wledcontroller.app.house
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -93,5 +94,44 @@ class GhostsTest {
             assertTrue("${fx.label} reach the bottom half: low $low, high $high", low > high / 2)
             assertTrue("${fx.label} still reach the top half: low $low, high $high", high > 0)
         }
+    }
+
+    @Test
+    fun holidayShadowsPlayOverAnyEffect() {
+        val base = HouseEffectParams(effect = HouseEffect.FIREWORKS, colors = listOf(0xFFFFFF, 0xFF0000), brightness = 1f)
+        // Picking a shadow keeps the effect and puts the shadow on top; picking it again takes it off.
+        val withGhosts = base.pick(HouseEffect.GHOSTS)
+        assertEquals(HouseEffect.FIREWORKS, withGhosts.effect)
+        assertEquals(HouseEffect.GHOSTS, withGhosts.shadow)
+        assertEquals(HouseEffect.SKULLS, withGhosts.pick(HouseEffect.SKULLS).shadow)
+        assertEquals(null, withGhosts.pick(HouseEffect.GHOSTS).shadow)
+        // Picking another effect keeps the shadow.
+        val twinkle = withGhosts.pick(HouseEffect.TWINKLE)
+        assertEquals(HouseEffect.TWINKLE, twinkle.effect)
+        assertEquals(HouseEffect.GHOSTS, twinkle.shadow)
+
+        // Rendered: wherever there's no figure, it's exactly the effect underneath; the figures darken some of it.
+        val plain = HouseEffectParams(effect = HouseEffect.SOLID, colors = listOf(0xFFFFFF), brightness = 1f)
+        val shaded = plain.copy(shadow = HouseEffect.PUMPKINS, count = 3, shadowSize = 0.6f)
+        var same = 0; var darker = 0
+        for (t in listOf(3f, 9f, 15f)) for (i in 0 until 80) for (j in 0 until 50) {
+            val a = HouseRenderer.color(plain, i / 79f, j / 49f, t, i, i)
+            val b = HouseRenderer.color(shaded, i / 79f, j / 49f, t, i, i)
+            if (a == b) same++ else if ((b and 0xFF) < (a and 0xFF)) darker++
+        }
+        assertTrue("most of the house shows the effect: $same", same > darker)
+        assertTrue("the pumpkins shade some of it: $darker", darker > 100)
+    }
+
+    @Test
+    fun olderSettingsWithTheShadowAsTheEffectStillWork() {
+        val old = HouseEffectParams(effect = HouseEffect.WITCHES, size = 0.7f, speed = 0.3f)
+        val n = old.normalized()
+        assertEquals(HouseEffect.GLOW, n.effect)
+        assertEquals(HouseEffect.WITCHES, n.shadow)
+        assertEquals(0.7f, n.shadowSize)
+        assertEquals(0.3f, n.shadowSpeed)
+        // Picking an everyday effect then keeps the witches over it.
+        assertEquals(HouseEffect.WITCHES, old.pick(HouseEffect.RAINBOW).shadow)
     }
 }

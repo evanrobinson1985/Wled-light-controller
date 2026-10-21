@@ -111,12 +111,16 @@ class WearRelayService : WearableListenerService() {
 
     /**
      * The whole-house effect: "action" play / stop / set (anything else just reports), with
-     * optional "effect" (by name), "speed", "size" and "count". Answers with what's running.
+     * optional "effect" (by name: an everyday effect replaces the effect, a holiday shadow goes
+     * on over it or, if on already, off), "speed", "size", "count", "shadowSize" and
+     * "shadowSpeed". Answers with what's running.
      */
     private fun house(container: AppContainer, req: JsonObject): ByteArray {
         val house = container.house
-        var p = house.params.value
-        req.str("effect")?.let { name -> HouseEffect.entries.firstOrNull { it.name == name }?.let { p = p.copy(effect = it) } }
+        var p = house.params.value.normalized()
+        req.str("effect")?.let { name -> HouseEffect.entries.firstOrNull { it.name == name }?.let { p = p.pick(it) } }
+        req["shadowSize"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(shadowSize = it.coerceIn(0f, 1f)) }
+        req["shadowSpeed"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(shadowSpeed = it.coerceIn(0f, 1f)) }
         req["speed"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(speed = it.coerceIn(0f, 1f)) }
         req["size"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(size = it.coerceIn(0f, 1f)) }
         req["count"]?.jsonPrimitive?.intOrNull?.let { p = p.copy(count = it.coerceIn(1, 8)) }
@@ -132,6 +136,8 @@ class WearRelayService : WearableListenerService() {
             put("running", house.running.value || req.str("action") == "play")
             put("effect", p.effect.name)
             put("speed", p.speed); put("size", p.size); put("count", p.count)
+            p.shadow?.let { put("shadow", it.name) }
+            put("shadowSize", p.shadowSize); put("shadowSpeed", p.shadowSpeed)
         }.toString().toByteArray()
     }
 }

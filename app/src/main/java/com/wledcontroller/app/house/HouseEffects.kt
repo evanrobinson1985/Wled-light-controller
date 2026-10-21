@@ -14,6 +14,7 @@ import kotlin.math.sin
  */
 enum class HouseEffect(val label: String, val holiday: String? = null, val figures: List<Figure> = emptyList()) {
     WAVE("Colour wave"),
+    GLOW("Gentle glow"),
     RAINBOW("Rainbow sweep"),
     WIPE("Colour wipe"),
     CHASE("Candy chase"),
@@ -39,6 +40,9 @@ enum class HouseEffect(val label: String, val holiday: String? = null, val figur
     EAGLES("Soaring eagles", "Independence Day", listOf(Figure.EAGLE)),
     ;
 
+    /** A holiday shadow: figures that move about over whichever effect is playing. */
+    val isShadow get() = figures.isNotEmpty()
+
     /** What the size / number / speed sliders call one of the figures, and several. */
     val noun get() = figures.singleOrNull()?.noun ?: "figure"
     val plural get() = figures.singleOrNull()?.plural ?: "figures"
@@ -55,9 +59,33 @@ data class HouseEffectParams(
     val size: Float = 0.5f,
     /** 0..1 */
     val brightness: Float = 0.8f,
-    /** How many there are, for effects with separate things moving about (ghosts). */
+    /** How many figures the holiday shadow has. */
     val count: Int = 3,
-)
+    /** A holiday shadow (an effect with figures) playing over [effect], or null for none. */
+    val shadow: HouseEffect? = null,
+    /** 0..1: the shadow figures' size and speed, apart from the effect's own. */
+    val shadowSize: Float = 0.5f,
+    val shadowSpeed: Float = 0.5f,
+) {
+    /**
+     * The effect and shadow kept apart: settings from before shadows could play over any
+     * effect have the shadow as the effect itself, which means it over a gentle glow.
+     */
+    fun normalized(): HouseEffectParams =
+        if (effect.isShadow) copy(effect = HouseEffect.GLOW, shadow = effect, shadowSize = size, shadowSpeed = speed) else this
+
+    /** The holiday shadow playing, if any. */
+    val activeShadow: HouseEffect? get() = if (effect.isShadow) effect else shadow?.takeIf { it.isShadow }
+
+    /** Picks [fx]: an everyday effect becomes the effect; a holiday shadow goes on over it (or off, if it's on already). */
+    fun pick(fx: HouseEffect): HouseEffectParams = normalized().let { n ->
+        when {
+            !fx.isShadow -> n.copy(effect = fx)
+            n.shadow == fx -> n.copy(shadow = null)
+            else -> n.copy(shadow = fx)
+        }
+    }
+}
 
 object HouseRenderer {
 
@@ -96,12 +124,15 @@ object HouseRenderer {
      * [id] is a stable per-LED number for randomness; [order] its position within its run.
      */
     fun color(p: HouseEffectParams, x: Float, y: Float, t: Float, id: Int, order: Int): Int {
+        if (p.effect.isShadow) return color(p.normalized(), x, y, t, id, order)
         val sp = 0.1f + p.speed * 1.9f          // 0.1 .. 2
         val sz = 0.25f + (1f - p.size) * 2.75f  // features per house width: 3 (small) .. 0.25 (large)
         val c = p.colors.ifEmpty { listOf(0xFFFFFF) }
         val rgb = when (p.effect) {
             HouseEffect.SOLID -> c[0]
             HouseEffect.WAVE -> palette(c, x * sz - t * sp * 0.25f)
+            // The colours spread gently across the house, slowly shimmering.
+            HouseEffect.GLOW -> palette(c, x * sz * 0.25f + t * sp * 0.04f)
             HouseEffect.RAINBOW -> hsv(x * sz * 0.5f - t * sp * 0.2f)
             HouseEffect.WIPE -> {
                 // Each colour sweeps across the house in turn.
@@ -141,7 +172,6 @@ object HouseRenderer {
                 }
                 acc
             }
-            HouseEffect.GHOSTS -> ghosts(p, c, x, y, t)
             HouseEffect.SNOW -> {
                 val lane = floor(x * 40f).toInt()
                 val fall = frac(y * 0.8f - t * sp * (0.15f + hash(lane, 5) * 0.15f) + hash(lane, 9))
@@ -149,60 +179,15 @@ object HouseRenderer {
                 maxRgb(scale(c.getOrElse(1) { c[0] }, 0.12f), scale(c[0], flake))
             }
             HouseEffect.BREATHE -> scale(palette(c, x * 0.5f), 0.15f + 0.85f * (0.5f + 0.5f * sin(t * sp * 1.5f).toFloat()))
-            // Clowns, spiders, witches and the other holiday shadows.
-            else -> ShadowFigures.render(p, p.effect.figures.ifEmpty { listOf(Figure.GHOST) }, c, x, y, t)
+            // Holiday shadows only ever play over an effect (see the start).
+            else -> palette(c, x)
         }
-        return scale(rgb, p.brightness)
+        // The holiday shadow's figures moving about over it.
+        val shaded = p.shadow?.takeIf { it.isShadow }?.let { fx ->
+            ShadowFigures.render(fx.figures, rgb, c, p.count, p.shadowSize, p.shadowSpeed, x, y, t)
+        } ?: rgb
+        return scale(shaded, p.brightness)
     }
-
-    /**
-     * The whole house lit in the colours, except where ghosts' shadows drift about: each ghost
-     * is a dark shape with a round head and a wavy hem (with two faint eyes), wandering the
-     * house on its own path. [HouseEffectParams.size] sets their size, [HouseEffectParams.count]
-     * how many, and [HouseEffectParams.speed] how fast they float.
-     */
-    private fun ghosts(p: HouseEffectParams, c: List<Int>, x: Float, y: Float, t: Float): Int {
-        // The lit house: the colours spread gently across it, slowly shimmering.
-        val lit = palette(c, x * 0.6f + t * 0.02f)
-        val speed = 0.15f + p.speed * 1.6f
-        val w = 0.08f + p.size * 0.32f          // ghost width, in house widths
-        val h = w * 1.35f                        // a little taller than wide
-        var shadow = 0f
-        var eye = 0f
-        for (k in 0 until p.count.coerceIn(1, MAX_GHOSTS)) {
-            // Each ghost floats on its own slow, looping path, bobbing as it goes.
-            val ax = speed * (0.22f + hash(k, 1) * 0.18f)
-            val ay = speed * (0.17f + hash(k, 3) * 0.14f)
-            val gx = 0.5f + 0.45f * sin(t * ax + hash(k, 2) * 6.283f)
-            val gy = 0.08f + 0.62f * (0.5f + 0.5f * sin(t * ay + hash(k, 4) * 6.283f)) + 0.02f * sin(t * 2.6f + k)
-            val u = (x - gx) / w                 // −0.5 … 0.5 across the ghost
-            val v = (y - gy) / h                 // 0 at the top of its head, 1 at its hem
-            val inside = ghostShape(u, v, t + k)
-            // Soft edges: a little outside the shape is still in half-shadow.
-            val edge = maxOf(inside, 0.5f * ghostShape(u / 1.18f, (v - 0.5f) / 1.18f + 0.5f, t + k))
-            if (edge > shadow) shadow = edge
-            // Two eyes, faintly glowing in the dark.
-            val ex = abs(u) - 0.17f; val ey = v - 0.33f
-            if (inside > 0f && ex * ex + ey * ey < 0.009f) eye = 1f
-        }
-        val dark = scale(lit, 1f - shadow * 0.96f)
-        return if (eye > 0f) maxRgb(dark, scale(c.getOrElse(1) { c[0] }, 0.55f)) else dark
-    }
-
-    /** 1 inside a ghost (local coords: u across −0.5…0.5, v down 0…1), else 0. */
-    private fun ghostShape(u: Float, v: Float, t: Float): Float {
-        if (abs(u) > 0.5f || v < 0f) return 0f
-        if (v < 0.5f) {
-            // Round head.
-            val dv = (v - 0.5f) / 0.5f; val du = u / 0.5f
-            return if (du * du + dv * dv <= 1f) 1f else 0f
-        }
-        // Body down to a wavy, rippling hem.
-        val hem = 0.88f + 0.1f * sin(u * 6f * PI.toFloat() + t * 4f)
-        return if (v <= hem) 1f else 0f
-    }
-
-    private const val MAX_GHOSTS = 8
 
     internal fun maxRgb(a: Int, b: Int) =
         (maxOf((a shr 16) and 0xFF, (b shr 16) and 0xFF) shl 16) or

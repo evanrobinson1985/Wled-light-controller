@@ -43,9 +43,12 @@ data class WatchGroup(val id: String, val name: String, val devices: List<String
 @Serializable
 data class HouseFx(val name: String, val label: String, val holiday: String? = null, val noun: String? = null, val plural: String? = null)
 
-/** What the whole-house effect is doing on the phone. */
+/** What the whole-house effect is doing on the phone; [shadow] is the holiday shadow playing over [effect], if any. */
 @Serializable
-data class HouseStatus(val running: Boolean = false, val effect: String = "", val speed: Float = 0.5f, val size: Float = 0.5f, val count: Int = 3)
+data class HouseStatus(
+    val running: Boolean = false, val effect: String = "", val speed: Float = 0.5f, val size: Float = 0.5f, val count: Int = 3,
+    val shadow: String? = null, val shadowSize: Float = 0.5f, val shadowSpeed: Float = 0.5f,
+)
 
 /** What a controller is doing, enough for the watch. */
 data class LightState(val on: Boolean, val bri: Int, val fx: Int, val pal: Int, val ledCount: Int)
@@ -224,11 +227,18 @@ class WatchLink(private val context: Context) {
         phone("/wled/group", buildJsonObject { put("id", id); if (on != null) put("on", on) })
             ?.let { runCatching { (WledParse.json.parseToJsonElement(String(it)) as JsonObject)["on"].toString() == "true" }.getOrNull() }
 
-    /** The whole-house effect: [action] "play", "stop", or null to change settings / just ask. */
-    suspend fun house(action: String? = null, effect: String? = null, speed: Float? = null, size: Float? = null, count: Int? = null): HouseStatus? =
+    /**
+     * The whole-house effect: [action] "play", "stop", or null to change settings / just ask.
+     * An everyday [effect] replaces the effect; a holiday shadow goes on over it (or off again).
+     */
+    suspend fun house(
+        action: String? = null, effect: String? = null, speed: Float? = null, size: Float? = null, count: Int? = null,
+        shadowSize: Float? = null, shadowSpeed: Float? = null,
+    ): HouseStatus? =
         phone("/wled/house", buildJsonObject {
             action?.let { put("action", it) }; effect?.let { put("effect", it) }
             speed?.let { put("speed", it) }; size?.let { put("size", it) }; count?.let { put("count", it) }
+            shadowSize?.let { put("shadowSize", it) }; shadowSpeed?.let { put("shadowSpeed", it) }
         })?.let { runCatching { WledParse.houseStatus(String(it)) }.getOrNull() }
 
     private suspend fun direct(d: WatchDevice, path: String, body: String?): String? = withContext(Dispatchers.IO) {

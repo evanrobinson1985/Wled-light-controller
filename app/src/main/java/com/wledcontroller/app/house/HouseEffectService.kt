@@ -81,7 +81,7 @@ class HouseEffectService : Service() {
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_tile_bulb)
             .setContentTitle("Whole-house effect running")
-            .setContentText(engine.params.value.effect.label)
+            .setContentText(engine.params.value.let { p -> p.effect.label + (p.activeShadow?.takeIf { it != p.effect }?.let { " + ${it.label}" } ?: "") })
             .setOngoing(true)
             .setContentIntent(open)
             .addAction(0, "Stop", stop)
