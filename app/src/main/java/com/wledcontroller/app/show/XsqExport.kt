@@ -58,6 +58,8 @@ object XsqExport {
         SeqEffect.TREE -> "Tree"
         SeqEffect.WARP -> "Warp"
         SeqEffect.WAVE -> "Wave"
+        SeqEffect.STATE -> "State"
+        SeqEffect.SKETCH -> "Sketch"
     }
 
     private fun esc(s: String) = s.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;").replace(">", "&gt;")
@@ -108,6 +110,7 @@ object XsqExport {
                 if (c.blur > 0f) add("B_SLIDER_Blur=${1 + (c.blur * 14).toInt()}")
                 if (c.hueShift != 0f) add("C_SLIDER_Color_HueAdjust=${(c.hueShift * 100).toInt()}")
                 if (c.sparkles > 0f) add("C_SLIDER_SparkleFrequency=${(c.sparkles * 200).toInt()}")
+                if (c.effect == SeqEffect.STATE) seq.timingTracks.firstOrNull { it.id == c.timingTrackId }?.let { add("E_CHOICE_State_TimingTrack=${it.name}") }
             }.joinToString(",")
             return effects.getOrPut(s) { effects.size }
         }
@@ -136,6 +139,9 @@ object XsqExport {
             val marks = seq.marks.sorted()
             val labels = marks.mapIndexed { i, m -> TimedLabel(m, marks.getOrNull(i + 1) ?: seq.durationMs, "") }
             elements.append("    <Element type=\"timing\" name=\"Beats\">\n").append(timingLayers(labels)).append("    </Element>\n")
+        }
+        for (tt in seq.timingTracks) {
+            elements.append("    <Element type=\"timing\" name=\"${esc(tt.name)}\">\n").append(timingLayers(tt.marks)).append("    </Element>\n")
         }
         seq.lyrics?.takeIf { !it.isEmpty }?.let { l ->
             val phon = l.phonemes.map { it.copy(label = Phoneme.parse(it.label)?.let { p -> if (p == Phoneme.ETC) "etc" else if (p == Phoneme.REST) "rest" else p.name } ?: it.label) }
@@ -168,6 +174,7 @@ object XsqExport {
             append("  <EffectDB>\n"); effects.keys.forEach { append("    <Effect>${esc(it)}</Effect>\n") }; append("  </EffectDB>\n")
             append("  <DisplayElements>\n")
             if (seq.marks.isNotEmpty()) append("    <Element collapsed=\"0\" type=\"timing\" name=\"Beats\" visible=\"1\" active=\"1\"/>\n")
+            seq.timingTracks.forEach { append("    <Element collapsed=\"0\" type=\"timing\" name=\"${esc(it.name)}\" visible=\"1\" active=\"0\"/>\n") }
             if (seq.lyrics?.isEmpty == false) append("    <Element collapsed=\"0\" type=\"timing\" name=\"Lyrics\" visible=\"1\" active=\"0\"/>\n")
             models.forEach { append("    <Element collapsed=\"0\" type=\"model\" name=\"${esc(it)}\" visible=\"1\"/>\n") }
             append("  </DisplayElements>\n")

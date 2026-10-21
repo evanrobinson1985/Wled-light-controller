@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -94,6 +95,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -137,6 +139,7 @@ import com.wledcontroller.app.LocalAppContainer
 import com.wledcontroller.app.data.HolidayThemes
 import com.wledcontroller.app.house.Direction
 import com.wledcontroller.app.house.HouseMap
+import com.wledcontroller.app.house.MapPoint
 import com.wledcontroller.app.show.AudioAnalyzer
 import com.wledcontroller.app.show.AudioEnvelope
 import com.wledcontroller.app.show.Clip
@@ -744,6 +747,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                         onCopy = { ClipClipboard.copy(listOf(trackId to selected)) },
                         hasSong = seq.audioFile != null,
                         modifier = m,
+                        timingTracks = seq.timingTracks,
                     )
                 } else {
                     Column(m.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -800,6 +804,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
             onDismiss = { showMusic = false },
             onChange = { seq = it; if (it.audioFile != initial.audioFile) player.seek(0) },
             onTapLyrics = { words -> tapLyrics = words; tapStarts.clear(); player.seek(0); player.play() },
+            position = pos,
         )
     }
     if (addingTrack) {
@@ -1007,6 +1012,39 @@ private fun Timeline(
                 }
             }
         }
+        seq.timingTracks.forEachIndexed { ti, tt ->
+            // Each named timing track: its labelled stretches, tap one to jump there.
+            val tint = listOf(MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.primary)[ti % 3]
+            Row(Modifier.height(26.dp)) {
+                Box(Modifier.width(HeaderWidth).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+                    Text("  " + tt.name, style = MaterialTheme.typography.labelSmall, color = textColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Canvas(
+                    Modifier.weight(1f).fillMaxHeight().background(laneBg).pointerInput(tt.id) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            seek((((down.position.x + state.scrollX) / state.pps) * 1000).roundToLong().coerceIn(0, state.seq.durationMs))
+                        }
+                    }
+                ) {
+                    clipRect {
+                        tt.marks.forEachIndexed { i, m ->
+                            val x0 = m.startMs / 1000f * pxPerSec - scrollX; val x1 = m.endMs / 1000f * pxPerSec - scrollX
+                            if (x1 < 0 || x0 > size.width) return@forEachIndexed
+                            drawRect(tint.copy(alpha = if (i % 2 == 0) 0.28f else 0.18f), Offset(x0, 2f), Size((x1 - x0).coerceAtLeast(1f), size.height - 4f))
+                            drawLine(tint, Offset(x0, 0f), Offset(x0, size.height), 1.5.dp.toPx())
+                            if (x1 - x0 > 16f && m.label.isNotBlank()) {
+                                val label = measurer.measure(m.label, TextStyle(fontSize = 10.sp, color = textColor), maxLines = 1,
+                                    constraints = androidx.compose.ui.unit.Constraints(maxWidth = (x1 - x0 - 4f).toInt().coerceAtLeast(1)))
+                                drawText(label, topLeft = Offset(x0 + 3f, 3f))
+                            }
+                        }
+                        val px = position / 1000f * pxPerSec - scrollX
+                        drawLine(playhead, Offset(px, 0f), Offset(px, size.height), 2.dp.toPx())
+                    }
+                }
+            }
+        }
         HorizontalDivider()
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             seq.tracks.forEach { track ->
@@ -1042,6 +1080,7 @@ private fun Timeline(
                                         val candidates = buildList {
                                             add(s0.position)
                                             addAll(s0.seq.marks)
+                                            s0.seq.timingTracks.forEach { tt -> tt.marks.forEach { add(it.startMs) } }
                                             s0.seq.tracks.forEach { tr -> tr.clips.forEach { c -> if (c.id != exclude) { add(c.startMs); add(c.endMs) } } }
                                         }
                                         val near = candidates.minByOrNull { abs(it - ms) }
@@ -1277,6 +1316,7 @@ private fun ClipInspector(
     onCopy: () -> Unit,
     hasSong: Boolean,
     modifier: Modifier,
+    timingTracks: List<com.wledcontroller.app.show.TimingTrack> = emptyList(),
 ) {
     var editingSlot by remember { mutableIntStateOf(-1) }
     var editingCurve by remember { mutableStateOf<String?>(null) }
@@ -1284,6 +1324,8 @@ private fun ClipInspector(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var videoProgress by remember { mutableStateOf<Float?>(null) }
+    var sketching by remember { mutableStateOf(false) }
+    if (sketching) SketchDialog(clip.sketch, onDismiss = { sketching = false }) { onChange(clip.copy(sketch = it)); sketching = false }
     var videoError by remember { mutableStateOf<String?>(null) }
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) container.scope.launch {
@@ -1348,6 +1390,21 @@ private fun ClipInspector(
                     "Fits the lights; speed above 0 scrolls it across. Best on matrices and big groups.",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            clip.effect == SeqEffect.STATE -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Lights the parts of the prop named by a timing track's labels as the song goes: label a stretch \"eyes\" or \"mouth, nose\" (or \"all\") to light those parts. Make the parts in the house map: edit the prop › Parts › Add part.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (timingTracks.isEmpty()) Text("Add a timing track first (♪ › Timing tracks).", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    timingTracks.forEach { tt -> FilterChip(selected = clip.timingTrackId == tt.id, onClick = { onChange(clip.copy(timingTrackId = tt.id)) }, label = { Text(tt.name) }) }
+                }
+            }
+            clip.effect == SeqEffect.SKETCH -> Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { sketching = true }) { Text(if (clip.sketch.size < 2) "Draw the path" else "Redraw") }
+                Spacer(Modifier.width(8.dp))
+                Text("The path draws itself along the lights over the effect. Size sets how thick.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             clip.effect == SeqEffect.VIDEO -> Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1442,7 +1499,7 @@ private fun ClipInspector(
             Text("Give pan a Wave curve to sweep the beam back and forth.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        LayerSettings(clip, onChange)
+        LayerSettings(clip, onChange) { editingCurve = it }
         EffectPresets(clip, onChange)
         Spacer(Modifier.height(16.dp))
     }
@@ -1453,6 +1510,8 @@ private fun ClipInspector(
             "size" -> Triple("Size", clip.size, clip.sizeCurve)
             "pan" -> Triple("Pan", clip.pan ?: 0.5f, clip.panCurve)
             "tilt" -> Triple("Tilt", clip.tilt ?: 0.5f, clip.tiltCurve)
+            "hue" -> Triple("Hue shift", clip.hueShift, clip.hueCurve)
+            "rotation" -> Triple("Rotate", clip.rotation, clip.rotationCurve)
             else -> Triple("Brightness", clip.intensity, clip.intensityCurveOrRamp)
         }
         CurveDialog(label, start, curve, onDismiss = { editingCurve = null }) { c ->
@@ -1462,6 +1521,8 @@ private fun ClipInspector(
                     "size" -> clip.copy(sizeCurve = c)
                     "pan" -> clip.copy(panCurve = c)
                     "tilt" -> clip.copy(tiltCurve = c)
+                    "hue" -> clip.copy(hueCurve = c)
+                    "rotation" -> clip.copy(rotationCurve = c)
                     else -> clip.copy(intensityCurve = c, intensityEnd = null)
                 }
             )
@@ -1538,13 +1599,13 @@ private fun SetupCheckDialog(issues: List<com.wledcontroller.app.show.SetupIssue
 
 /** xLights' layer settings: turn, spin, zoom, mirror, recolour and sparkle the effect. */
 @Composable
-private fun LayerSettings(clip: Clip, onChange: (Clip) -> Unit) {
+private fun LayerSettings(clip: Clip, onChange: (Clip) -> Unit, onEditCurve: (String) -> Unit) {
     var open by remember { mutableStateOf(clip.hasLayerSettings) }
     SectionTitle("Layer settings") {
         TextButton(onClick = { open = !open }) { Text(if (open) "Hide" else if (clip.hasLayerSettings) "Show (in use)" else "Show") }
     }
     if (!open) return
-    GradientSlider(clip.rotation, { onChange(clip.copy(rotation = it)) }, label = "Rotate", valueText = "${(clip.rotation * 360).roundToInt()}°", height = 30.dp)
+    CurvedSlider("Rotate", clip.rotation, clip.rotationCurve, { onChange(clip.copy(rotation = it)) }) { onEditCurve("rotation") }
     // Spin: −4 … +4 turns over the effect.
     GradientSlider(
         (clip.spin + 4f) / 8f, { onChange(clip.copy(spin = ((it * 8f - 4f) * 4).roundToInt() / 4f)) },
@@ -1561,14 +1622,14 @@ private fun LayerSettings(clip: Clip, onChange: (Clip) -> Unit) {
     clip.zoomEnd?.let { end ->
         GradientSlider(zoomToSlider(end), { onChange(clip.copy(zoomEnd = sliderToZoom(it))) }, label = "Zoom at the end", valueText = "%.2f×".format(end), height = 30.dp)
     }
-    GradientSlider(clip.hueShift, { onChange(clip.copy(hueShift = it)) }, label = "Hue shift", valueText = "${(clip.hueShift * 360).roundToInt()}°", height = 30.dp)
+    CurvedSlider("Hue shift", clip.hueShift, clip.hueCurve, { onChange(clip.copy(hueShift = it)) }) { onEditCurve("hue") }
     GradientSlider(clip.sparkles, { onChange(clip.copy(sparkles = it)) }, label = "Sparkles", valueText = "${(clip.sparkles * 100).roundToInt()}%", height = 30.dp)
     GradientSlider(clip.blur, { onChange(clip.copy(blur = it)) }, label = "Blur", valueText = "${(clip.blur * 100).roundToInt()}%", height = 30.dp)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         FilterChip(selected = clip.mirrorX, onClick = { onChange(clip.copy(mirrorX = !clip.mirrorX)) }, label = { Text("Mirror ↔") })
         FilterChip(selected = clip.mirrorY, onClick = { onChange(clip.copy(mirrorY = !clip.mirrorY)) }, label = { Text("Flip ↕") })
         if (clip.hasLayerSettings) TextButton(onClick = {
-            onChange(clip.copy(rotation = 0f, spin = 0f, zoom = 1f, zoomEnd = null, hueShift = 0f, sparkles = 0f, mirrorX = false, mirrorY = false, blur = 0f))
+            onChange(clip.copy(rotation = 0f, spin = 0f, zoom = 1f, zoomEnd = null, hueShift = 0f, sparkles = 0f, mirrorX = false, mirrorY = false, blur = 0f, hueCurve = null, rotationCurve = null))
         }) { Text("Reset") }
     }
 }
@@ -1634,6 +1695,7 @@ internal fun MusicSheet(
     onDismiss: () -> Unit,
     onChange: (Sequence) -> Unit,
     onTapLyrics: (String) -> Unit = {},
+    position: Long = 0,
 ) {
     val container = LocalAppContainer.current
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1805,9 +1867,118 @@ internal fun MusicSheet(
 
             HorizontalDivider()
             LyricsSection(seq, selectedTrack, onChange, onTapLyrics = { onTapLyrics(it); onDismiss() })
+            HorizontalDivider()
+            TimingTracksSection(seq, position, onChange)
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+/**
+ * Named timing tracks, like xLights': mark the song's sections (or any labels) at the playhead.
+ * Effects snap to them and the State effect lights the parts their labels name.
+ */
+@Composable
+private fun TimingTracksSection(seq: Sequence, position: Long, onChange: (Sequence) -> Unit) {
+    var selectedId by remember(seq.id) { mutableStateOf(seq.timingTracks.firstOrNull()?.id) }
+    var naming by remember { mutableStateOf(false) }
+    var label by remember { mutableStateOf("") }
+    val selected = seq.timingTracks.firstOrNull { it.id == selectedId }
+    fun update(tt: com.wledcontroller.app.show.TimingTrack) { onChange(seq.copy(timingTracks = seq.timingTracks.map { if (it.id == tt.id) tt else it })) }
+
+    Text("Timing tracks", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    Text(
+        "Label stretches of the song — verse, chorus, bridge, or states like \"eyes\" for the State effect. Each label runs until the next. Effects snap to them.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        seq.timingTracks.forEach { tt -> FilterChip(selected = tt.id == selectedId, onClick = { selectedId = tt.id }, label = { Text(tt.name) }) }
+        AssistChip(onClick = { naming = true }, label = { Text("New track") }, leadingIcon = { Icon(Icons.Filled.Add, null, Modifier.size(16.dp)) })
+    }
+    if (selected != null) {
+        Text("At ${formatTime(position, true)}:", style = MaterialTheme.typography.labelMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("Intro", "Verse", "Chorus", "Bridge", "Solo", "Outro").forEach { l ->
+                SuggestionChip(onClick = { update(selected.withMark(position, l, seq.durationMs)) }, label = { Text(l) })
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(label, { label = it.take(40) }, singleLine = true, label = { Text("Other label") }, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            FilledTonalButton(enabled = label.isNotBlank(), onClick = { update(selected.withMark(position, label.trim(), seq.durationMs)); label = "" }) { Text("Mark") }
+        }
+        selected.marks.forEach { m ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${formatTime(m.startMs, true)}  ${m.label}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                IconButton(onClick = { update(selected.without(m.startMs, seq.durationMs)) }) { Icon(Icons.Filled.Close, "Remove", Modifier.size(18.dp)) }
+            }
+        }
+        TextButton(onClick = { onChange(seq.copy(timingTracks = seq.timingTracks.filterNot { it.id == selected.id })); selectedId = null }) {
+            Text("Delete \"${selected.name}\"")
+        }
+    }
+    if (naming) {
+        var name by remember { mutableStateOf(if (seq.timingTracks.isEmpty()) "Sections" else "Timing ${seq.timingTracks.size + 1}") }
+        AlertDialog(
+            onDismissRequest = { naming = false },
+            title = { Text("New timing track") },
+            text = { OutlinedTextField(name, { name = it.take(30) }, singleLine = true, label = { Text("Name") }) },
+            confirmButton = {
+                TextButton(enabled = name.isNotBlank(), onClick = {
+                    val tt = com.wledcontroller.app.show.TimingTrack(UUID.randomUUID().toString(), name.trim())
+                    onChange(seq.copy(timingTracks = seq.timingTracks + tt)); selectedId = tt.id; naming = false
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { naming = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Draw a path with a finger for the Sketch effect. */
+@Composable
+private fun SketchDialog(initial: List<MapPoint>, onDismiss: () -> Unit, onDone: (List<MapPoint>) -> Unit) {
+    val points = remember { mutableStateListOf<MapPoint>().apply { addAll(initial) } }
+    val ink = MaterialTheme.colorScheme.primary
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Draw the path") },
+        text = {
+            Column {
+                Text("Draw with one finger: the lights will trace it from where you start.", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                Canvas(
+                    Modifier.fillMaxWidth().aspectRatio(1.5f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF14161C))
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                points.clear()
+                                fun add(o: Offset) {
+                                    val p = MapPoint((o.x / size.width).coerceIn(0f, 1f), (o.y / size.height).coerceIn(0f, 1f))
+                                    val last = points.lastOrNull()
+                                    if (last == null || kotlin.math.hypot(p.x - last.x, p.y - last.y) > 0.01f) points.add(p)
+                                }
+                                add(down.position)
+                                while (true) {
+                                    val ev = awaitPointerEvent()
+                                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!ch.pressed) break
+                                    add(ch.position); ch.consume()
+                                    if (points.size > 240) break
+                                }
+                            }
+                        }
+                ) {
+                    for ((a, b) in points.zipWithNext()) {
+                        drawLine(ink, Offset(a.x * size.width, a.y * size.height), Offset(b.x * size.width, b.y * size.height), 4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    }
+                    points.firstOrNull()?.let { drawCircle(Color.White, 5.dp.toPx(), Offset(it.x * size.width, it.y * size.height)) }
+                }
+            }
+        },
+        confirmButton = { TextButton(enabled = points.size >= 2, onClick = { onDone(points.toList()) }) { Text("Done") } },
+        dismissButton = { TextButton(onClick = { points.clear() }) { Text("Clear") } },
+    )
 }
 
 /**

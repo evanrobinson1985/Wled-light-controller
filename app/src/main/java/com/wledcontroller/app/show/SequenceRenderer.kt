@@ -39,6 +39,8 @@ class TrackLayout(
     val aspect: Float = 1f,
     /** For singing faces: which part each LED is (see [PropModel.facePart]), or -1. */
     val part: IntArray = IntArray(0),
+    /** For the State effect: the (lower-case) names of the prop parts each LED is in. */
+    val states: Array<Set<String>> = emptyArray(),
 )
 
 object SequenceRenderer {
@@ -47,6 +49,12 @@ object SequenceRenderer {
         val leds = map.placedLeds()
         val runs = map.runs
         val runCounts = runs.map { it.count }
+        val partsOfRun = runs.map { r -> r.allSubmodels() }
+        /** The part names each LED in [idx] belongs to. */
+        fun statesOf(idx: IntArray): Array<Set<String>> = Array(idx.size) { i ->
+            val l = leds[idx[i]]
+            partsOfRun[l.runIndex].filter { it.contains(l.orderInRun) }.map { it.name.lowercase() }.toSet()
+        }
         val trackLayouts = tracks.map { track ->
             val sub = if (track.target.kind == TrackTarget.Kind.SUBMODEL) {
                 val runId = track.target.refId.substringBefore('/'); val name = track.target.refId.substringAfter('/')
@@ -99,6 +107,7 @@ object SequenceRenderer {
                     natural = Array(idx.size) { runs[leds[idx[it]].runIndex].prop.natural },
                     aspect = aspects.sorted().getOrElse(aspects.size / 2) { 1f },
                     part = IntArray(idx.size) { i -> val l = leds[idx[i]]; runs[l.runIndex].model?.facePart(l.orderInRun) ?: -1 },
+                    states = statesOf(idx),
                 )
             }
             TrackLayout(
@@ -119,6 +128,7 @@ object SequenceRenderer {
                     val l = leds[idx[i]]
                     runs[l.runIndex].model?.facePart(l.orderInRun) ?: -1
                 },
+                states = statesOf(idx),
             )
         }
         return PreparedLayout(leds, trackLayouts)
@@ -177,7 +187,14 @@ object SequenceRenderer {
             val t = local / 1000f
             // Layer settings: turned (and spinning), zoomed and mirrored.
             val layered = clip.hasLayerSettings
-            val angle = (clip.rotation + clip.spin * progress) * 2f * PI.toFloat()
+            val rotation = clip.rotationCurve?.at(clip.rotation, progress) ?: clip.rotation
+            val hue = clip.hueCurve?.at(clip.hueShift, progress) ?: clip.hueShift
+            val angle = (rotation + clip.spin * progress) * 2f * PI.toFloat()
+            // The State effect's label at this moment, from its timing track.
+            val stateLabels = if (clip.effect == SeqEffect.STATE) {
+                seq.timingTracks.firstOrNull { it.id == clip.timingTrackId }?.labelAt(timeMs)
+                    ?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet()
+            } else null
             val zoom = (clip.zoomEnd?.let { clip.zoom + (it - clip.zoom) * progress } ?: clip.zoom).coerceAtLeast(0.05f)
             val cosA = cos(angle); val sinA = sin(angle)
             val turned = angle != 0f || zoom != 1f
@@ -200,9 +217,15 @@ object SequenceRenderer {
                 val dir = if (clip.direction == Direction.AUTO) tl.natural[k] else clip.direction
                 val pos = position(dir, along, lx, ly)
                 val reveal = transition(clip, local, pos, lx, ly, li)
-                var color = if (reveal <= 0f) 0 else effectColor(clip, pos, lx, ly, t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 }, mouth, singing, spectrum)
+                var color = if (reveal <= 0f) 0 else if (stateLabels != null || clip.effect == SeqEffect.STATE) {
+                    // State: the parts named by the timing track's label light up.
+                    val mine = tl.states.getOrElse(k) { emptySet() }
+                    val labels = stateLabels ?: emptySet()
+                    val hit = labels.firstOrNull { it in mine || it == "all" }
+                    if (hit == null) 0 else clip.colors.ifEmpty { listOf(0xFFFFFF) }.let { cs -> cs[labels.indexOf(hit).coerceAtLeast(0) % cs.size] }
+                } else effectColor(clip, pos, lx, ly, t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 }, mouth, singing, spectrum)
                 if (layered && reveal > 0f) {
-                    if (clip.hueShift != 0f && color != 0) color = hueShift(color, clip.hueShift)
+                    if (hue != 0f && color != 0) color = hueShift(color, hue)
                     if (clip.sparkles > 0f && HouseRenderer.hash(li, sparkleStep) > 1f - clip.sparkles * 0.2f) color = 0xFFFFFF
                 }
                 val c = if (reveal <= 0f) 0 else HouseRenderer.scale(color, intensity * reveal)
@@ -596,6 +619,28 @@ object SequenceRenderer {
                     val b = (lx * s.size).toInt().coerceIn(0, s.lastIndex)
                     if (s[b] > 0.02f && ly <= s[b]) HouseRenderer.palette(cols, (b / s.size.toFloat()) * 0.999f) else 0
                 }
+            }
+            SeqEffect.STATE -> 0 // Drawn in render(), which knows the timing track.
+            SeqEffect.SKETCH -> {
+                // The drawn path appears along its length over the effect, then stays.
+                val path = c.sketch
+                if (path.size < 2) return 0
+                val px = lx * aspect; val py = 1f - ly
+                var total = 0f
+                val lens = FloatArray(path.size - 1) { i -> hypot((path[i + 1].x - path[i].x) * aspect, path[i + 1].y - path[i].y).also { total += it } }
+                val drawn = total * (progress * 1.25f).coerceAtMost(1f)
+                val thick = 0.02f + c.size * 0.06f
+                var acc = 0f; var best = 9f; var bestAt = 0f
+                for (i in lens.indices) {
+                    if (acc >= drawn) break
+                    val a = path[i]; val b = path[i + 1]
+                    val f = ((drawn - acc) / lens[i]).coerceAtMost(1f)
+                    val bx = a.x + (b.x - a.x) * f; val by = a.y + (b.y - a.y) * f
+                    val d = segDist(px, py, a.x * aspect, a.y, bx * aspect, by)
+                    if (d < best) { best = d; bestAt = (acc + lens[i] * 0.5f) / total.coerceAtLeast(1e-4f) }
+                    acc += lens[i]
+                }
+                if (best < thick) HouseRenderer.scale(HouseRenderer.palette(cols, bestAt * 0.999f), 1f - best / thick * 0.5f) else 0
             }
             SeqEffect.OFF -> 0
             SeqEffect.COLOR_WASH -> HouseRenderer.palette(cols, progress * (1f + floor(c.speed * 4f)) * 0.999f)

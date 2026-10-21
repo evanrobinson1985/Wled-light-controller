@@ -128,6 +128,8 @@ object EffectFit {
             SeqEffect.PIANO -> setOf(m, s)
             SeqEffect.VIDEO -> setOf(m, t)
             SeqEffect.MUSIC -> setOf(m, t, a)
+            SeqEffect.STATE -> setOf(m, a, p)
+            SeqEffect.SKETCH -> setOf(m)
         }
     }
 

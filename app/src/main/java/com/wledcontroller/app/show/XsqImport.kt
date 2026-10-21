@@ -21,6 +21,8 @@ data class XsqSequence(
     val elements: List<XsqElement>,
     /** A lyric timing track (phrases, words, phonemes), when the sequence has one. */
     val lyrics: Lyrics? = null,
+    /** Other timing tracks with labels (song sections, states …), by name. */
+    val timingTracks: List<Pair<String, List<TimedLabel>>> = emptyList(),
 )
 
 /**
@@ -62,6 +64,7 @@ object XsqImport {
         val marks = ArrayList<Long>()
         val elements = ArrayList<XsqElement>()
         var lyrics: Lyrics? = null
+        val named = ArrayList<Pair<String, List<TimedLabel>>>()
         fun labels(layer: Element?) = layer?.children("Effect")?.mapNotNull { e ->
             val s = e.getAttribute("startTime").toLongOrNull() ?: return@mapNotNull null
             val t = e.getAttribute("endTime").toLongOrNull() ?: return@mapNotNull null
@@ -77,6 +80,8 @@ object XsqImport {
                     if (lyrics == null && layers.size >= 2 && first.any { it.label.isNotBlank() }) {
                         lyrics = Lyrics(first.filter { it.label.isNotBlank() }, labels(layers[1]).filter { it.label.isNotBlank() },
                             labels(layers.getOrNull(2)).filter { Phoneme.parse(it.label) != null })
+                    } else if (first.any { it.label.isNotBlank() }) {
+                        named += name to first
                     } else if (marks.isEmpty()) first.forEach { marks += it.startMs }
                 }
                 "model" -> {
@@ -91,7 +96,7 @@ object XsqImport {
             }
         }
         val end = maxOf(durationMs, elements.flatMap { e -> e.layers.flatten() }.maxOfOrNull { it.endMs } ?: 0L)
-        return XsqSequence(end, media, marks.sorted(), elements, lyrics)
+        return XsqSequence(end, media, marks.sorted(), elements, lyrics, named)
     }
 
     /** "A=1,B=x,y" style settings (values may contain commas only inside other fields' text). */
@@ -166,6 +171,8 @@ object XsqImport {
         "faces" -> SeqEffect.SING
         "pictures" -> SeqEffect.PICTURE
         "video" -> SeqEffect.VIDEO
+        "state" -> SeqEffect.STATE
+        "sketch" -> SeqEffect.SKETCH
         "rainbow" -> SeqEffect.RAINBOW
         "pulse" -> SeqEffect.PULSE
         else -> null
@@ -197,6 +204,7 @@ object XsqImport {
     fun toSequence(xsq: XsqSequence, name: String, targets: Map<String, TrackTarget?>): Pair<Sequence, Int> {
         var skipped = 0
         val tracks = ArrayList<Track>()
+        val timing = xsq.timingTracks.map { (n, l) -> TimingTrack(UUID.randomUUID().toString(), n, l.sortedBy { it.startMs }) }
         for (el in xsq.elements) {
             val target = targets[el.label] ?: continue
             el.layers.forEachIndexed { li, layer ->
@@ -217,6 +225,7 @@ object XsqImport {
                         inTransition = transitionFor(s["T_CHOICE_In_Transition_Type"]),
                         outTransition = transitionFor(s["T_CHOICE_Out_Transition_Type"]),
                         text = s.entries.firstOrNull { it.key.startsWith("E_TEXTCTRL_Text") && it.key != "E_TEXTCTRL_Text_Font" }?.value,
+                        timingTrackId = s["E_CHOICE_State_TimingTrack"]?.let { n -> timing.firstOrNull { it.name == n }?.id },
                     )
                 }
                 if (clips.isEmpty()) return@forEachIndexed
@@ -238,6 +247,7 @@ object XsqImport {
             marks = xsq.marks,
             audioTitle = xsq.mediaFile,
             lyrics = xsq.lyrics,
+            timingTracks = timing,
         )
         return seq to skipped
     }

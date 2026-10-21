@@ -75,6 +75,8 @@ enum class SeqEffect(val label: String) {
     PIANO("Piano (music)"),
     VIDEO("Video"),
     MUSIC("Music (spectrum)"),
+    STATE("State"),
+    SKETCH("Sketch"),
     ;
 
     /** Effects that follow the song's loudness (need a song on the show). */
@@ -201,11 +203,18 @@ data class Clip(
     val mirrorY: Boolean = false,
     /** 0..1: softens the effect along the lights. */
     val blur: Float = 0f,
+    /** Curves for the hue shift and rotation over the effect. */
+    val hueCurve: ValueCurve? = null,
+    val rotationCurve: ValueCurve? = null,
+    /** For the State effect: the timing track whose labels pick which part of the prop lights. */
+    val timingTrackId: String? = null,
+    /** For the Sketch effect: the drawn path, points 0..1 across and up the lights' area. */
+    val sketch: List<com.wledcontroller.app.house.MapPoint> = emptyList(),
     /** When set, the colours change to these over the effect (xLights' colour curves). */
     val colorsEnd: List<Int>? = null,
 ) {
     /** Whether any layer setting changes the effect. */
-    val hasLayerSettings get() = rotation != 0f || spin != 0f || zoom != 1f || zoomEnd != null || hueShift != 0f || sparkles > 0f || mirrorX || mirrorY || blur > 0f
+    val hasLayerSettings get() = rotation != 0f || spin != 0f || zoom != 1f || zoomEnd != null || hueShift != 0f || sparkles > 0f || mirrorX || mirrorY || blur > 0f || hueCurve != null || rotationCurve != null
 
     val speedCurveOrRamp get() = speedCurve ?: speedEnd?.let { ValueCurve(CurveShape.RAMP, it) }
     val intensityCurveOrRamp get() = intensityCurve ?: intensityEnd?.let { ValueCurve(CurveShape.RAMP, it) }
@@ -250,11 +259,30 @@ data class Sequence(
     val bpm: Float? = null,
     /** The song's words, timed: singing faces follow them. */
     val lyrics: Lyrics? = null,
+    /** Named timing tracks (verse, chorus …), like xLights': effects snap to them, State effects follow their labels. */
+    val timingTracks: List<TimingTrack> = emptyList(),
     /** For shows imported from xLights: the .fseq file, played instead of [tracks]. */
     val fseqFile: String? = null,
     /** Where each controller's LEDs are in the .fseq channel data. */
     val fseqMap: List<FseqMapping> = emptyList(),
 )
+
+/** A named row of labelled times, e.g. the song's sections. */
+@Serializable
+data class TimingTrack(val id: String, val name: String, val marks: List<TimedLabel> = emptyList()) {
+    /** The label showing at [ms], if any. */
+    fun labelAt(ms: Long): String? = marks.lastOrNull { ms >= it.startMs && ms < it.endMs }?.label
+
+    /** With a new mark at [ms] labelled [label]; each mark runs until the next one (the last to [endMs]). */
+    fun withMark(ms: Long, label: String, endMs: Long): TimingTrack = copy(marks = respace(marks.filterNot { it.startMs == ms } + TimedLabel(ms, ms + 1, label), endMs))
+
+    fun without(ms: Long, endMs: Long): TimingTrack = copy(marks = respace(marks.filterNot { it.startMs == ms }, endMs))
+
+    private fun respace(list: List<TimedLabel>, endMs: Long): List<TimedLabel> {
+        val sorted = list.sortedBy { it.startMs }
+        return sorted.mapIndexed { i, m -> m.copy(endMs = (sorted.getOrNull(i + 1)?.startMs ?: endMs).coerceAtLeast(m.startMs + 1)) }
+    }
+}
 
 /** A controller's place in an xLights sequence: its first channel (1-based, as xLights shows it) and LED count. */
 @Serializable
