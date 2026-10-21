@@ -474,6 +474,20 @@ fun SimulatorScreen(
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+            // An older virtual house: offer the newer demo.
+            val outdated by sim.demoOutdated.collectAsStateWithLifecycle()
+            if (active && outdated) {
+                Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("The demo house has been updated", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "New: ${com.wledcontroller.app.sim.DemoSetup.WHATS_NEW}. Rebuild to get them; anything you've added or changed in the simulator is replaced. Your real lights aren't affected.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(onClick = { run("Rebuilding the demo…") { sim.reset() } }, enabled = busy == null) { Text("Rebuild the virtual house") }
+                    }
+                }
+            }
             if (!active) Intro(enabled = busy == null, onStart = { run("Building the virtual house…") { sim.enter() } })
             else ActiveSimulator(
                 onOpenDevice = onOpenDevice, onOpenGroup = onOpenGroup, onOpenHouse = onOpenHouse, onOpenShows = onOpenShows,

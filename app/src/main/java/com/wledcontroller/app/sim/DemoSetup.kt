@@ -53,6 +53,10 @@ import kotlin.random.Random
  * a demo show, a playlist and a schedule.
  */
 object DemoSetup {
+    /** Goes up whenever the demo house gains something, so older virtual houses can offer a rebuild. */
+    const val VERSION = 2
+    /** What's new in [VERSION], for the rebuild offer. */
+    const val WHATS_NEW = "a garage with a pixel-matrix door, a matching roofline, icicles on both eaves, and six DMX spotlights on the roofs, all to a true scale"
 
     private const val W = 1600
     private const val H = 1000
@@ -274,6 +278,10 @@ object DemoSetup {
         fun prop(id: String) = TrackTarget(TrackTarget.Kind.PROP, id)
         fun group(id: String) = TrackTarget(TrackTarget.Kind.GROUP, id)
         val tracks = listOf(
+            // The spotlights: sweeping the sky, changing colour, flashing and fanning up at the end.
+            // The garage pair mirrors the house four. First in the list, so they're easy to find.
+            Track("demo-t8", "House spotlights", group("grp-house-spots"), spotClips(::clip, mirrored = false)),
+            Track("demo-t9", "Garage spotlights", group("grp-garage-spots"), spotClips(::clip, mirrored = true)),
             Track("demo-t1", "Whole house", house, listOf(
                 clip(0, 3000, SeqEffect.WIPE, c(0xFF0000, 0x00C000)),
                 clip(3000, 8000, SeqEffect.CHASE, c(0xFF0000, 0xFFFFFF), speed = 0.4f),
@@ -300,10 +308,6 @@ object DemoSetup {
                 clip(11000, 13000, SeqEffect.SHIMMER, c(0x10C020, 0x40FF60)),
                 clip(32000, 8000, SeqEffect.SNOW, c(0xFFFFFF)),
             )),
-            // The spotlights: sweeping the sky, changing colour, flashing and fanning up at the end.
-            // The garage pair mirrors the house four.
-            Track("demo-t8", "House spotlights", group("grp-house-spots"), spotClips(::clip, mirrored = false)),
-            Track("demo-t9", "Garage spotlights", group("grp-garage-spots"), spotClips(::clip, mirrored = true)),
             Track("demo-t7", "Garage door", prop("run-garage"), listOf(
                 clip(11000, 13000, SeqEffect.TEXT, c(0xFF2020, 0x20C040), speed = 0.45f).copy(text = "Merry Christmas!"),
                 clip(32000, 8000, SeqEffect.PLASMA, c(0xFF1010, 0x10C020, 0xFFB040), speed = 0.5f),

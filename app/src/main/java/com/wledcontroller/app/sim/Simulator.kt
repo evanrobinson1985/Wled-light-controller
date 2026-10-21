@@ -84,6 +84,7 @@ class Simulator(
         }
         SimHub.load(simFile)
         _active.value = true
+        checkDemo()
         reconnectAll()
     }
 
@@ -100,6 +101,7 @@ class Simulator(
             flag.delete()
         }
         _active.value = false
+        checkDemo()
         reconnectAll()
         if (store.scheduleOn.first()) ShowRunnerService.startSchedule(context)
     }
@@ -111,12 +113,29 @@ class Simulator(
         SimHub.unload()
         withContext(Dispatchers.IO) { freshDemo() }
         SimHub.load(simFile)
+        checkDemo()
         reconnectAll()
     }
 
     private suspend fun freshDemo() {
         backup.clearAll()
         DemoSetup.build(store, house, sequences, simFile)
+        demoVersionFile.writeText(DemoSetup.VERSION.toString())
+    }
+
+    /** Which demo the virtual house was built from (kept with it, in the simulator's folder). */
+    private val demoVersionFile get() = File(simFile.parentFile, "demo_version")
+
+    private val _demoOutdated = MutableStateFlow(false)
+    /** True when the virtual house was built from an older demo, so it's missing newer things. */
+    val demoOutdated: StateFlow<Boolean> = _demoOutdated.asStateFlow()
+
+    // After the flag above exists (properties start up in order).
+    init { checkDemo() }
+
+    private fun checkDemo() {
+        val built = runCatching { demoVersionFile.readText().trim().toInt() }.getOrDefault(1)
+        _demoOutdated.value = _active.value && built < DemoSetup.VERSION
     }
 
     /** Adds a simulated controller with [leds] LEDs. Returns its id in the app. */
