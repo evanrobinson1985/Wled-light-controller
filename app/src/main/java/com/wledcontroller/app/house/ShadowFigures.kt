@@ -19,6 +19,8 @@ enum class Figure(val move: Move, val noun: String, val plural: String) {
     HEART(Move.RISE, "heart", "hearts"),
     SHAMROCK(Move.DRIFT, "shamrock", "shamrocks"),
     EAGLE(Move.FLY, "eagle", "eagles"),
+    SKULL(Move.FLOAT, "skull", "skulls"),
+    PUMPKIN(Move.HOP, "pumpkin", "pumpkins"),
 }
 
 enum class Move { FLOAT, WALK, HOP, CRAWL, FLY, RISE, DRIFT }
@@ -65,8 +67,8 @@ internal object ShadowFigures {
             if (!fig.near(u, v)) continue
             s.at(u, v)
             draw(fig, s, tt + k * 1.7f, k)
-            shade = maxOf(shade, s.dark)
-            glow = maxOf(glow, s.glow)
+            shade = maxOf(shade, s.shadow)
+            glow = maxOf(glow, s.lit)
         }
         val dark = HouseRenderer.scale(lit, 1f - shade * 0.96f)
         return if (glow > 0f) HouseRenderer.maxRgb(dark, HouseRenderer.scale(c.getOrElse(1) { c[0] }, 0.6f * glow)) else dark
@@ -142,6 +144,8 @@ internal object ShadowFigures {
         Figure.HEART -> heart(s, t)
         Figure.SHAMROCK -> shamrock(s)
         Figure.EAGLE -> eagle(s, t)
+        Figure.SKULL -> skull(s, t, k)
+        Figure.PUMPKIN -> pumpkin(s, t, k)
     }
 
     private fun ghost(s: Shape, t: Float) {
@@ -292,37 +296,86 @@ internal object ShadowFigures {
         s.glowCircle(0.21f, 0.41f, 0.02f)
     }
 
+    private fun skull(s: Shape, t: Float, k: Int) {
+        // The jaw chatters now and then.
+        val chatter = 0.05f * maxOf(0f, sin(t * 11f)) * if (sin(t * 0.9f + k) > 0.2f) 1f else 0f
+        s.circle(0f, 0.4f, 0.42f)                                   // cranium
+        s.seg(-0.14f, 0.72f, 0.14f, 0.72f, 0.17f)                   // cheekbones and upper teeth
+        s.seg(-0.1f, 0.93f + chatter, 0.1f, 0.93f + chatter, 0.12f) // jaw
+        // Holes the lit house shows through: eye sockets, nose, the gaps between the teeth.
+        s.cutCircle(-0.18f, 0.47f, 0.13f); s.cutCircle(0.18f, 0.47f, 0.13f)
+        s.cutTri(-0.07f, 0.72f, 0.07f, 0.72f, 0f, 0.58f)
+        if (chatter > 0.005f) s.cutSeg(-0.22f, 0.87f + chatter / 2, 0.22f, 0.87f + chatter / 2, chatter * 0.45f)
+        for (i in -2..2) s.cutSeg(i * 0.07f, 0.82f, i * 0.07f, 0.9f + chatter, 0.012f)
+        // A cold glint deep in each eye.
+        s.glowCircle(-0.18f, 0.49f, 0.04f); s.glowCircle(0.18f, 0.49f, 0.04f)
+    }
+
+    private fun pumpkin(s: Shape, t: Float, k: Int) {
+        s.circle(-0.24f, 0.56f, 0.3f); s.circle(0.24f, 0.56f, 0.3f) // the ribbed sides
+        s.circle(0f, 0.54f, 0.37f)
+        s.seg(0f, 0.22f, 0.07f, 0.04f, 0.05f)                      // stem
+        s.seg(0.07f, 0.06f, 0.2f, 0.02f, 0.02f)                    // curly vine
+        // The carved face glows like a candle inside: angry eyes, a nose and a jagged grin.
+        val flicker = 0.7f + 0.3f * sin(t * 13f + k) * sin(t * 7.3f + k * 2f)
+        s.glowTri(-0.36f, 0.38f, -0.07f, 0.5f, -0.3f, 0.56f, flicker)
+        s.glowTri(0.36f, 0.38f, 0.07f, 0.5f, 0.3f, 0.56f, flicker)
+        s.glowTri(-0.06f, 0.66f, 0.06f, 0.66f, 0f, 0.56f, flicker)
+        s.glowTri(-0.4f, 0.66f, 0.4f, 0.66f, 0f, 0.9f, flicker)
+        s.glowTri(-0.4f, 0.66f, -0.18f, 0.72f, -0.3f, 0.82f, flicker)
+        s.glowTri(0.4f, 0.66f, 0.18f, 0.72f, 0.3f, 0.82f, flicker)
+        // Fangs left in the grin.
+        s.blockTri(-0.17f, 0.65f, -0.05f, 0.65f, -0.11f, 0.77f)
+        s.blockTri(0.05f, 0.65f, 0.17f, 0.65f, 0.11f, 0.77f)
+        s.blockTri(-0.08f, 0.9f, 0.08f, 0.9f, 0f, 0.8f)
+    }
+
     /** Accumulates how much a point is in shadow (and in a glowing eye) as shapes are added. */
     private class Shape {
         var u = 0f; var v = 0f
         var dark = 0f; var glow = 0f
+        /** Holes in the shadow (lit house shows through) and parts of the glow covered over. */
+        private var cut = 0f; private var block = 0f
+        val shadow get() = dark * (1f - cut)
+        val lit get() = glow * (1f - block)
         /** Edges fade over this distance, so shapes look smooth on sparse lights. */
         private val soft = 0.05f
 
-        fun at(u: Float, v: Float) { this.u = u; this.v = v; dark = 0f; glow = 0f }
+        fun at(u: Float, v: Float) { this.u = u; this.v = v; dark = 0f; glow = 0f; cut = 0f; block = 0f }
         fun coverage(inside: Float) = (inside / soft + 0.5f).coerceIn(0f, 1f)
 
         fun circle(cx: Float, cy: Float, r: Float) { dark = maxOf(dark, coverage(r - hypot(u - cx, v - cy))) }
         fun glowCircle(cx: Float, cy: Float, r: Float) { glow = maxOf(glow, coverage(r - hypot(u - cx, v - cy))) }
+        fun cutCircle(cx: Float, cy: Float, r: Float) { cut = maxOf(cut, coverage(r - hypot(u - cx, v - cy))) }
 
         /** A thick line from (ax, ay) to (bx, by). */
-        fun seg(ax: Float, ay: Float, bx: Float, by: Float, thick: Float) {
+        fun seg(ax: Float, ay: Float, bx: Float, by: Float, thick: Float) { dark = maxOf(dark, segIn(ax, ay, bx, by, thick)) }
+        fun cutSeg(ax: Float, ay: Float, bx: Float, by: Float, thick: Float) { cut = maxOf(cut, segIn(ax, ay, bx, by, thick)) }
+
+        private fun segIn(ax: Float, ay: Float, bx: Float, by: Float, thick: Float): Float {
             val dx = bx - ax; val dy = by - ay
             val len2 = dx * dx + dy * dy
             val k = if (len2 <= 0f) 0f else (((u - ax) * dx + (v - ay) * dy) / len2).coerceIn(0f, 1f)
-            dark = maxOf(dark, coverage(thick - hypot(u - (ax + k * dx), v - (ay + k * dy))))
+            return coverage(thick - hypot(u - (ax + k * dx), v - (ay + k * dy)))
         }
 
-        fun tri(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float) {
+        fun tri(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float) { dark = maxOf(dark, triIn(ax, ay, bx, by, cx, cy)) }
+        fun cutTri(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float) { cut = maxOf(cut, triIn(ax, ay, bx, by, cx, cy)) }
+        fun glowTri(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float, level: Float = 1f) {
+            glow = maxOf(glow, triIn(ax, ay, bx, by, cx, cy) * level)
+        }
+        fun blockTri(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float) { block = maxOf(block, triIn(ax, ay, bx, by, cx, cy)) }
+
+        private fun triIn(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float): Float {
             // Distance inside the nearest edge (positive inside), whichever way round the corners go.
             val area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
-            if (area == 0f) return
+            if (area == 0f) return 0f
             val sgn = if (area > 0f) 1f else -1f
             fun edge(px: Float, py: Float, qx: Float, qy: Float): Float {
                 val len = sqrt((qx - px) * (qx - px) + (qy - py) * (qy - py)).coerceAtLeast(1e-5f)
                 return sgn * ((qx - px) * (v - py) - (qy - py) * (u - px)) / len
             }
-            dark = maxOf(dark, coverage(minOf(edge(ax, ay, bx, by), edge(bx, by, cx, cy), edge(cx, cy, ax, ay))))
+            return coverage(minOf(edge(ax, ay, bx, by), edge(bx, by, cx, cy), edge(cx, cy, ax, ay)))
         }
     }
 }

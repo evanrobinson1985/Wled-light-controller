@@ -49,4 +49,22 @@ class GhostsTest {
             assertTrue("${fx.label} moves", a != b)
         }
     }
+
+    @Test
+    fun jackOLanternFacesGlow() {
+        // Lit white-to-red; a carved face shows as dim red inside the dark pumpkin (lit red is full brightness).
+        fun glowing(fx: HouseEffect) = listOf(2f, 5f, 11f, 17f).sumOf { t ->
+            val p = HouseEffectParams(effect = fx, colors = listOf(0xFFFFFF, 0xFF0000), count = 3, size = 0.8f, brightness = 1f)
+            var n = 0
+            for (i in 0 until 80) for (j in 0 until 50) {
+                val c = HouseRenderer.color(p, i / 79f, j / 49f, t, i * 50 + j, i)
+                val r = (c shr 16) and 0xFF; val g = (c shr 8) and 0xFF
+                if (r in 60..200 && g < 20) n++
+            }
+            n
+        }
+        val pumpkins = glowing(HouseEffect.PUMPKINS)
+        assertTrue("pumpkin faces glow: $pumpkins", pumpkins > 20)
+        assertTrue("far more than a ghost's eyes", pumpkins > glowing(HouseEffect.GHOSTS) * 2)
+    }
 }
