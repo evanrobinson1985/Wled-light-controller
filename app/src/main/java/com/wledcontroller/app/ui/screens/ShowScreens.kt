@@ -446,6 +446,10 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
     val pos by player.position.collectAsStateWithLifecycle()
     val playing by player.playing.collectAsStateWithLifecycle()
     val live by player.live.collectAsStateWithLifecycle()
+    // In the simulator the "lights" are virtual, so the show goes to them from the start: pressing
+    // Play moves the spotlights and lights the house rather than only previewing here.
+    val simActive by LocalAppContainer.current.simulator.active.collectAsStateWithLifecycle()
+    LaunchedEffect(simActive) { if (simActive && !player.live.value) player.setLive(true) }
     val view = LocalView.current
     DisposableEffect(live, playing) {
         view.keepScreenOn = live || playing
