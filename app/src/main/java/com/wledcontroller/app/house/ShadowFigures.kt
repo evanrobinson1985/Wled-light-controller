@@ -35,8 +35,15 @@ internal object ShadowFigures {
     /** Width / height of a typical house photo, so figures aren't squashed. */
     private const val ASPECT = 1.5f
     private const val MAX_FIGURES = 8
-    /** How far down a hopping figure's feet (or a pumpkin's base) are, in its own units. */
-    private const val FOOT = 0.95f
+
+    /** How far down a figure's feet (or a pumpkin's base) are, in its own units. */
+    private val Figure.foot get() = when (this) {
+        Figure.CLOWN -> 1.5f
+        Figure.TURKEY -> 1.04f
+        Figure.BUNNY -> 0.99f
+        Figure.PUMPKIN -> 0.92f
+        else -> 1f
+    }
 
     /** Where one figure is: its origin on the house, whether it faces left, and its turn (radians). */
     private class Pose(val gx: Float, val gy: Float, val flip: Boolean, val rot: Float = 0f, val dangle: Boolean = false)
@@ -51,7 +58,7 @@ internal object ShadowFigures {
         var glow = 0f
         for (k in 0 until p.count.coerceIn(1, MAX_FIGURES)) {
             val fig = figures[k % figures.size]
-            val pose = pose(fig.move, k, t, speed, w)
+            val pose = pose(fig.move, k, t, speed, w, fig.foot)
             var u = (x - pose.gx) / w
             var v = (y - pose.gy) / (w * ASPECT)
             // A spider hanging on its thread: the thread runs up from it to the top of the house.
@@ -91,8 +98,12 @@ internal object ShadowFigures {
         return (if (left) 1f - x else x) to left
     }
 
-    private fun pose(move: Move, k: Int, t: Float, speed: Float, w: Float): Pose {
+    private fun pose(move: Move, k: Int, t: Float, speed: Float, w: Float, foot: Float): Pose {
         fun h(salt: Int) = HouseRenderer.hash(k, salt)
+        // Walkers and hoppers each go along a line of their own: the first along the bottom of
+        // the house, the others higher up, so together they cover the display top to bottom.
+        val ground = 0.98f - (k % 3) * 0.26f - 0.03f * h(7)
+        val standing = ground - foot * w * ASPECT
         return when (move) {
             Move.FLOAT -> {
                 val gx = 0.5f + 0.45f * sin(t * speed * (0.22f + h(1) * 0.18f) + h(2) * 6.283f)
@@ -102,15 +113,12 @@ internal object ShadowFigures {
             Move.WALK -> {
                 val (gx, left) = cross(k, t, speed * 0.05f)
                 val bounce = abs(sin(t * (1.5f + speed * 2f) + k)) * 0.05f
-                Pose(gx, 0.3f + 0.25f * h(7) - bounce, left)
+                Pose(gx, standing - bounce, left)
             }
             Move.HOP -> {
-                // Landing on a line across the house: the first along the bottom, the others
-                // higher up, so they cover the whole display from top to bottom.
                 val (gx, left) = cross(k, t, speed * 0.06f)
                 val f = HouseRenderer.frac(t * (0.4f + speed * 0.6f) + h(9))
-                val ground = 0.98f - (k % 3) * 0.26f - 0.03f * h(7)
-                Pose(gx, ground - FOOT * w * ASPECT - sin(f * PI.toFloat()) * 0.12f, left)
+                Pose(gx, standing - sin(f * PI.toFloat()) * 0.12f, left)
             }
             Move.CRAWL -> if (k % 2 == 0) {
                 // Crawling across, head first.

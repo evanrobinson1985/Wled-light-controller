@@ -80,9 +80,9 @@ class GhostsTest {
     }
 
     @Test
-    fun hoppersCoverTheWholeHeight() {
-        // Pumpkins and bunnies land in lanes from the bottom of the house up, not just the top half.
-        for (fx in listOf(HouseEffect.PUMPKINS, HouseEffect.BUNNIES)) {
+    fun walkersAndHoppersCoverTheWholeHeight() {
+        // Pumpkins, bunnies, clowns and turkeys go along lines from the bottom of the house up, not just the top half.
+        for (fx in listOf(HouseEffect.PUMPKINS, HouseEffect.BUNNIES, HouseEffect.CLOWNS, HouseEffect.TURKEYS)) {
             val p = HouseEffectParams(effect = fx, colors = listOf(0xFFFFFF), count = 3, size = 0.5f, speed = 0.5f, brightness = 1f)
             var low = 0; var high = 0
             for (t in listOf(2f, 5f, 9f, 14f, 20f, 27f)) for (i in 0 until 80) for (j in 0 until 50) {
