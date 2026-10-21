@@ -48,6 +48,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileOpen
@@ -425,6 +426,10 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
     var layoutPending by remember { mutableStateOf<com.wledcontroller.app.house.XlLayout?>(null) }
     var importNote by remember { mutableStateOf<String?>(null) }
     var browsingVendors by remember { mutableStateOf(false) }
+    // Saved layouts and light models.
+    var libraryMenu by remember { mutableStateOf(false) }
+    var showLayouts by remember { mutableStateOf(false) }
+    var showModels by remember { mutableStateOf(false) }
     // A DMX fixture model picked here: set it up, then put it on the map.
     var newFixture by remember { mutableStateOf<com.wledcontroller.app.data.DmxFixture?>(null) }
     val outputs by container.store.outputs.collectAsStateWithLifecycle(emptyList())
@@ -492,6 +497,25 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
         }
     }
 
+    /** A saved model onto the house: like an imported prop, it opens to choose where it goes. */
+    fun useModel(m: com.wledcontroller.app.data.SavedModel) {
+        importError = null
+        if (simActive) {
+            scope.launch {
+                runCatching { container.simulator.addProp(m.toXlModel()) }
+                    .onSuccess { r ->
+                        if (m.mirrored || m.upsideDown) saveRun(r.copy(mirrored = m.mirrored, upsideDown = m.upsideDown)).join()
+                        startTracing(r.id)
+                    }
+                    .onFailure { importError = it.message ?: "Couldn't add that model." }
+            }
+            return
+        }
+        val target = targets.firstOrNull { it.kind?.startsWith("DMX") != true }
+        val usedEnd = map.runs.filter { it.deviceId == target?.id }.maxOfOrNull { it.endLed } ?: 0
+        editRun = m.toRun(UUID.randomUUID().toString(), target?.id ?: "", usedEnd)
+    }
+
     val drawingRun = map.runs.firstOrNull { it.id == drawingRunId }
     val editingRun = map.runs.firstOrNull { it.id == editingRunId }
 
@@ -544,6 +568,19 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                                 DropdownMenuItem(
                                     text = { Column { Text("Prop or fixture model file"); Text(".xmodel from xLights or a prop maker", style = MaterialTheme.typography.labelSmall) } },
                                     onClick = { importMenu = false; xmodelPicker.launch(arrayOf("*/*")) },
+                                )
+                            }
+                        }
+                        Box {
+                            IconButton(onClick = { libraryMenu = true }) { Icon(Icons.Filled.Bookmarks, "Saved layouts and models") }
+                            DropdownMenu(expanded = libraryMenu, onDismissRequest = { libraryMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Column { Text("House layouts"); Text("Save this map, or open a saved one", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = { libraryMenu = false; showLayouts = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Column { Text("My light models"); Text("Props you've kept, to add again", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = { libraryMenu = false; showModels = true },
                                 )
                             }
                         }
@@ -837,6 +874,17 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                                     Icon(Icons.Filled.ContentCopy, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Mirrored copy")
                                 }
                             }
+                            TextButton(enabled = run.placedCount > 0, onClick = {
+                                scope.launch {
+                                    val m = com.wledcontroller.app.data.SavedModel.fromRun(run, map)
+                                    if (m == null) importNote = "Place ${run.name} on the photo first, so it has a shape to keep."
+                                    else runCatching { container.library.saveModel(m) }
+                                        .onSuccess { importNote = "Saved ${it.name} to My light models (the bookmark button at the top)." }
+                                        .onFailure { importError = "Couldn't save the model: ${it.message}" }
+                                }
+                            }) {
+                                Icon(Icons.Filled.Bookmarks, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Save as model")
+                            }
                             TextButton(enabled = device != null, onClick = { device?.let { container.house.identify(run, it.address) } }) {
                                 Icon(Icons.Outlined.Lightbulb, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Identify")
                             }
@@ -891,6 +939,17 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
             editRun = null
             if (isNew) startTracing(updated.id)
         }
+    }
+    if (showLayouts) LayoutsDialog(map, onDismiss = { showLayouts = false }) { opened ->
+        showLayouts = false
+        scope.launch { container.store.updateHouseMap { opened } }
+        val known = targets.map { it.id }.toSet()
+        val missing = opened.runs.count { it.deviceId !in known }
+        importNote = "Opened the layout." + if (missing > 0) " $missing runs are on controllers this phone doesn't have — edit them to choose one." else ""
+    }
+    if (showModels) ModelsDialog(onDismiss = { showModels = false }) { m ->
+        showModels = false
+        useModel(m)
     }
     if (browsingVendors) VendorBrowser(dmx = false, onDismiss = { browsingVendors = false }) { xml, m ->
         browsingVendors = false

@@ -1,6 +1,7 @@
 package com.wledcontroller.app
 
 import android.os.Bundle
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -179,5 +180,8 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         container.devices.setForeground(false)
+        // Leaving the app: refresh the copy in Downloads if anything changed.
+        val c = container
+        c.scope.launch { runCatching { c.autoBackup.saveIfChanged(simulatorOn = c.simulator.active.value) } }
     }
 }

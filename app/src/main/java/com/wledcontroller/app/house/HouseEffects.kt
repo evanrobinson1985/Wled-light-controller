@@ -42,6 +42,7 @@ enum class HouseEffect(val label: String, val holiday: String? = null, val figur
     val plural get() = figures.singleOrNull()?.plural ?: "figures"
 }
 
+@kotlinx.serialization.Serializable
 data class HouseEffectParams(
     val effect: HouseEffect = HouseEffect.WAVE,
     /** Three ARGB colours the effects draw from. */

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's own backup to the Google account (put back automatically on reinstall). It stops
+     working above 25 MB, so songs and imported sequences stay out: they're in the app's own
+     backup file and the copy in Downloads instead. -->
+<full-backup-content>
+    <exclude domain="file" path="audio" />
+    <exclude domain="file" path="fseq" />
+    <exclude domain="file" path="devcache" />
+    <exclude domain="file" path="sim_virtual_house.zip" />
+</full-backup-content>

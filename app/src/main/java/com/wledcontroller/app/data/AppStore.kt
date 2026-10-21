@@ -65,6 +65,7 @@ class AppStore(private val context: Context) {
         val MQTT = stringPreferencesKey("mqtt")
         val EFFECT_SETTINGS = stringPreferencesKey("effect_settings")
         val KEEP_STARTUP = androidx.datastore.preferences.core.booleanPreferencesKey("keep_startup_look")
+        val HOUSE_EFFECT = stringPreferencesKey("house_effect")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -204,6 +205,14 @@ class AppStore(private val context: Context) {
             val cur = prefs[Keys.EFFECT_SETTINGS]?.let { runCatching { json.decodeFromString<Map<String, Map<String, Int>>>(it) }.getOrNull() } ?: emptyMap()
             prefs[Keys.EFFECT_SETTINGS] = json.encodeToString(cur + (EffectMemory.key(deviceId, fx) to values))
         }
+    }
+
+    /** The whole-house effect and its colours and sliders, as last set. */
+    val houseEffect: Flow<com.wledcontroller.app.house.HouseEffectParams?> = context.dataStore.data.map { prefs ->
+        prefs[Keys.HOUSE_EFFECT]?.let { runCatching { json.decodeFromString<com.wledcontroller.app.house.HouseEffectParams>(it) }.getOrNull() }
+    }
+    suspend fun setHouseEffect(p: com.wledcontroller.app.house.HouseEffectParams) {
+        context.dataStore.edit { it[Keys.HOUSE_EFFECT] = mqttJson.encodeToString(p) }
     }
 
     /** Whether controllers start up with whatever was last chosen in the app. */

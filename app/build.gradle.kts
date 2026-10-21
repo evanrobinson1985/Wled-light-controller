@@ -13,8 +13,11 @@ android {
         applicationId = "com.wledcontroller.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // Each CI build numbers itself, so every new APK installs as an update over the last
+        // (keeping all the app's data) and Settings shows which build is installed.
+        val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = build
+        versionName = "1.0.$build"
     }
 
     // A fixed key committed to the repo so every CI build can be installed over the previous one.

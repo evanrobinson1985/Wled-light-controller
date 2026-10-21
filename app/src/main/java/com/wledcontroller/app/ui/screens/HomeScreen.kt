@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Lightbulb
@@ -130,7 +131,7 @@ fun HomeScreen(
         },
     ) { padding ->
         if (controllers.isEmpty()) {
-            EmptyHome(Modifier.padding(padding), onAdd = { showAdd = true }, onTrySimulator = onOpenSimulator)
+            EmptyHome(Modifier.padding(padding), onAdd = { showAdd = true }, onTrySimulator = onOpenSimulator, onRestore = onOpenSettings)
         } else {
             LazyColumn(
                 contentPadding = PaddingValues(
@@ -281,7 +282,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun EmptyHome(modifier: Modifier, onAdd: () -> Unit, onTrySimulator: () -> Unit) {
+private fun EmptyHome(modifier: Modifier, onAdd: () -> Unit, onTrySimulator: () -> Unit, onRestore: () -> Unit) {
     Column(
         modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -308,6 +309,17 @@ private fun EmptyHome(modifier: Modifier, onAdd: () -> Unit, onTrySimulator: () 
             Spacer(Modifier.width(8.dp))
             Text("No lights to hand? Try the simulator")
         }
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onRestore) {
+            Icon(Icons.Filled.Restore, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Reinstalled? Restore your setup")
+        }
+        Text(
+            "Settings › Backup & restore › Restore, then pick WLED-Controller-autosave.zip in Downloads › WLED Controller.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

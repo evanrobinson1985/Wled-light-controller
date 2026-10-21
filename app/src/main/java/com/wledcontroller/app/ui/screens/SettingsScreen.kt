@@ -122,6 +122,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}) {
                             Icon(Icons.Filled.Restore, null); Spacer(Modifier.width(8.dp)); Text("Restore")
                         }
                     }
+                    AutoBackupSetting(enabled = busy == null) { m -> message = m }
                     busy?.let {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -204,4 +205,50 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}) {
             dismissButton = { TextButton(onClick = { confirmRestore = null }) { Text("Cancel") } },
         )
     }
+}
+
+/** The copy kept in Downloads, which is still there after the app is uninstalled. */
+@Composable
+private fun AutoBackupSetting(enabled: Boolean, onMessage: (String) -> Unit) {
+    val container = LocalAppContainer.current
+    val scope = rememberCoroutineScope()
+    val auto = container.autoBackup
+    val on by auto.enabled.collectAsStateWithLifecycle()
+    val last by auto.lastSaved.collectAsStateWithLifecycle()
+    val simActive by container.simulator.active.collectAsStateWithLifecycle()
+    var saving by remember { mutableStateOf(false) }
+    if (!auto.supported) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Keep a copy in Downloads", fontWeight = FontWeight.SemiBold)
+            Text(
+                "Saved by itself whenever you leave the app after changing something, to Downloads › ${com.wledcontroller.app.data.AutoBackup.FOLDER}. " +
+                    "Updates keep everything anyway; this copy survives uninstalling the app or moving to a new phone — restore it with Restore above.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                when {
+                    simActive -> "Paused while the simulator is on (your real setup is put away)."
+                    last != null -> "Last saved " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(last!!))
+                    else -> "Not saved yet."
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Switch(checked = on, onCheckedChange = { auto.setEnabled(it) })
+    }
+    OutlinedButton(
+        enabled = enabled && !saving && !simActive,
+        onClick = {
+            saving = true
+            scope.launch {
+                runCatching { auto.saveIfChanged(simulatorOn = false, force = true) }
+                    .onSuccess { ok -> onMessage(if (ok) "Saved to Downloads › ${com.wledcontroller.app.data.AutoBackup.FOLDER} › ${com.wledcontroller.app.data.AutoBackup.FILE_NAME}." else "Couldn't save the copy.") }
+                    .onFailure { onMessage("Couldn't save the copy: ${it.message}") }
+                saving = false
+            }
+        },
+    ) { Text(if (saving) "Saving…" else "Save a copy now") }
 }

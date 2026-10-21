@@ -13,6 +13,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -23,12 +25,21 @@ import java.io.File
  * Streams whole-house effects from the phone: renders every mapped LED each frame and sends one
  * DDP frame per controller. Runs in the app process; [HouseEffectService] keeps it alive.
  */
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class HouseEngine(private val context: Context, private val store: AppStore, private val scope: CoroutineScope) {
 
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
 
     val params = MutableStateFlow(HouseEffectParams())
+
+    init {
+        // The effect and its settings are remembered: put back the last ones, then save each change.
+        scope.launch {
+            store.houseEffect.first()?.let { saved -> if (params.value == HouseEffectParams()) params.value = saved }
+            params.drop(1).debounce(400).collect { store.setHouseEffect(it) }
+        }
+    }
 
     private var job: Job? = null
 

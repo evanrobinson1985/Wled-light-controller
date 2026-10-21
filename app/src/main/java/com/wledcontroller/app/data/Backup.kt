@@ -22,10 +22,17 @@ data class BackupSummary(val devices: Int, val shows: Int, val files: Int, val b
 
 /**
  * Saves everything — settings, controllers, house map and photo, shows, songs, xLights
- * sequences and standalone-mode backups — into one zip, and restores it (on this phone or
- * another). File paths inside the data are rewritten to the restoring phone's storage.
+ * sequences, standalone-mode backups and the saved layouts and models — into one zip, and
+ * restores it (on this phone or another). File paths inside the data are rewritten to the
+ * restoring phone's storage. Restoring adds the backup's saved layouts and models to the ones
+ * already here rather than replacing them.
  */
-class Backup(private val context: Context, private val store: AppStore, private val sequences: SequenceRepository) {
+class Backup(
+    private val context: Context,
+    private val store: AppStore,
+    private val sequences: SequenceRepository,
+    private val library: Library? = null,
+) {
 
     private val filesDir get() = context.filesDir
     private val json = Json { ignoreUnknownKeys = true }
@@ -34,15 +41,16 @@ class Backup(private val context: Context, private val store: AppStore, private 
         ?.toList() ?: emptyList()
 
     /** Everything in app storage that belongs in a backup. */
-    private fun backupFiles(): List<File> {
-        val dirs = DIRS.map { File(filesDir, it) }
+    private fun backupFiles(withLibrary: Boolean): List<File> {
+        val dirs = (if (withLibrary) DIRS + LIBRARY else DIRS).map { File(filesDir, it) }
         return dirs.flatMap { d -> d.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.toList() } + looseFiles()
     }
 
     suspend fun export(uri: Uri): BackupSummary =
-        export(context.contentResolver.openOutputStream(uri) ?: throw IllegalStateException("Couldn't write the backup file"))
+        export(context.contentResolver.openOutputStream(uri, "wt") ?: throw IllegalStateException("Couldn't write the backup file"))
 
-    suspend fun export(file: File): BackupSummary = export(file.outputStream())
+    /** [withLibrary] false leaves out the saved layouts and models (the simulator's swaps keep them as they are). */
+    suspend fun export(file: File, withLibrary: Boolean = true): BackupSummary = export(file.outputStream(), withLibrary)
 
     suspend fun restore(uri: Uri): BackupSummary =
         restore(context.contentResolver.openInputStream(uri) ?: throw IllegalStateException("Couldn't open that file"))
@@ -58,9 +66,9 @@ class Backup(private val context: Context, private val store: AppStore, private 
         sequences.reload()
     }
 
-    private suspend fun export(stream: java.io.OutputStream): BackupSummary = withContext(Dispatchers.IO) {
+    suspend fun export(stream: java.io.OutputStream, withLibrary: Boolean = true): BackupSummary = withContext(Dispatchers.IO) {
         val prefs = store.exportAll()
-        val files = backupFiles()
+        val files = backupFiles(withLibrary)
         val manifest = buildJsonObject {
             put("format", 1)
             put("app", "wled-controller")
@@ -133,11 +141,14 @@ class Backup(private val context: Context, private val store: AppStore, private 
         store.importAll(settings ?: JsonObject(emptyMap()), ::fixPath)
         FseqReader.forgetAll()
         sequences.reload()
+        library?.reload()
         BackupSummary(store.devices.first().size, sequences.all.value.size, fileCount, bytes)
     }
 
     private companion object {
         /** Folders of app data; "simulator" holds the simulated controllers. */
         val DIRS = listOf("sequences", "audio", "fseq", "simulator", "pictures")
+        /** Saved house layouts and light models: never cleared, and the same in and out of the simulator. */
+        val LIBRARY = listOf(Library.LAYOUTS, Library.MODELS)
     }
 }

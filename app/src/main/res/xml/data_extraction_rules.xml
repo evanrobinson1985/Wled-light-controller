@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The same as backup_rules.xml, for Android 12 and later. Moving to a new phone by cable or
+     Wi-Fi takes everything. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="audio" />
+        <exclude domain="file" path="fseq" />
+        <exclude domain="file" path="devcache" />
+        <exclude domain="file" path="sim_virtual_house.zip" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="devcache" />
+    </device-transfer>
+</data-extraction-rules>

@@ -52,10 +52,14 @@ class Simulator(
 
     private val mutex = Mutex()
 
-    private val _miniView = MutableStateFlow(true)
-    /** Whether the small live view of the virtual house floats over the other screens. */
+    private val flags = context.getSharedPreferences("app_flags", Context.MODE_PRIVATE)
+    private val _miniView = MutableStateFlow(flags.getBoolean("sim_mini_view", true))
+    /** Whether the small live view of the virtual house floats over the other screens (remembered). */
     val miniView: StateFlow<Boolean> = _miniView.asStateFlow()
-    fun setMiniView(on: Boolean) { _miniView.value = on }
+    fun setMiniView(on: Boolean) {
+        flags.edit().putBoolean("sim_mini_view", on).apply()
+        _miniView.value = on
+    }
 
     init {
         if (_active.value) SimHub.load(simFile)
@@ -73,7 +77,7 @@ class Simulator(
         if (_active.value) return@withLock
         stopEverything()
         withContext(Dispatchers.IO) {
-            backup.export(realSnapshot)
+            backup.export(realSnapshot, withLibrary = false)
             if (sandboxSnapshot.exists()) {
                 val restored = runCatching { backup.restore(sandboxSnapshot) }.isSuccess
                 if (!restored) freshDemo()
@@ -94,7 +98,7 @@ class Simulator(
         stopEverything()
         SimHub.saveNow()
         withContext(Dispatchers.IO) {
-            backup.export(sandboxSnapshot)
+            backup.export(sandboxSnapshot, withLibrary = false)
             SimHub.unload()
             if (realSnapshot.exists()) backup.restore(realSnapshot) else backup.clearAll()
             realSnapshot.delete()
