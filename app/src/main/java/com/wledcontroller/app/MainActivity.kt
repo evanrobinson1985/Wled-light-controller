@@ -94,7 +94,10 @@ class MainActivity : ComponentActivity() {
                                 onOpenMap = { nav.navigate("house/map") },
                             )
                         }
-                        composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }) }
+                        composable("settings") {
+                            SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }, onOpenTest = { nav.navigate("test") })
+                        }
+                        composable("test") { com.wledcontroller.app.ui.screens.TestLightsScreen(onBack = { nav.popBackStack() }) }
                         composable("house") {
                             HouseScreen(
                                 onBack = { nav.popBackStack() },

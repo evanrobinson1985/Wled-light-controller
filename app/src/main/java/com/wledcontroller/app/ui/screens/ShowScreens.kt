@@ -22,6 +22,7 @@ import com.wledcontroller.app.ui.components.neighbourGaps
 import com.wledcontroller.app.ui.components.pixelRadius
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -158,6 +159,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 // ================================================================== show list
@@ -1263,6 +1266,9 @@ private fun ClipInspector(
             CurvedSlider("Tilt (down ↔ up)", clip.tilt ?: 0.5f, clip.tiltCurve, { onChange(clip.copy(tilt = it)) }) { editingCurve = "tilt" }
             Text("Give pan a Wave curve to sweep the beam back and forth.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+
+        LayerSettings(clip, onChange)
+        EffectPresets(clip, onChange)
         Spacer(Modifier.height(16.dp))
     }
 
@@ -1311,6 +1317,93 @@ private fun ClipInspector(
                 }) { Text("OK") }
             },
             dismissButton = { TextButton(onClick = { editingSlot = -1 }) { Text("Cancel") } },
+        )
+    }
+}
+
+// ================================================================== layer settings and presets
+
+/** xLights' layer settings: turn, spin, zoom, mirror, recolour and sparkle the effect. */
+@Composable
+private fun LayerSettings(clip: Clip, onChange: (Clip) -> Unit) {
+    var open by remember { mutableStateOf(clip.hasLayerSettings) }
+    SectionTitle("Layer settings") {
+        TextButton(onClick = { open = !open }) { Text(if (open) "Hide" else if (clip.hasLayerSettings) "Show (in use)" else "Show") }
+    }
+    if (!open) return
+    GradientSlider(clip.rotation, { onChange(clip.copy(rotation = it)) }, label = "Rotate", valueText = "${(clip.rotation * 360).roundToInt()}°", height = 30.dp)
+    // Spin: −4 … +4 turns over the effect.
+    GradientSlider(
+        (clip.spin + 4f) / 8f, { onChange(clip.copy(spin = ((it * 8f - 4f) * 4).roundToInt() / 4f)) },
+        label = "Spin", valueText = if (clip.spin == 0f) "None" else "%+.2f turns".format(clip.spin), height = 30.dp,
+    )
+    // Zoom on a doubling scale: ¼× … 4×.
+    fun zoomToSlider(z: Float) = ((kotlin.math.ln(z) / kotlin.math.ln(2f)) + 2f) / 4f
+    fun sliderToZoom(v: Float) = 2f.pow(v * 4f - 2f).let { (it * 20).roundToInt() / 20f }
+    GradientSlider(zoomToSlider(clip.zoom), { onChange(clip.copy(zoom = sliderToZoom(it))) }, label = "Zoom", valueText = "%.2f×".format(clip.zoom), height = 30.dp)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Zoom changes over the effect", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+        Switch(checked = clip.zoomEnd != null, onCheckedChange = { on -> onChange(clip.copy(zoomEnd = if (on) clip.zoom * 2f else null)) })
+    }
+    clip.zoomEnd?.let { end ->
+        GradientSlider(zoomToSlider(end), { onChange(clip.copy(zoomEnd = sliderToZoom(it))) }, label = "Zoom at the end", valueText = "%.2f×".format(end), height = 30.dp)
+    }
+    GradientSlider(clip.hueShift, { onChange(clip.copy(hueShift = it)) }, label = "Hue shift", valueText = "${(clip.hueShift * 360).roundToInt()}°", height = 30.dp)
+    GradientSlider(clip.sparkles, { onChange(clip.copy(sparkles = it)) }, label = "Sparkles", valueText = "${(clip.sparkles * 100).roundToInt()}%", height = 30.dp)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FilterChip(selected = clip.mirrorX, onClick = { onChange(clip.copy(mirrorX = !clip.mirrorX)) }, label = { Text("Mirror ↔") })
+        FilterChip(selected = clip.mirrorY, onClick = { onChange(clip.copy(mirrorY = !clip.mirrorY)) }, label = { Text("Flip ↕") })
+        if (clip.hasLayerSettings) TextButton(onClick = {
+            onChange(clip.copy(rotation = 0f, spin = 0f, zoom = 1f, zoomEnd = null, hueShift = 0f, sparkles = 0f, mirrorX = false, mirrorY = false))
+        }) { Text("Reset") }
+    }
+}
+
+/** Effects saved with all their settings under a name, to put on other effects in any show. */
+@Composable
+private fun EffectPresets(clip: Clip, onChange: (Clip) -> Unit) {
+    val container = LocalAppContainer.current
+    val scope = rememberCoroutineScope()
+    val presets by container.store.effectPresets.collectAsStateWithLifecycle(emptyList())
+    var naming by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<com.wledcontroller.app.data.EffectPreset?>(null) }
+    SectionTitle("Presets") { TextButton(onClick = { naming = true }) { Text("Save this one") } }
+    if (presets.isEmpty()) {
+        Text("Save an effect you like with all its settings, then tap it here to use it on any effect in any show.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            presets.forEach { p ->
+                androidx.compose.material3.InputChip(
+                    selected = false,
+                    onClick = { onChange(p.applyTo(clip)) },
+                    label = { Text(p.name) },
+                    trailingIcon = { Icon(Icons.Filled.Close, "Remove", Modifier.size(16.dp).clickable { removing = p }) },
+                )
+            }
+        }
+    }
+    if (naming) {
+        var name by remember { mutableStateOf(clip.effect.label) }
+        AlertDialog(
+            onDismissRequest = { naming = false },
+            title = { Text("Save as a preset") },
+            text = { OutlinedTextField(name, { name = it.take(40) }, singleLine = true, label = { Text("Name") }) },
+            confirmButton = {
+                TextButton(enabled = name.isNotBlank(), onClick = {
+                    val n = name.trim()
+                    scope.launch { container.store.saveEffectPreset(com.wledcontroller.app.data.EffectPreset(n, clip)) }
+                    naming = false
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { naming = false }) { Text("Cancel") } },
+        )
+    }
+    removing?.let { p ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove ${p.name}?") },
+            confirmButton = { TextButton(onClick = { scope.launch { container.store.removeEffectPreset(p.name) }; removing = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
         )
     }
 }

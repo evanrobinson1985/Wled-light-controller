@@ -28,6 +28,16 @@ data class SavedDevice(
     val mqttTopic: String? = null,
 )
 
+/** A show effect kept under a name with all its settings. */
+@Serializable
+data class EffectPreset(val name: String, val clip: com.wledcontroller.app.show.Clip) {
+    /** The preset's effect and settings on [target], keeping where and how long it is. */
+    fun applyTo(target: com.wledcontroller.app.show.Clip) = clip.copy(
+        id = target.id, startMs = target.startMs, durationMs = target.durationMs,
+        fadeInMs = clip.fadeInMs.coerceAtMost(target.durationMs / 2), fadeOutMs = clip.fadeOutMs.coerceAtMost(target.durationMs / 2),
+    )
+}
+
 /** Simulated controllers answer on 127.77.x.x inside the app. */
 internal fun isSimulatedHost(host: String) = WledApi.normalizeHost(host).substringBefore(':').startsWith("127.77.")
 
@@ -69,6 +79,7 @@ class AppStore(private val context: Context) {
         val EFFECT_SETTINGS = stringPreferencesKey("effect_settings")
         val KEEP_STARTUP = androidx.datastore.preferences.core.booleanPreferencesKey("keep_startup_look")
         val HOUSE_EFFECT = stringPreferencesKey("house_effect")
+        val EFFECT_PRESETS = stringPreferencesKey("effect_presets")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -256,6 +267,13 @@ class AppStore(private val context: Context) {
             prefs[Keys.EFFECT_SETTINGS] = json.encodeToString(cur + (EffectMemory.key(deviceId, fx) to values))
         }
     }
+
+    /** Show effects saved with all their settings, to use again (like xLights' effect presets). */
+    val effectPresets: Flow<List<EffectPreset>> = listFlow(Keys.EFFECT_PRESETS)
+    suspend fun saveEffectPreset(p: EffectPreset) = editList<EffectPreset>(Keys.EFFECT_PRESETS) { list ->
+        list.filterNot { it.name.equals(p.name, ignoreCase = true) } + p
+    }
+    suspend fun removeEffectPreset(name: String) = editList<EffectPreset>(Keys.EFFECT_PRESETS) { list -> list.filterNot { it.name == name } }
 
     /** The whole-house effect and its colours and sliders, as last set. */
     val houseEffect: Flow<com.wledcontroller.app.house.HouseEffectParams?> = context.dataStore.data.map { prefs ->

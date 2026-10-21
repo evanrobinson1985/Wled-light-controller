@@ -54,7 +54,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}) {
+fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTest: () -> Unit = {}) {
     val container = LocalAppContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -102,6 +102,17 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}) {
                     Text(
                         "A walk-through of every feature, with shortcuts to try each one. Also on the home screen's ? button.",
                         style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            Card(onClick = onOpenTest, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Test lights", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Test patterns straight on your controllers — chase, alternate, colours, count — to check wiring, colour order and every LED.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

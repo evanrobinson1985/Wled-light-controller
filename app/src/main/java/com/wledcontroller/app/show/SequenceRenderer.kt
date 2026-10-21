@@ -133,20 +133,105 @@ object SequenceRenderer {
             }
             if (intensity <= 0f) continue
             val t = local / 1000f
+            // Layer settings: turned (and spinning), zoomed and mirrored.
+            val layered = clip.hasLayerSettings
+            val angle = (clip.rotation + clip.spin * progress) * 2f * PI.toFloat()
+            val zoom = (clip.zoomEnd?.let { clip.zoom + (it - clip.zoom) * progress } ?: clip.zoom).coerceAtLeast(0.05f)
+            val cosA = cos(angle); val sinA = sin(angle)
+            val turned = angle != 0f || zoom != 1f
+            val sparkleStep = floor(t * 12f).toInt()
             for (k in tl.ledIndex.indices) {
                 val li = tl.ledIndex[k]
+                var lx = tl.lx[k]; var ly = tl.ly[k]; var along = tl.along[k]
+                if (layered) {
+                    if (clip.mirrorX) { lx = 1f - lx; along = 1f - along }
+                    if (clip.mirrorY) ly = 1f - ly
+                    if (turned) {
+                        val dx = (lx - 0.5f) * tl.aspect; val dy = ly - 0.5f
+                        lx = (dx * cosA - dy * sinA) / zoom / tl.aspect + 0.5f
+                        ly = (dx * sinA + dy * cosA) / zoom + 0.5f
+                        along = (along - 0.5f) / zoom + 0.5f
+                    }
+                }
                 val dir = if (clip.direction == Direction.AUTO) tl.natural[k] else clip.direction
-                val pos = position(dir, tl.along[k], tl.lx[k], tl.ly[k])
-                val reveal = transition(clip, local, pos, tl.lx[k], tl.ly[k], li)
-                val c = if (reveal <= 0f) 0
-                else HouseRenderer.scale(
-                    effectColor(clip, pos, tl.lx[k], tl.ly[k], t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 }),
-                    intensity * reveal,
-                )
+                val pos = position(dir, along, lx, ly)
+                val reveal = transition(clip, local, pos, lx, ly, li)
+                var color = if (reveal <= 0f) 0 else effectColor(clip, pos, lx, ly, t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 })
+                if (layered && reveal > 0f) {
+                    if (clip.hueShift != 0f && color != 0) color = hueShift(color, clip.hueShift)
+                    if (clip.sparkles > 0f && HouseRenderer.hash(li, sparkleStep) > 1f - clip.sparkles * 0.2f) color = 0xFFFFFF
+                }
+                val c = if (reveal <= 0f) 0 else HouseRenderer.scale(color, intensity * reveal)
                 out[li] = mix(track.blend, out[li], c)
             }
         }
         return out
+    }
+
+    /** [rgb] turned [shift] (0..1) of the way round the colour wheel. */
+    internal fun hueShift(rgb: Int, shift: Float): Int {
+        val r = ((rgb shr 16) and 0xFF) / 255f; val g = ((rgb shr 8) and 0xFF) / 255f; val b = (rgb and 0xFF) / 255f
+        val max = maxOf(r, g, b); val min = minOf(r, g, b); val d = max - min
+        if (d <= 1e-4f) return rgb
+        var h = when (max) {
+            r -> ((g - b) / d).let { if (it < 0) it + 6f else it }
+            g -> (b - r) / d + 2f
+            else -> (r - g) / d + 4f
+        } / 6f
+        h = HouseRenderer.frac(h + shift)
+        val s = d / max; val v = max
+        val i = floor(h * 6f).toInt(); val f = h * 6f - i
+        val p = v * (1 - s); val q = v * (1 - s * f); val tt = v * (1 - s * (1 - f))
+        val (rr, gg, bb) = when (i % 6) {
+            0 -> Triple(v, tt, p); 1 -> Triple(q, v, p); 2 -> Triple(p, v, tt)
+            3 -> Triple(p, q, v); 4 -> Triple(tt, p, v); else -> Triple(v, p, q)
+        }
+        return ((rr * 255).toInt() shl 16) or ((gg * 255).toInt() shl 8) or (bb * 255).toInt()
+    }
+
+    /** 0 → 1 → 0 as [v] goes from 0 to 1, repeating: something bouncing between two walls. */
+    private fun bounce(v: Float) = 1f - abs(1f - 2f * HouseRenderer.frac(v))
+
+    /** Distance from (px, py) to the segment (ax, ay)–(bx, by). */
+    private fun segDist(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
+        val dx = bx - ax; val dy = by - ay
+        val l2 = dx * dx + dy * dy
+        val k = if (l2 <= 0f) 0f else (((px - ax) * dx + (py - ay) * dy) / l2).coerceIn(0f, 1f)
+        return hypot(px - (ax + k * dx), py - (ay + k * dy))
+    }
+
+    /**
+     * Conway's Game of Life on a small grid, for the Life effect: generation [gen] of a board
+     * seeded by [seed]. The last board asked for is kept, so a frame computes it once; it starts
+     * afresh every 64 generations so it never dies out for long.
+     */
+    private object Life {
+        private class Board(val key: Long, var gen: Int, var cells: BooleanArray)
+        private val boards = HashMap<Long, Board>()
+
+        fun alive(seed: Int, w: Int, h: Int, density: Float, gen: Int, x: Int, y: Int): Boolean = synchronized(this) {
+            val era = gen / 64; val g = gen % 64
+            val key = (seed.toLong() shl 32) xor (era.toLong() shl 20) xor (w.toLong() shl 10) xor h.toLong()
+            var b = boards[key]
+            if (b == null || b.gen > g) {
+                b = Board(key, 0, BooleanArray(w * h) { HouseRenderer.hash(seed + era * 7919, it) < density })
+                if (boards.size > 16) boards.clear()
+                boards[key] = b
+            }
+            while (b.gen < g) {
+                val c = b.cells
+                b.cells = BooleanArray(w * h) { i ->
+                    val cx = i % w; val cy = i / w
+                    var n = 0
+                    for (dy in -1..1) for (dx in -1..1) if (dx != 0 || dy != 0) {
+                        if (c[((cy + dy).mod(h)) * w + (cx + dx).mod(w)]) n++
+                    }
+                    n == 3 || (n == 2 && c[i])
+                }
+                b.gen++
+            }
+            b.cells[y.coerceIn(0, h - 1) * w + x.coerceIn(0, w - 1)]
+        }
     }
 
     private const val FACE_EYES = 0
@@ -415,6 +500,202 @@ object SequenceRenderer {
                     FACE_OPEN -> if (level in 0.15f..0.45f) cols.getOrElse(1) { cols[0] } else 0
                     FACE_WIDE -> if (level > 0.45f) cols.getOrElse(1) { cols[0] } else 0
                     else -> HouseRenderer.scale(cols[0], level)
+                }
+            }
+            SeqEffect.OFF -> 0
+            SeqEffect.COLOR_WASH -> HouseRenderer.palette(cols, progress * (1f + floor(c.speed * 4f)) * 0.999f)
+            SeqEffect.FILL -> {
+                // Fills from the start in one colour, then the next colour fills over it.
+                val v = t * rate * 0.3f
+                val cyc = floor(v).toInt()
+                if (pos <= HouseRenderer.frac(v)) cols[cyc.mod(cols.size)] else if (cyc > 0) cols[(cyc - 1).mod(cols.size)] else 0
+            }
+            SeqEffect.CANDLE -> {
+                val flicker = noise(id * 0.37f, t * (2f + rate * 4f))
+                HouseRenderer.scale(cols[0], 0.35f + 0.65f * flicker * flicker.coerceAtLeast(0.5f))
+            }
+            SeqEffect.CIRCLES -> {
+                var acc = 0
+                val n = 2 + ((1f - c.size) * 6f).toInt()
+                val r = 0.06f + c.size * 0.16f
+                for (b in 0 until n) {
+                    val cx = bounce(HouseRenderer.hash(b, 3) + t * rate * (0.08f + HouseRenderer.hash(b, 5) * 0.1f)) * aspect
+                    val cy = bounce(HouseRenderer.hash(b, 7) + t * rate * (0.06f + HouseRenderer.hash(b, 9) * 0.1f))
+                    val d = hypot(lx * aspect - cx, ly - cy)
+                    if (d < r) acc = HouseRenderer.maxRgb(acc, HouseRenderer.scale(cols[b % cols.size], 1f - (d / r) * (d / r) * 0.6f))
+                }
+                acc
+            }
+            SeqEffect.FAN -> {
+                // Blades swinging round from the bottom middle.
+                val blades = 2 + ((1f - c.size) * 8).toInt()
+                val a = atan2(ly, (lx - 0.5f) * aspect) / PI.toFloat()
+                val v = HouseRenderer.frac(a * blades + t * rate * 0.5f)
+                if (v < 0.5f) HouseRenderer.palette(cols, hypot((lx - 0.5f) * aspect, ly) * 0.999f) else 0
+            }
+            SeqEffect.KALEIDOSCOPE -> {
+                // A pattern folded into mirrored wedges round the middle.
+                val wedges = 3 + ((1f - c.size) * 6).toInt()
+                val dx = (lx - 0.5f) * aspect; val dy = ly - 0.5f
+                val r = hypot(dx, dy)
+                val seg = 2f * PI.toFloat() / wedges
+                var a = (atan2(dy, dx) + t * rate * 0.2f).mod(seg)
+                if (a > seg / 2f) a = seg - a
+                val u = r * cos(a) * 6f; val v = r * sin(a) * 6f
+                HouseRenderer.palette(cols, (sin(u + t * rate) + sin(v * 1.7f - t * rate * 0.7f) + sin((u + v) * 0.8f)) / 6f + 0.5f)
+            }
+            SeqEffect.LIFE -> {
+                val h = (8 + ((1f - c.size) * 16)).toInt()
+                val w = (h * aspect).toInt().coerceIn(4, 96)
+                val gen = floor(t * (1f + rate * 4f)).toInt()
+                val x = (lx * w).toInt(); val y = ((1f - ly) * h).toInt()
+                if (Life.alive(c.id.hashCode(), w, h, 0.35f, gen, x, y)) cols[((x + y) / 4).mod(cols.size)] else 0
+            }
+            SeqEffect.LIGHTNING -> {
+                // A jagged bolt from the top, flashing then fading; a new one each strike.
+                val period = 0.6f + (1f - c.speed) * 2.4f
+                val k = floor(t / period).toInt()
+                val age = t / period - k
+                val flash = if (age < 0.05f) 1f else if (age < 0.12f) 0.3f else if (age < 0.16f) 0.9f else (1f - (age - 0.16f) * 3f).coerceAtLeast(0f) * 0.6f
+                val x0 = 0.2f + HouseRenderer.hash(k, 3) * 0.6f
+                val down = 1f - ly
+                val pathX = x0 + (noise(down * 6f, k * 3.1f) - 0.5f) * 0.35f + (noise(down * 18f, k * 7.7f) - 0.5f) * 0.08f
+                val width = (0.01f + c.size * 0.04f) / aspect.coerceAtLeast(0.2f)
+                val d = abs(lx - pathX)
+                if (d < width * 2f) HouseRenderer.scale(cols[0], flash * (1f - d / (width * 2f))) else HouseRenderer.scale(cols.getOrElse(1) { 0 }, flash * 0.08f)
+            }
+            SeqEffect.LINES -> {
+                // Straight lines whose ends bounce round the edges.
+                var acc = 0
+                val n = 1 + ((1f - c.size) * 4).toInt()
+                val thick = 0.02f + c.size * 0.05f
+                for (l in 0 until n) {
+                    fun p(salt: Int, sp: Float) = bounce(HouseRenderer.hash(l, salt) + t * rate * sp)
+                    val ax = p(1, 0.11f) * aspect; val ay = p(2, 0.07f); val bx = p(3, 0.09f) * aspect; val by = p(4, 0.13f)
+                    val d = segDist(lx * aspect, ly, ax, ay, bx, by)
+                    if (d < thick) acc = HouseRenderer.maxRgb(acc, HouseRenderer.scale(cols[l % cols.size], 1f - d / thick))
+                }
+                acc
+            }
+            SeqEffect.LIQUID -> {
+                val wx = noise(lx * aspect * 2f + t * rate * 0.2f, ly * 2f)
+                val v = noise(lx * aspect * 3f + wx * 2f, ly * 3f - t * rate * 0.4f)
+                HouseRenderer.palette(cols, v * 0.999f)
+            }
+            SeqEffect.MORPH -> {
+                // A band that travels from one end to the other over the effect, head bright, tail fading.
+                val len = 0.1f + c.size * 0.6f
+                val head = progress * (1f + len)
+                val d = head - pos
+                if (d < 0f || d > len) 0 else HouseRenderer.palette(listOf(cols[0], cols.getOrElse(1) { cols[0] }), (d / len) * 0.999f).let {
+                    HouseRenderer.scale(it, 1f - d / len * 0.7f)
+                }
+            }
+            SeqEffect.SHAPE -> {
+                // Stars appearing round the area, growing and fading.
+                var acc = 0
+                val slot = 0.5f / (0.2f + rate)
+                val now = floor(t / slot).toInt()
+                for (k in now - 3..now) {
+                    val age = (t - k * slot) / (slot * 4f)
+                    if (age !in 0f..1f) continue
+                    val cx = HouseRenderer.hash(k, 21) * aspect; val cy = 0.15f + HouseRenderer.hash(k, 23) * 0.7f
+                    val dx = lx * aspect - cx; val dy = ly - cy
+                    val a = atan2(dy, dx)
+                    val size = age * (0.15f + c.size * 0.35f)
+                    val star = size * (0.65f + 0.35f * cos(5f * a))
+                    val d = abs(hypot(dx, dy) - star)
+                    if (d < 0.025f) acc = HouseRenderer.maxRgb(acc, HouseRenderer.scale(cols[k.mod(cols.size)], (1f - age) * (1f - d / 0.025f)))
+                }
+                acc
+            }
+            SeqEffect.SINGLE_STRAND -> {
+                // A block bouncing end to end along the strand, leaving a fading trail.
+                val w = 0.04f + c.size * 0.25f
+                val head = bounce(t * rate * 0.3f) * (1f + w) - w / 2f
+                val d = abs(pos - head)
+                if (d > w) 0 else HouseRenderer.scale(HouseRenderer.palette(cols, head.coerceIn(0f, 0.999f)), 1f - d / w)
+            }
+            SeqEffect.SNOWFLAKES -> {
+                var acc = HouseRenderer.scale(cols.getOrElse(1) { 0 }, 0.05f)
+                val n = 6 + ((1f - c.size) * 20).toInt()
+                val r = 0.02f + c.size * 0.04f
+                for (f in 0 until n) {
+                    val fall = HouseRenderer.frac(HouseRenderer.hash(f, 2) + t * rate * (0.05f + HouseRenderer.hash(f, 4) * 0.08f))
+                    val fx = (HouseRenderer.hash(f, 6) + 0.04f * sin(t * 1.3f + f)) * aspect
+                    val fy = 1.05f - fall * 1.1f
+                    val dx = abs(lx * aspect - fx); val dy = abs(ly - fy)
+                    // Six-armed: a cross and its diagonals.
+                    val arm = minOf(dx, dy, abs(dx - dy) * 0.7071f)
+                    if (hypot(dx, dy) < r && arm < r * 0.25f) acc = HouseRenderer.maxRgb(acc, cols[0])
+                }
+                acc
+            }
+            SeqEffect.SPIROGRAPH -> {
+                // A spirograph curve, slowly turning.
+                val big = 0.42f; val small = 0.12f + c.size * 0.18f; val pen = 0.2f
+                var best = 9f; var at = 0f
+                val dx = (lx - 0.5f) * aspect; val dy = ly - 0.5f
+                val turn = t * rate * 0.3f
+                for (i in 0 until 160) {
+                    val th = i / 160f * 2f * PI.toFloat() * 6f
+                    val x = (big - small) * cos(th + turn) + pen * cos((big - small) / small * th + turn)
+                    val y = (big - small) * sin(th + turn) - pen * sin((big - small) / small * th + turn)
+                    val d = hypot(dx - x * minOf(aspect, 1.6f), dy - y)
+                    if (d < best) { best = d; at = i / 160f }
+                }
+                if (best < 0.03f) HouseRenderer.scale(HouseRenderer.palette(cols, at * 0.999f), 1f - best / 0.03f) else 0
+            }
+            SeqEffect.TENDRIL -> {
+                // A wandering line with a fading tail.
+                val tailLen = 30
+                var best = 9f; var bestK = 0
+                for (k in 0 until tailLen) {
+                    val tt = t - k * 0.04f * (1.5f - c.speed)
+                    val x = noise(tt * rate * 0.6f, 1.3f) * aspect
+                    val y = noise(5.1f, tt * rate * 0.6f)
+                    val d = hypot(lx * aspect - x, ly - y)
+                    if (d < best) { best = d; bestK = k }
+                }
+                val thick = 0.02f + c.size * 0.05f
+                if (best < thick) HouseRenderer.scale(HouseRenderer.palette(cols, bestK / tailLen.toFloat()), (1f - bestK / tailLen.toFloat()) * (1f - best / thick)) else 0
+            }
+            SeqEffect.TREE -> {
+                // Rows of branches, each with lights chasing along it, coloured by row.
+                val rows = 4 + ((1f - c.size) * 10).toInt()
+                val row = floor(ly * rows).toInt()
+                val dirn = if (row % 2 == 0) 1f else -1f
+                val v = HouseRenderer.frac(lx * 6f * dirn - t * rate * 0.5f)
+                val within = HouseRenderer.frac(ly * rows)
+                if (within > 0.75f) 0 else HouseRenderer.scale(cols[row.mod(cols.size)], 0.25f + 0.75f * v)
+            }
+            SeqEffect.WARP -> {
+                // Flying through a tunnel of rings.
+                val r = hypot((lx - 0.5f) * aspect, ly - 0.5f).coerceAtLeast(0.01f)
+                val v = HouseRenderer.frac(1f / (r * (2f + c.size * 6f)) - t * rate * 0.6f)
+                HouseRenderer.scale(HouseRenderer.palette(cols, v), (r * 2.5f).coerceAtMost(1f) * (1f - abs(v * 2f - 1f)))
+            }
+            SeqEffect.WAVE -> {
+                // A wave line rolling across, filled underneath.
+                val cycles = 0.5f + (1f - c.size) * 3f
+                val wy = 0.5f + 0.35f * sin((lx * cycles - t * rate * 0.4f) * 2f * PI.toFloat())
+                when {
+                    abs(ly - wy) < 0.05f -> cols[0]
+                    ly < wy -> HouseRenderer.scale(cols.getOrElse(1) { cols[0] }, 0.4f)
+                    else -> 0
+                }
+            }
+            SeqEffect.PIANO -> {
+                // Keys across the area pressed with the music: louder plays more keys.
+                val keys = 12 + ((1f - c.size) * 24).toInt()
+                val key = floor(lx * keys).toInt()
+                val step = floor(t * (2f + rate * 6f)).toInt()
+                val pressed = HouseRenderer.hash(key, step) < level * 0.7f + beat * 0.2f
+                val black = (key % 12) in intArrayOf(1, 3, 6, 8, 10)
+                when {
+                    pressed -> cols[0]
+                    black -> 0
+                    else -> HouseRenderer.scale(cols.getOrElse(1) { 0xFFFFFF }, 0.15f)
                 }
             }
         }

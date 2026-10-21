@@ -101,27 +101,48 @@ object XsqImport {
 
     /** The nearest effect here to an xLights effect, or null to skip it. */
     fun effectFor(xlights: String): SeqEffect? = when (xlights.lowercase()) {
-        "on", "color wash", "colorwash", "fill" -> SeqEffect.ON
+        "on" -> SeqEffect.ON
+        "off" -> SeqEffect.OFF
+        "color wash", "colorwash" -> SeqEffect.COLOR_WASH
+        "fill" -> SeqEffect.FILL
+        "candle" -> SeqEffect.CANDLE
+        "circles" -> SeqEffect.CIRCLES
+        "fan" -> SeqEffect.FAN
+        "kaleidoscope" -> SeqEffect.KALEIDOSCOPE
+        "life" -> SeqEffect.LIFE
+        "lightning" -> SeqEffect.LIGHTNING
+        "lines" -> SeqEffect.LINES
+        "liquid" -> SeqEffect.LIQUID
+        "morph" -> SeqEffect.MORPH
+        "shape" -> SeqEffect.SHAPE
+        "single strand", "singlestrand" -> SeqEffect.SINGLE_STRAND
+        "snowflakes" -> SeqEffect.SNOWFLAKES
+        "spirograph" -> SeqEffect.SPIROGRAPH
+        "tendril" -> SeqEffect.TENDRIL
+        "tree" -> SeqEffect.TREE
+        "warp" -> SeqEffect.WARP
+        "wave" -> SeqEffect.WAVE
+        "piano" -> SeqEffect.PIANO
         "bars" -> SeqEffect.BARS
         "garlands" -> SeqEffect.GARLANDS
-        "butterfly", "liquid", "kaleidoscope" -> SeqEffect.BUTTERFLY
+        "butterfly" -> SeqEffect.BUTTERFLY
         "plasma" -> SeqEffect.PLASMA
-        "chase", "single strand", "singlestrand" -> SeqEffect.CHASE
+        "chase" -> SeqEffect.CHASE
         "marquee" -> SeqEffect.MARQUEE
-        "wave", "color wave", "colorwave" -> SeqEffect.COLOR_WAVE
+        "color wave", "colorwave" -> SeqEffect.COLOR_WAVE
         "wipe" -> SeqEffect.WIPE
         "curtain" -> SeqEffect.CURTAIN
-        "fire", "candle" -> SeqEffect.FIRE
+        "fire" -> SeqEffect.FIRE
         "shimmer" -> SeqEffect.SHIMMER
         "fireworks" -> SeqEffect.FIREWORKS
         "shockwave" -> SeqEffect.SHOCKWAVE
-        "ripple", "circles" -> SeqEffect.RIPPLE
+        "ripple" -> SeqEffect.RIPPLE
         "meteors" -> SeqEffect.METEORS
-        "morph", "lightning" -> SeqEffect.COMET
-        "spirals", "spirograph" -> SeqEffect.SPIRALS
-        "pinwheel", "fan" -> SeqEffect.PINWHEEL
+        "comet" -> SeqEffect.COMET
+        "spirals" -> SeqEffect.SPIRALS
+        "pinwheel" -> SeqEffect.PINWHEEL
         "galaxy" -> SeqEffect.GALAXY
-        "snowflakes", "snowstorm" -> SeqEffect.SNOW
+        "snowstorm" -> SeqEffect.SNOW
         "strobe" -> SeqEffect.STROBE
         "text" -> SeqEffect.TEXT
         "twinkle" -> SeqEffect.TWINKLE

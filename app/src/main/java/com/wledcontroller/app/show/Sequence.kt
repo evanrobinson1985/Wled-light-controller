@@ -51,10 +51,32 @@ enum class SeqEffect(val label: String) {
     MARQUEE("Marquee"),
     GARLANDS("Garlands"),
     SING("Sing (faces)"),
+    // More of xLights' effects.
+    OFF("Off"),
+    COLOR_WASH("Colour wash"),
+    FILL("Fill"),
+    CANDLE("Candle"),
+    CIRCLES("Circles"),
+    FAN("Fan"),
+    KALEIDOSCOPE("Kaleidoscope"),
+    LIFE("Life"),
+    LIGHTNING("Lightning"),
+    LINES("Lines"),
+    LIQUID("Liquid"),
+    MORPH("Morph"),
+    SHAPE("Shapes"),
+    SINGLE_STRAND("Single strand"),
+    SNOWFLAKES("Snowflakes"),
+    SPIROGRAPH("Spirograph"),
+    TENDRIL("Tendril"),
+    TREE("Tree"),
+    WARP("Warp"),
+    WAVE("Wave"),
+    PIANO("Piano (music)"),
     ;
 
     /** Effects that follow the song's loudness (need a song on the show). */
-    val musical get() = this == VU_METER || this == MUSIC_PULSE || this == BEAT_FLASH || this == SING
+    val musical get() = this == VU_METER || this == MUSIC_PULSE || this == BEAT_FLASH || this == SING || this == PIANO
 }
 
 /** How a track mixes with the tracks below it in the list. */
@@ -157,7 +179,26 @@ data class Clip(
     val tilt: Float? = null,
     val panCurve: ValueCurve? = null,
     val tiltCurve: ValueCurve? = null,
+    // Layer settings, as in xLights: the effect turned, zoomed, recoloured and sparkled.
+    /** 0..1 of a full turn. */
+    val rotation: Float = 0f,
+    /** Keeps turning: this many turns over the effect (negative turns the other way). */
+    val spin: Float = 0f,
+    /** 1 = as is; above 1 zooms in, below zooms out. */
+    val zoom: Float = 1f,
+    /** When set, zoom goes from [zoom] at the start to this at the end. */
+    val zoomEnd: Float? = null,
+    /** 0..1 round the colour wheel. */
+    val hueShift: Float = 0f,
+    /** 0..1: white sparkles over the effect. */
+    val sparkles: Float = 0f,
+    /** Shown left-to-right reversed / upside down. */
+    val mirrorX: Boolean = false,
+    val mirrorY: Boolean = false,
 ) {
+    /** Whether any layer setting changes the effect. */
+    val hasLayerSettings get() = rotation != 0f || spin != 0f || zoom != 1f || zoomEnd != null || hueShift != 0f || sparkles > 0f || mirrorX || mirrorY
+
     val speedCurveOrRamp get() = speedCurve ?: speedEnd?.let { ValueCurve(CurveShape.RAMP, it) }
     val intensityCurveOrRamp get() = intensityCurve ?: intensityEnd?.let { ValueCurve(CurveShape.RAMP, it) }
 
