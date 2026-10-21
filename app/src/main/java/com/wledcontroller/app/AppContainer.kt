@@ -63,5 +63,8 @@ class AppContainer(context: Context) {
         }
         scope.launch { store.mqtt.collect { s -> mqtt.update(s ?: com.wledcontroller.app.data.MqttSettings()) } }
         scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }
+        // Every real controller ever added comes back, whatever replaced the list (the simulator
+        // keeps its own, so not while it's on).
+        scope.launch { if (!simulator.active.value) runCatching { store.restoreRememberedDevices() } }
     }
 }

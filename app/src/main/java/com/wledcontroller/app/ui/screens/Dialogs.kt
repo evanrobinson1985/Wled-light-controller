@@ -94,13 +94,21 @@ fun AddDeviceSheet(onDismiss: () -> Unit) {
         job.cancel()
     }
 
+    val simActive by container.simulator.active.collectAsStateWithLifecycle()
+    var remembered by remember { mutableStateOf(container.store.rememberedDevices().map { WledApi.normalizeHost(it.host) }.toSet()) }
     fun add(name: String, host: String) {
-        scope.launch {
-            container.store.upsertDevice(SavedDevice(UUID.randomUUID().toString(), name, WledApi.normalizeHost(host)))
+        val device = SavedDevice(UUID.randomUUID().toString(), name, WledApi.normalizeHost(host))
+        if (simActive && !com.wledcontroller.app.data.isSimulatedHost(host)) {
+            // The simulator only drives virtual lights: keep the real one for the real setup.
+            container.store.rememberDevice(device)
+            remembered = remembered + device.host
+            return
         }
+        // Saved even if this sheet closes straight away.
+        container.scope.launch { container.store.upsertDevice(device) }
     }
 
-    val savedHosts = saved.map { WledApi.normalizeHost(it.host) }.toSet()
+    val savedHosts = saved.map { WledApi.normalizeHost(it.host) }.toSet() + if (simActive) remembered else emptySet()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding()) {
@@ -111,6 +119,14 @@ fun AddDeviceSheet(onDismiss: () -> Unit) {
                 if (scanning) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             }
             if (scanning) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
+            if (simActive) {
+                Text(
+                    "The simulator is on. Real lights you add here are saved to your real setup and appear when you leave the simulator.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+            }
             LazyColumn(Modifier.heightIn(max = 320.dp)) {
                 items(found, key = { it.host }) { d ->
                     val added = WledApi.normalizeHost(d.host) in savedHosts

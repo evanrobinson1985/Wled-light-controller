@@ -105,6 +105,8 @@ class Simulator(
             flag.delete()
         }
         _active.value = false
+        // Real controllers added while the simulator was on (or ever) belong to the real setup.
+        store.restoreRememberedDevices()
         checkDemo()
         reconnectAll()
         if (store.scheduleOn.first()) ShowRunnerService.startSchedule(context)

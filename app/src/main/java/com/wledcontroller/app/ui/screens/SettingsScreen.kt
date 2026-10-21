@@ -194,6 +194,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}) {
                             container.backup.restore(uri).also {
                                 // In the simulator, the restored data becomes the virtual house.
                                 if (container.simulator.active.value) com.wledcontroller.app.sim.SimHub.load(container.simulator.simFile)
+                                // Controllers added since the backup was made stay.
+                                else container.store.restoreRememberedDevices()
                             }
                         }
                             .onSuccess { s -> message = "Restored ${s.devices} controllers and ${s.shows} shows (${s.files} files)." }

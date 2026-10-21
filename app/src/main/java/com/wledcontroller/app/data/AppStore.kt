@@ -28,6 +28,9 @@ data class SavedDevice(
     val mqttTopic: String? = null,
 )
 
+/** Simulated controllers answer on 127.77.x.x inside the app. */
+internal fun isSimulatedHost(host: String) = WledApi.normalizeHost(host).substringBefore(':').startsWith("127.77.")
+
 @Serializable
 data class DeviceGroup(val id: String, val name: String, val deviceIds: List<String>)
 
@@ -88,11 +91,16 @@ class AppStore(private val context: Context) {
     val favoriteEffects: Flow<Set<String>> = context.dataStore.data.map { it[Keys.FAVORITE_EFFECTS] ?: emptySet() }
     val tileDeviceId: Flow<String?> = context.dataStore.data.map { it[Keys.TILE_DEVICE] }
 
-    suspend fun upsertDevice(device: SavedDevice) = editList<SavedDevice>(Keys.DEVICES) { list ->
-        if (list.any { it.id == device.id }) list.map { if (it.id == device.id) device else it } else list + device
+    suspend fun upsertDevice(device: SavedDevice) {
+        editList<SavedDevice>(Keys.DEVICES) { list ->
+            if (list.any { it.id == device.id }) list.map { if (it.id == device.id) device else it } else list + device
+        }
+        rememberDevice(device)
     }
 
+    /** Removes a controller for good (the user's choice): from the app and from [rememberedDevices]. */
     suspend fun removeDevice(id: String) {
+        forgetDevice(id)
         editList<SavedDevice>(Keys.DEVICES) { list -> list.filterNot { it.id == id } }
         editList<DeviceGroup>(Keys.GROUPS) { list -> list.map { g -> g.copy(deviceIds = g.deviceIds - id) } }
     }
@@ -184,6 +192,48 @@ class AppStore(private val context: Context) {
     suspend fun streamTargets(): Map<String, String> =
         devices.first().associate { it.id to it.host } + outputs.first().associate { it.id to it.address } +
             fixtures.first().associate { it.id to DmxRegistry.address(it.id) }
+
+    /**
+     * Every real controller ever added, kept apart from the settings above (which restores and
+     * the simulator swap in and out), so one is only ever lost by removing it. Simulated
+     * controllers aren't kept here.
+     */
+    private val registry = context.getSharedPreferences("device_registry", android.content.Context.MODE_PRIVATE)
+
+    fun rememberedDevices(): List<SavedDevice> =
+        registry.getString("devices", null)?.let { runCatching { json.decodeFromString<List<SavedDevice>>(it) }.getOrNull() } ?: emptyList()
+
+    /** Keeps [device] (a real one) in the record, whatever happens to the app's settings. */
+    fun rememberDevice(device: SavedDevice) {
+        if (isSimulatedHost(device.host)) return
+        synchronized(registry) {
+            val list = rememberedDevices()
+            val updated = if (list.any { it.id == device.id }) list.map { if (it.id == device.id) device else it } else list + device
+            registry.edit().putString("devices", json.encodeToString(updated)).commit()
+        }
+    }
+
+    private fun forgetDevice(id: String) = synchronized(registry) {
+        registry.edit().putString("devices", json.encodeToString(rememberedDevices().filterNot { it.id == id })).commit()
+    }
+
+    /**
+     * Puts back any remembered controller missing from the app (after a restore, leaving the
+     * simulator, or anything else that replaced the list), and remembers any the app has that
+     * the record doesn't yet. Returns how many came back. Not for use inside the simulator.
+     */
+    suspend fun restoreRememberedDevices(): Int {
+        var added = 0
+        editList<SavedDevice>(Keys.DEVICES) { list ->
+            val ids = list.map { it.id }.toSet()
+            val hosts = list.map { WledApi.normalizeHost(it.host) }.toSet()
+            val missing = rememberedDevices().filter { it.id !in ids && WledApi.normalizeHost(it.host) !in hosts }
+            added = missing.size
+            list + missing
+        }
+        devices.first().forEach { rememberDevice(it) }
+        return added
+    }
 
     // Kept apart from the settings above, which backups and the simulator swap in and out.
     private val flags = context.getSharedPreferences("app_flags", Context.MODE_PRIVATE)
