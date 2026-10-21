@@ -562,7 +562,8 @@ object SequenceRenderer {
                 // Following the lyrics: the mouth shape of the sound being sung.
                 val mc = cols.getOrElse(1) { cols[0] }
                 when (part) {
-                    FACE_EYES -> cols[0]
+                    // Eyes blink now and then, as faces in xLights do.
+                    FACE_EYES -> if (HouseRenderer.frac(t / 3.7f) > 0.96f) 0 else cols[0]
                     FACE_CLOSED -> if (mouth == 0) mc else 0
                     FACE_OPEN -> if (mouth == 1) mc else 0
                     FACE_WIDE -> if (mouth == 2) mc else 0
@@ -571,7 +572,7 @@ object SequenceRenderer {
             } else {
                 // On a face: eyes stay lit; the mouth opens with the song. Elsewhere: pulse with it.
                 when (part) {
-                    FACE_EYES -> cols[0]
+                    FACE_EYES -> if (HouseRenderer.frac(t / 3.7f) > 0.96f) 0 else cols[0]
                     FACE_CLOSED -> if (level < 0.15f) cols.getOrElse(1) { cols[0] } else 0
                     FACE_OPEN -> if (level in 0.15f..0.45f) cols.getOrElse(1) { cols[0] } else 0
                     FACE_WIDE -> if (level > 0.45f) cols.getOrElse(1) { cols[0] } else 0

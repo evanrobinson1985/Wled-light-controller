@@ -55,6 +55,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.FactCheck
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddToPhotos
 import androidx.compose.material.icons.filled.ContentCopy
@@ -191,6 +194,17 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
         }
     }
     var importMenu by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    if (checking) {
+        val outputs by container.store.outputs.collectAsStateWithLifecycle(emptyList())
+        val fixtures by container.store.fixtures.collectAsStateWithLifecycle(emptyList())
+        val issues = remember(map, shows, controllers, outputs, fixtures) {
+            val known = controllers.associate { it.id to it.snapshot.value.info?.ledCount } +
+                outputs.associate { it.id to null } + fixtures.associate { it.id to null }
+            com.wledcontroller.app.show.SetupCheck.run(map, known, shows)
+        }
+        SetupCheckDialog(issues, onDismiss = { checking = false }, onEditMap = { checking = false; onEditMap() })
+    }
     // An xLights .xsq waiting for its models to be matched to the house.
     var xsqPending by remember { mutableStateOf<Pair<com.wledcontroller.app.show.XsqSequence, String>?>(null) }
     val xsqImporter = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -255,6 +269,7 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                             )
                         }
                     }
+                    IconButton(onClick = { checking = true }) { Icon(Icons.Filled.FactCheck, "Check for problems") }
                     TextButton(onClick = onSchedule) {
                         Icon(Icons.Filled.Schedule, null); Spacer(Modifier.width(6.dp)); Text("Schedule")
                     }
@@ -1453,6 +1468,41 @@ private fun ClipInspector(
     }
 }
 
+// ================================================================== check
+
+/** What the setup check found, problems first. */
+@Composable
+private fun SetupCheckDialog(issues: List<com.wledcontroller.app.show.SetupIssue>, onDismiss: () -> Unit, onEditMap: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (issues.isEmpty()) "All good" else "Check: ${issues.size} to look at") },
+        text = {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (issues.isEmpty()) {
+                    Text("Every prop has a controller and a place on the house, and every show's tracks, pictures, videos and songs are there.")
+                }
+                issues.forEach { i ->
+                    val problem = i.severity == com.wledcontroller.app.show.SetupIssue.Severity.PROBLEM
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(
+                            if (problem) Icons.Filled.Error else Icons.Filled.Warning, null,
+                            Modifier.size(18.dp).padding(top = 2.dp),
+                            tint = if (problem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(i.where, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                            Text(i.message, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = { if (issues.any { it.where.startsWith("Prop") || it.where.startsWith("Group") }) TextButton(onClick = onEditMap) { Text("Open house map") } },
+    )
+}
+
 // ================================================================== layer settings and presets
 
 /** xLights' layer settings: turn, spin, zoom, mirror, recolour and sparkle the effect. */
@@ -1626,7 +1676,7 @@ internal fun MusicSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilledTonalButton(
                     enabled = seq.audioFile != null && busy == null,
                     onClick = {
@@ -1645,6 +1695,25 @@ internal fun MusicSheet(
                         }
                     },
                 ) { Text("Detect beats") }
+                OutlinedButton(
+                    enabled = busy == null && seq.audioFile != null,
+                    onClick = {
+                        val path = seq.audioFile
+                        if (path != null) scope.launch {
+                            busy = "Listening for notes…"; error = null
+                            runCatching {
+                                withContext(Dispatchers.Default) {
+                                    val env = envelope?.takeIf { it.bands != null } ?: AudioAnalyzer.envelope(path)
+                                    com.wledcontroller.app.show.Onsets.detect(env.values, env.bands, env.hopMs)
+                                }
+                            }.onSuccess { notes ->
+                                if (notes.isEmpty()) error = "Couldn't pick out notes in this song."
+                                else onChange(current.copy(marks = notes.filter { it < current.durationMs }, bpm = null))
+                            }.onFailure { error = "Couldn't analyse the song: ${it.message}" }
+                            busy = null
+                        }
+                    },
+                ) { Text("Detect notes") }
                 OutlinedButton(enabled = seq.marks.isNotEmpty(), onClick = { onChange(seq.copy(marks = emptyList(), bpm = null)) }) { Text("Clear marks") }
             }
 

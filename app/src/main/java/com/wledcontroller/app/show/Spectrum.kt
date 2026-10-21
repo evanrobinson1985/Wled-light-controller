@@ -55,3 +55,35 @@ class BandAnalyzer(sampleRate: Int, private val window: Int = 1024) {
         }
     }
 }
+
+/** Finds where new notes and hits start in a song (xLights' note onset timing). */
+object Onsets {
+    /**
+     * Times (ms) where the sound suddenly gains energy: spectral flux over [bands] (or rises in
+     * loudness [values] without them), above a running average, at least [minGapMs] apart.
+     */
+    fun detect(values: FloatArray, bands: Array<FloatArray>?, hopMs: Int, minGapMs: Int = 90, sensitivity: Float = 0.5f): List<Long> {
+        val n = bands?.firstOrNull()?.size ?: values.size
+        if (n < 3) return emptyList()
+        val flux = FloatArray(n)
+        for (i in 1 until n) {
+            flux[i] = if (bands != null) bands.sumOf { b -> (b[i] - b[i - 1]).coerceAtLeast(0f).toDouble() }.toFloat()
+            else (values[i] - values[i - 1]).coerceAtLeast(0f)
+        }
+        val w = (300 / hopMs).coerceAtLeast(3)
+        val k = 1.2f + (1f - sensitivity) * 1.2f
+        val floor = (flux.maxOrNull() ?: 0f) * 0.08f
+        val out = ArrayList<Long>()
+        var last = -1_000_000L
+        for (i in 1 until n - 1) {
+            if (flux[i] <= flux[i - 1] || flux[i] < flux[i + 1]) continue
+            var sum = 0f; var c = 0
+            for (j in maxOf(0, i - w)..minOf(n - 1, i + w)) { sum += flux[j]; c++ }
+            if (flux[i] < sum / c * k || flux[i] < floor) continue
+            val ms = i.toLong() * hopMs
+            if (ms - last < minGapMs) continue
+            out += ms; last = ms
+        }
+        return out
+    }
+}

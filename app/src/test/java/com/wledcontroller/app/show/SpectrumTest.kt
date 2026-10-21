@@ -45,3 +45,17 @@ class SpectrumTest {
         assertTrue("left $left right $right", left >= 8 && right == 0)
     }
 }
+
+class OnsetsTest {
+    @Test
+    fun findsEachHit() {
+        // Four drum hits, half a second apart, decaying between.
+        val hop = 10
+        val n = 250
+        val bands = Array(BandAnalyzer.BANDS) { b ->
+            FloatArray(n) { i -> val since = (i - 20).mod(50); if (i < 20) 0f else (1f - since / 25f).coerceAtLeast(0f) * (0.5f + b * 0.03f) }
+        }
+        val hits = Onsets.detect(FloatArray(n), bands, hop)
+        assertEquals(listOf(200L, 700L, 1200L, 1700L, 2200L), hits)
+    }
+}
