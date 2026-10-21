@@ -97,6 +97,7 @@ class MainActivity : ComponentActivity() {
                         composable("settings") {
                             SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }, onOpenTest = { nav.navigate("test") })
                         }
+                        composable("house/controllers") { com.wledcontroller.app.ui.screens.ControllerMapScreen(onBack = { nav.popBackStack() }) }
                         composable("test") { com.wledcontroller.app.ui.screens.TestLightsScreen(onBack = { nav.popBackStack() }) }
                         composable("house") {
                             HouseScreen(
@@ -119,7 +120,7 @@ class MainActivity : ComponentActivity() {
                             SequenceEditorScreen(sequenceId = entry.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
                         }
                         composable("house/map") {
-                            HouseMapEditor(onBack = { nav.popBackStack() }, onScan = { nav.navigate("house/scan") })
+                            HouseMapEditor(onBack = { nav.popBackStack() }, onScan = { nav.navigate("house/scan") }, onControllers = { nav.navigate("house/controllers") })
                         }
                         composable("house/scan") {
                             CameraScanScreen(

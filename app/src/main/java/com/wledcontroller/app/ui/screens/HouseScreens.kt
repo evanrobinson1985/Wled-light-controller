@@ -395,7 +395,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
 // ================================================================== map editor
 
 @Composable
-fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
+fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> Unit = {}) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
@@ -597,6 +597,10 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit) {
                                 DropdownMenuItem(
                                     text = { Column { Text("My light models"); Text("Props you've kept, to add again", style = MaterialTheme.typography.labelSmall) } },
                                     onClick = { libraryMenu = false; showModels = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Column { Text("Controller map"); Text("Which props are on which controller and output", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = { libraryMenu = false; onControllers() },
                                 )
                             }
                         }
