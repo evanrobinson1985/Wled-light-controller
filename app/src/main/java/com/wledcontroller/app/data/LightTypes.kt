@@ -130,6 +130,7 @@ object EffectFit {
             SeqEffect.MUSIC -> setOf(m, t, a)
             SeqEffect.STATE -> setOf(m, a, p)
             SeqEffect.SKETCH -> setOf(m)
+            SeqEffect.SHADER -> setOf(m, t, s)
         }
     }
 

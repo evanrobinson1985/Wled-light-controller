@@ -239,6 +239,12 @@ object SequenceRenderer {
         return out
     }
 
+    /** Parsed Shader formulas, so each is read once (null for ones that don't parse). */
+    private val formulas = object {
+        private val cache = HashMap<String, Formula?>()
+        @Synchronized fun get(text: String): Formula? = cache.getOrPut(text) { runCatching { Formula.parse(text) }.getOrNull() }.also { if (cache.size > 64) cache.clear() }
+    }
+
     /** [rgb] turned [shift] (0..1) of the way round the colour wheel. */
     internal fun hueShift(rgb: Int, shift: Float): Int {
         val r = ((rgb shr 16) and 0xFF) / 255f; val g = ((rgb shr 8) and 0xFF) / 255f; val b = (rgb and 0xFF) / 255f
@@ -621,6 +627,11 @@ object SequenceRenderer {
                 }
             }
             SeqEffect.STATE -> 0 // Drawn in render(), which knows the timing track.
+            SeqEffect.SHADER -> {
+                val f = formulas.get(c.formula ?: Formula.examples.first().second) ?: return 0
+                val v = Formula.Vars(lx, ly, t, pos, c.speed, c.size)
+                HouseRenderer.palette(cols, f.eval(v))
+            }
             SeqEffect.SKETCH -> {
                 // The drawn path appears along its length over the effect, then stays.
                 val path = c.sketch

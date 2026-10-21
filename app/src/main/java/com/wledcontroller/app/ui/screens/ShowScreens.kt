@@ -630,7 +630,9 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                     val gaps = remember(layout, map.aspect) { neighbourGaps(layout.leds, map.aspect) }
                     val fixtures by LocalAppContainer.current.store.fixtures.collectAsStateWithLifecycle(emptyList())
                     val fixtureIds = remember(fixtures) { fixtures.map { it.id }.toSet() }
-                    HouseCanvas(map, photo, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp)) {
+                    var view3d by remember { mutableStateOf(false) }
+                    if (view3d) com.wledcontroller.app.ui.components.House3DView(map, layout.leds, { colors.getOrElse(it) { 0 } }, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp))
+                    else HouseCanvas(map, photo, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp)) {
                         // DMX fixtures as spotlights with their beams, behind the other lights.
                         layout.leds.forEachIndexed { i, l ->
                             if (l.deviceId in fixtureIds) {
@@ -641,6 +643,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                             if (!l.hidden && l.deviceId !in fixtureIds) drawPixel(colors[i], Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
                         }
                     }
+                    FilterChip(selected = view3d, onClick = { view3d = !view3d }, label = { Text("3D") }, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp))
                 }
             }
             val transport: @Composable () -> Unit = {
@@ -1399,6 +1402,21 @@ private fun ClipInspector(
                 if (timingTracks.isEmpty()) Text("Add a timing track first (♪ › Timing tracks).", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     timingTracks.forEach { tt -> FilterChip(selected = clip.timingTrackId == tt.id, onClick = { onChange(clip.copy(timingTrackId = tt.id)) }, label = { Text(tt.name) }) }
+                }
+            }
+            clip.effect == SeqEffect.SHADER -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                var text by remember(clip.id) { mutableStateOf(clip.formula ?: com.wledcontroller.app.show.Formula.examples.first().second) }
+                val problem = remember(text) { com.wledcontroller.app.show.Formula.check(text) }
+                OutlinedTextField(
+                    text, { text = it; if (com.wledcontroller.app.show.Formula.check(it) == null) onChange(clip.copy(formula = it)) },
+                    label = { Text("Formula") }, isError = problem != null, singleLine = false, maxLines = 3,
+                    supportingText = { Text(problem ?: "x, y across and up · t seconds · r, a from the middle · i along · result picks the colour") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.wledcontroller.app.show.Formula.examples.forEach { (name, f) ->
+                        SuggestionChip(onClick = { text = f; onChange(clip.copy(formula = f)) }, label = { Text(name) })
+                    }
                 }
             }
             clip.effect == SeqEffect.SKETCH -> Row(verticalAlignment = Alignment.CenterVertically) {

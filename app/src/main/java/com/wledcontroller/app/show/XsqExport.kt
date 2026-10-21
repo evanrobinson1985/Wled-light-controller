@@ -60,6 +60,7 @@ object XsqExport {
         SeqEffect.WAVE -> "Wave"
         SeqEffect.STATE -> "State"
         SeqEffect.SKETCH -> "Sketch"
+        SeqEffect.SHADER -> "Shader"
     }
 
     private fun esc(s: String) = s.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;").replace(">", "&gt;")

@@ -173,6 +173,7 @@ object XsqImport {
         "video" -> SeqEffect.VIDEO
         "state" -> SeqEffect.STATE
         "sketch" -> SeqEffect.SKETCH
+        "shader" -> SeqEffect.SHADER
         "rainbow" -> SeqEffect.RAINBOW
         "pulse" -> SeqEffect.PULSE
         else -> null

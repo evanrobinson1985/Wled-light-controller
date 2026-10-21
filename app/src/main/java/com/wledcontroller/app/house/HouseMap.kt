@@ -44,6 +44,8 @@ data class LightRun(
     val mirrored: Boolean = false,
     /** A model shown upside down. */
     val upsideDown: Boolean = false,
+    /** How far in front of the house wall it stands (yard props), in cm, for the 3D view. */
+    val depthCm: Float = 0f,
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null

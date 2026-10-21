@@ -269,7 +269,12 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
 
             val fixtureList by container.store.fixtures.collectAsStateWithLifecycle(emptyList())
             val fixtureIds = remember(fixtureList) { fixtureList.map { it.id }.toSet() }
-            HouseCanvas(map, photo) {
+            var view3d by rememberSaveable { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                FilterChip(selected = view3d, onClick = { view3d = !view3d }, label = { Text("3D") })
+            }
+            if (view3d) com.wledcontroller.app.ui.components.House3DView(map, leds, { i -> leds[i].let { l -> HouseRenderer.color(params, l.x, l.y, t, i, l.orderInRun) } })
+            else HouseCanvas(map, photo) {
                 leds.forEachIndexed { i, led ->
                     if (led.hidden) return@forEachIndexed // Out of sight in the photo.
                     val o = Offset(led.x * size.width, led.y * size.height)
@@ -1178,6 +1183,8 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
     var realW by remember { mutableStateOf(inches(run.realWidthCm)) }
     var realH by remember { mutableStateOf(inches(run.realHeightCm)) }
     var mirrored by remember { mutableStateOf(run.mirrored) }
+    // Distance in front of the house, in feet (or metres), for the 3D view.
+    var depthText by remember { mutableStateOf(if (run.depthCm > 0f) "%.1f".format(if (map.useInches) run.depthCm / 30.48f else run.depthCm / 100f).removeSuffix(".0") else "") }
     var upsideDown by remember { mutableStateOf(run.upsideDown) }
     val activeModel = modelKind?.takeIf { !isFixture }?.let { model.copy(kind = it) }
     val valid = name.isNotBlank() && device != null && s != null && (activeModel != null || (c != null && c > 0)) && (!fixedSpacing || spacingCm != null)
@@ -1188,6 +1195,13 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("Name (e.g. Roofline)") }, singleLine = true)
+                OutlinedTextField(
+                    depthText, { depthText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' }.take(5) },
+                    label = { Text(if (map.useInches) "In front of the house (feet)" else "In front of the house (metres)") },
+                    supportingText = { Text("For the 3D view: 0 or blank for lights on the house, more for yard props.") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                )
                 Text("Layout", style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(selected = modelKind == null, onClick = { modelKind = null }, label = { Text("Traced line") })
@@ -1339,6 +1353,7 @@ private fun RunDialog(run: LightRun, map: HouseMap, onDismiss: () -> Unit, onSav
                         realHeightCm = realH.toFloatOrNull()?.takeIf { it > 0f && activeModel != null }?.times(2.54f),
                         mirrored = activeModel != null && mirrored,
                         upsideDown = activeModel != null && upsideDown,
+                        depthCm = depthText.replace(',', '.').toFloatOrNull()?.coerceIn(0f, 500f)?.let { if (map.useInches) it * 30.48f else it * 100f } ?: 0f,
                     )
                 ) }) {
                 Text(if (run.count == 0) "Next: trace it" else "Save")

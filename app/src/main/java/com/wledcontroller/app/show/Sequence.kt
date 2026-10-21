@@ -77,6 +77,7 @@ enum class SeqEffect(val label: String) {
     MUSIC("Music (spectrum)"),
     STATE("State"),
     SKETCH("Sketch"),
+    SHADER("Shader (formula)"),
     ;
 
     /** Effects that follow the song's loudness (need a song on the show). */
@@ -210,6 +211,8 @@ data class Clip(
     val timingTrackId: String? = null,
     /** For the Sketch effect: the drawn path, points 0..1 across and up the lights' area. */
     val sketch: List<com.wledcontroller.app.house.MapPoint> = emptyList(),
+    /** For the Shader effect: the formula (see [Formula]). */
+    val formula: String? = null,
     /** When set, the colours change to these over the effect (xLights' colour curves). */
     val colorsEnd: List<Int>? = null,
 ) {
