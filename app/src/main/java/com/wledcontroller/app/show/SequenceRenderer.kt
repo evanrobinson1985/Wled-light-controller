@@ -70,6 +70,37 @@ object SequenceRenderer {
             val minX = xs.minOrNull() ?: 0f; val maxX = xs.maxOrNull() ?: 1f
             val minY = ys.minOrNull() ?: 0f; val maxY = ys.maxOrNull() ?: 1f
             val sx = (maxX - minX).takeIf { it > 1e-4f }; val sy = (maxY - minY).takeIf { it > 1e-4f }
+            val style = if (sub != null) RenderStyle.AS_ONE else track.style
+            if (style == RenderStyle.SINGLE_LINE) {
+                // Every LED in order, end to end.
+                val n = idx.size
+                val along = FloatArray(n) { if (n <= 1) 0f else it / (n - 1f) }
+                return@map TrackLayout(idx, along, along.copyOf(), FloatArray(n) { 0.5f }, Array(n) { Direction.ALONG }, aspect = 8f)
+            }
+            if (style == RenderStyle.PER_PROP) {
+                // Each prop fills its own box, so every prop shows the whole effect.
+                val byRun = idx.indices.groupBy { leds[idx[it]].runIndex }
+                val lx = FloatArray(idx.size); val ly = FloatArray(idx.size)
+                val aspects = ArrayList<Float>()
+                for ((_, ks) in byRun) {
+                    val x0 = ks.minOf { xs[it] }; val x1 = ks.maxOf { xs[it] }
+                    val y0 = ks.minOf { ys[it] }; val y1 = ks.maxOf { ys[it] }
+                    val w = (x1 - x0).takeIf { it > 1e-4f }; val h = (y1 - y0).takeIf { it > 1e-4f }
+                    for (k in ks) {
+                        lx[k] = w?.let { (xs[k] - x0) / it } ?: 0.5f
+                        ly[k] = h?.let { 1f - (ys[k] - y0) / it } ?: 0.5f
+                    }
+                    aspects += if (w != null && h != null) w / h else if (w != null) 8f else 1f
+                }
+                return@map TrackLayout(
+                    ledIndex = idx,
+                    along = FloatArray(idx.size) { val l = leds[idx[it]]; val n = runCounts[l.runIndex]; if (n <= 1) 0f else l.orderInRun / (n - 1f) },
+                    lx = lx, ly = ly,
+                    natural = Array(idx.size) { runs[leds[idx[it]].runIndex].prop.natural },
+                    aspect = aspects.sorted().getOrElse(aspects.size / 2) { 1f },
+                    part = IntArray(idx.size) { i -> val l = leds[idx[i]]; runs[l.runIndex].model?.facePart(l.orderInRun) ?: -1 },
+                )
+            }
             TrackLayout(
                 ledIndex = idx,
                 along = FloatArray(idx.size) {
@@ -110,6 +141,10 @@ object SequenceRenderer {
         motion?.fill(0.5f)
         val level = audio?.at(timeMs)?.coerceIn(0f, 1f) ?: 0f
         val beat = audio?.let { beatStrength(it, timeMs) } ?: 0f
+        // With lyrics, singing faces follow the words; without, the song's loudness.
+        val lyrics = seq.lyrics?.takeIf { it.phonemes.isNotEmpty() }
+        val mouth = lyrics?.let { l -> l.phonemeAt(timeMs)?.mouth?.ordinal ?: Phoneme.Mouth.CLOSED.ordinal } ?: -1
+        val singing = lyrics?.phonemeAt(timeMs)?.let { it != Phoneme.REST } ?: false
         for (ti in seq.tracks.indices.reversed()) {
             val track = seq.tracks[ti]
             if (track.muted) continue
@@ -122,7 +157,13 @@ object SequenceRenderer {
             // Speed uses its average so far, so motion stays continuous as the speed changes.
             val speed = stored.speedCurveOrRamp?.let { averageOf(it, stored.speed, progress) } ?: stored.speed
             val size = stored.sizeCurve?.at(stored.size, progress) ?: stored.size
-            val clip = if (speed != stored.speed || size != stored.size) stored.copy(speed = speed, size = size) else stored
+            // Colours changing over the effect.
+            val colors = stored.colorsEnd?.let { end ->
+                List(maxOf(stored.colors.size, end.size)) { i ->
+                    HouseRenderer.lerp(stored.colors.getOrElse(i) { stored.colors.lastOrNull() ?: 0 } and 0xFFFFFF, end.getOrElse(i) { end.lastOrNull() ?: 0 } and 0xFFFFFF, progress)
+                }
+            } ?: stored.colors
+            val clip = if (speed != stored.speed || size != stored.size || colors !== stored.colors) stored.copy(speed = speed, size = size, colors = colors) else stored
             if (motion != null && (stored.pan != null || stored.tilt != null)) {
                 val pan = stored.pan?.let { stored.panCurve?.at(it, progress) ?: it }
                 val tilt = stored.tilt?.let { stored.tiltCurve?.at(it, progress) ?: it }
@@ -140,6 +181,8 @@ object SequenceRenderer {
             val cosA = cos(angle); val sinA = sin(angle)
             val turned = angle != 0f || zoom != 1f
             val sparkleStep = floor(t * 12f).toInt()
+            // Blurred effects are drawn first, softened, then mixed in.
+            val blurred = if (clip.blur > 0f) IntArray(tl.ledIndex.size) else null
             for (k in tl.ledIndex.indices) {
                 val li = tl.ledIndex[k]
                 var lx = tl.lx[k]; var ly = tl.ly[k]; var along = tl.along[k]
@@ -156,13 +199,17 @@ object SequenceRenderer {
                 val dir = if (clip.direction == Direction.AUTO) tl.natural[k] else clip.direction
                 val pos = position(dir, along, lx, ly)
                 val reveal = transition(clip, local, pos, lx, ly, li)
-                var color = if (reveal <= 0f) 0 else effectColor(clip, pos, lx, ly, t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 })
+                var color = if (reveal <= 0f) 0 else effectColor(clip, pos, lx, ly, t, progress, li, tl.aspect, level, beat, tl.part.getOrElse(k) { -1 }, mouth, singing)
                 if (layered && reveal > 0f) {
                     if (clip.hueShift != 0f && color != 0) color = hueShift(color, clip.hueShift)
                     if (clip.sparkles > 0f && HouseRenderer.hash(li, sparkleStep) > 1f - clip.sparkles * 0.2f) color = 0xFFFFFF
                 }
                 val c = if (reveal <= 0f) 0 else HouseRenderer.scale(color, intensity * reveal)
-                out[li] = mix(track.blend, out[li], c)
+                if (blurred != null) blurred[k] = c else out[li] = mix(track.blend, out[li], c)
+            }
+            if (blurred != null) {
+                val soft = blur(blurred, 1 + (clip.blur * 6f).toInt())
+                for (k in tl.ledIndex.indices) { val li = tl.ledIndex[k]; out[li] = mix(track.blend, out[li], soft[k]) }
             }
         }
         return out
@@ -187,6 +234,20 @@ object SequenceRenderer {
             3 -> Triple(p, q, v); 4 -> Triple(tt, p, v); else -> Triple(v, p, q)
         }
         return ((rr * 255).toInt() shl 16) or ((gg * 255).toInt() shl 8) or (bb * 255).toInt()
+    }
+
+    /** [src] averaged over [radius] neighbours each side, along the track's lights. */
+    internal fun blur(src: IntArray, radius: Int): IntArray {
+        val n = src.size
+        val out = IntArray(n)
+        for (i in 0 until n) {
+            var r = 0; var g = 0; var b = 0; var c = 0
+            for (j in maxOf(0, i - radius)..minOf(n - 1, i + radius)) {
+                val v = src[j]; r += (v shr 16) and 0xFF; g += (v shr 8) and 0xFF; b += v and 0xFF; c++
+            }
+            out[i] = ((r / c) shl 16) or ((g / c) shl 8) or (b / c)
+        }
+        return out
     }
 
     /** 0 → 1 → 0 as [v] goes from 0 to 1, repeating: something bouncing between two walls. */
@@ -337,6 +398,8 @@ object SequenceRenderer {
     private fun effectColor(
         c: Clip, pos: Float, lx: Float, ly: Float, t: Float, progress: Float, id: Int,
         aspect: Float = 1f, level: Float = 0f, beat: Float = 0f, part: Int = -1,
+        /** From the lyrics: 0 closed, 1 open, 2 wide; -1 without lyrics. */
+        mouth: Int = -1, singing: Boolean = false,
     ): Int {
         val cols = c.colors.ifEmpty { listOf(0xFFFFFF) }
         val rate = 0.1f + c.speed * 2.9f         // cycles per second-ish
@@ -492,7 +555,17 @@ object SequenceRenderer {
                 val sag = 0.5f - 0.5f * cos(HouseRenderer.frac(pos * swags + t * rate * 0.1f) * 2f * PI.toFloat())
                 HouseRenderer.scale(HouseRenderer.palette(cols, pos), 0.15f + 0.85f * sag * sag)
             }
-            SeqEffect.SING -> {
+            SeqEffect.SING -> if (mouth >= 0) {
+                // Following the lyrics: the mouth shape of the sound being sung.
+                val mc = cols.getOrElse(1) { cols[0] }
+                when (part) {
+                    FACE_EYES -> cols[0]
+                    FACE_CLOSED -> if (mouth == 0) mc else 0
+                    FACE_OPEN -> if (mouth == 1) mc else 0
+                    FACE_WIDE -> if (mouth == 2) mc else 0
+                    else -> HouseRenderer.scale(cols[0], if (singing) 1f else 0.15f)
+                }
+            } else {
                 // On a face: eyes stay lit; the mouth opens with the song. Elsewhere: pulse with it.
                 when (part) {
                     FACE_EYES -> cols[0]

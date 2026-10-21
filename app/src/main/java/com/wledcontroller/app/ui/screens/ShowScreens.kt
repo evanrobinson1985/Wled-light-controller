@@ -91,6 +91,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Button
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,6 +103,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -141,6 +143,8 @@ import com.wledcontroller.app.show.CurveShape
 import com.wledcontroller.app.show.BlendMode
 import com.wledcontroller.app.show.ClipClipboard
 import com.wledcontroller.app.show.SeqEffect
+import com.wledcontroller.app.show.LyricSync
+import com.wledcontroller.app.show.RenderStyle
 import com.wledcontroller.app.show.Sequence
 import com.wledcontroller.app.show.SequenceRenderer
 import com.wledcontroller.app.show.Track
@@ -468,6 +472,14 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
     var scrollX by remember { mutableFloatStateOf(0f) }
     var addingTrack by remember { mutableStateOf(false) }
     var showMusic by remember { mutableStateOf(false) }
+    // Tapping along with the lyrics: the words, and when each line started.
+    var tapLyrics by remember { mutableStateOf<String?>(null) }
+    val tapStarts = remember { mutableStateListOf<Long>() }
+    fun finishTapping() {
+        val words = tapLyrics ?: return
+        if (tapStarts.isNotEmpty()) seq = seq.copy(lyrics = LyricSync.breakdown(words, 0, seq.durationMs, tapStarts.toList()))
+        tapLyrics = null; tapStarts.clear(); player.pause()
+    }
 
     // Undo history: a snapshot is recorded once the show has been still for a moment, so a whole
     // drag is one step.
@@ -583,6 +595,20 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                 }
             }
             val transport: @Composable () -> Unit = {
+                tapLyrics?.let { words ->
+                    val lines = words.lines().map { it.trim() }.filter { it.isNotEmpty() && LyricSync.words(it).isNotEmpty() }
+                    val next = lines.getOrNull(tapStarts.size)
+                    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(if (next != null) "Tap when this line starts:" else "All lines tapped", style = MaterialTheme.typography.labelSmall)
+                                Text(next ?: "Press Done.", style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (next != null) Button(onClick = { tapStarts += pos; if (!playing) player.play() }) { Text("Now") }
+                            TextButton(onClick = { finishTapping() }) { Text("Done") }
+                        }
+                    }
+                }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { player.seek(0) }) { Icon(Icons.Filled.SkipPrevious, "To start") }
                     FilledIconButton(onClick = { if (playing) player.pause() else player.play() }) {
@@ -727,6 +753,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
             selectedTrack = seq.tracks.firstOrNull { it.id == selectedTrack },
             onDismiss = { showMusic = false },
             onChange = { seq = it; if (it.audioFile != initial.audioFile) player.seek(0) },
+            onTapLyrics = { words -> tapLyrics = words; tapStarts.clear(); player.seek(0); player.play() },
         )
     }
     if (addingTrack) {
@@ -903,6 +930,37 @@ private fun Timeline(
                 }
             }
         }
+        seq.lyrics?.takeIf { !it.isEmpty }?.let { lyrics ->
+            // The words (and, zoomed in, their mouth shapes) under the song.
+            val wordColor = MaterialTheme.colorScheme.secondary
+            Row(Modifier.height(30.dp)) {
+                Box(Modifier.width(HeaderWidth).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+                    Text("  Lyrics", style = MaterialTheme.typography.labelSmall, color = textColor)
+                }
+                Canvas(Modifier.weight(1f).fillMaxHeight().background(laneBg)) {
+                    clipRect {
+                        for (w in lyrics.words) {
+                            val x0 = w.startMs / 1000f * pxPerSec - scrollX; val x1 = w.endMs / 1000f * pxPerSec - scrollX
+                            if (x1 < 0 || x0 > size.width) continue
+                            drawRoundRect(wordColor.copy(alpha = 0.25f), Offset(x0, 2f), Size((x1 - x0).coerceAtLeast(1f), size.height * 0.55f), CornerRadius(4f))
+                            if (x1 - x0 > 18f) {
+                                val label = measurer.measure(w.label, TextStyle(fontSize = 10.sp, color = textColor), maxLines = 1,
+                                    constraints = androidx.compose.ui.unit.Constraints(maxWidth = (x1 - x0).toInt().coerceAtLeast(1)))
+                                drawText(label, topLeft = Offset(x0 + 2f, 2f))
+                            }
+                        }
+                        if (pxPerSec > 120f) for (p in lyrics.phonemes) {
+                            val x0 = p.startMs / 1000f * pxPerSec - scrollX
+                            if (x0 < -40f || x0 > size.width) continue
+                            val label = measurer.measure(p.label, TextStyle(fontSize = 8.sp, color = textColor.copy(alpha = 0.8f)))
+                            drawText(label, topLeft = Offset(x0, size.height * 0.6f))
+                        }
+                        val px = position / 1000f * pxPerSec - scrollX
+                        drawLine(playhead, Offset(px, 0f), Offset(px, size.height), 2.dp.toPx())
+                    }
+                }
+            }
+        }
         HorizontalDivider()
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             seq.tracks.forEach { track ->
@@ -1063,6 +1121,7 @@ private fun TrackHeader(
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var choosingBlend by remember { mutableStateOf(false) }
+    var choosingStyle by remember { mutableStateOf(false) }
     val kind = when (track.target.kind) {
         TrackTarget.Kind.HOUSE -> "Whole house"
         TrackTarget.Kind.GROUP -> if (map.groups.any { it.id == track.target.refId }) "Group" else "Missing group"
@@ -1079,7 +1138,7 @@ private fun TrackHeader(
             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(track.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    kind + if (track.blend != BlendMode.MAX) " · ${track.blend.label}" else "",
+                    kind + (if (track.blend != BlendMode.MAX) " · ${track.blend.label}" else "") + (if (track.style != RenderStyle.AS_ONE) " · ${track.style.label}" else ""),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (track.blend != BlendMode.MAX) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1092,6 +1151,9 @@ private fun TrackHeader(
                     DropdownMenuItem(text = { Text(if (track.muted) "Unmute" else "Mute") }, onClick = { menu = false; onChange(track.copy(muted = !track.muted)) })
                     DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = true })
                     DropdownMenuItem(text = { Text("Blend: ${track.blend.label}") }, onClick = { menu = false; choosingBlend = true })
+                    if (track.target.kind == com.wledcontroller.app.show.TrackTarget.Kind.GROUP || track.target.kind == com.wledcontroller.app.show.TrackTarget.Kind.HOUSE) {
+                        DropdownMenuItem(text = { Text("Render: ${track.style.label}") }, onClick = { menu = false; choosingStyle = true })
+                    }
                     DropdownMenuItem(text = { Text("Add layer above") }, onClick = { menu = false; onAddLayer() })
                     DropdownMenuItem(text = { Text("Move up") }, onClick = { menu = false; onMove(-1) })
                     DropdownMenuItem(text = { Text("Move down") }, onClick = { menu = false; onMove(1) })
@@ -1129,6 +1191,29 @@ private fun TrackHeader(
                 }
             },
             confirmButton = { TextButton(onClick = { choosingBlend = false }) { Text("Close") } },
+        )
+    }
+    if (choosingStyle) {
+        AlertDialog(
+            onDismissRequest = { choosingStyle = false },
+            title = { Text("How ${track.name} spreads its effects") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    RenderStyle.entries.forEach { r ->
+                        Surface(
+                            onClick = { onChange(track.copy(style = r)); choosingStyle = false },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (r == track.style) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                                Text(r.label, fontWeight = FontWeight.SemiBold)
+                                Text(r.help, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingStyle = false }) { Text("Close") } },
         )
     }
 }
@@ -1221,6 +1306,21 @@ private fun ClipInspector(
             }
             Text("Tap to change", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        // Colour curves: the colours turn into others over the effect.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Change colours over the effect", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            Switch(checked = clip.colorsEnd != null, onCheckedChange = { on ->
+                onChange(clip.copy(colorsEnd = if (on) clip.colors.map { com.wledcontroller.app.show.SequenceRenderer.hueShift(it and 0xFFFFFF, 0.5f) or 0xFF000000.toInt() } else null))
+            })
+        }
+        clip.colorsEnd?.let { end ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("to", style = MaterialTheme.typography.labelMedium)
+                for (i in 0 until 3) {
+                    ColorSwatch(end.getOrElse(i) { 0xFF000000.toInt() }.toComposeColor(), onClick = { editingSlot = 3 + i }, size = 40.dp)
+                }
+            }
+        }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(themes, key = { it.id }) { t ->
                 Surface(onClick = { onChange(clip.copy(colors = t.colors)) }, shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
@@ -1296,10 +1396,13 @@ private fun ClipInspector(
 
     if (editingSlot >= 0) {
         val slot = editingSlot
-        var temp by remember(slot) { mutableIntStateOf(clip.colors.getOrElse(slot) { 0xFFFF0000.toInt() }) }
+        // Slots 0–2 are the colours, 3–5 the ones they change to.
+        val ends = slot >= 3
+        val slotColors = if (ends) clip.colorsEnd ?: clip.colors else clip.colors
+        var temp by remember(slot) { mutableIntStateOf(slotColors.getOrElse(slot % 3) { 0xFFFF0000.toInt() }) }
         AlertDialog(
             onDismissRequest = { editingSlot = -1 },
-            title = { Text("Colour ${slot + 1}") },
+            title = { Text(if (ends) "Colour ${slot - 2} at the end" else "Colour ${slot + 1}") },
             text = {
                 Column {
                     ColorPickerPanel(temp, onColorChange = { temp = it }, onCommit = {})
@@ -1311,8 +1414,8 @@ private fun ClipInspector(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val cols = List(3) { i -> if (i == slot) temp else clip.colors.getOrElse(i) { 0xFF000000.toInt() } }
-                    onChange(clip.copy(colors = cols))
+                    val cols = List(3) { i -> if (i == slot % 3) temp else slotColors.getOrElse(i) { 0xFF000000.toInt() } }
+                    onChange(if (ends) clip.copy(colorsEnd = cols) else clip.copy(colors = cols))
                     editingSlot = -1
                 }) { Text("OK") }
             },
@@ -1350,11 +1453,12 @@ private fun LayerSettings(clip: Clip, onChange: (Clip) -> Unit) {
     }
     GradientSlider(clip.hueShift, { onChange(clip.copy(hueShift = it)) }, label = "Hue shift", valueText = "${(clip.hueShift * 360).roundToInt()}°", height = 30.dp)
     GradientSlider(clip.sparkles, { onChange(clip.copy(sparkles = it)) }, label = "Sparkles", valueText = "${(clip.sparkles * 100).roundToInt()}%", height = 30.dp)
+    GradientSlider(clip.blur, { onChange(clip.copy(blur = it)) }, label = "Blur", valueText = "${(clip.blur * 100).roundToInt()}%", height = 30.dp)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         FilterChip(selected = clip.mirrorX, onClick = { onChange(clip.copy(mirrorX = !clip.mirrorX)) }, label = { Text("Mirror ↔") })
         FilterChip(selected = clip.mirrorY, onClick = { onChange(clip.copy(mirrorY = !clip.mirrorY)) }, label = { Text("Flip ↕") })
         if (clip.hasLayerSettings) TextButton(onClick = {
-            onChange(clip.copy(rotation = 0f, spin = 0f, zoom = 1f, zoomEnd = null, hueShift = 0f, sparkles = 0f, mirrorX = false, mirrorY = false))
+            onChange(clip.copy(rotation = 0f, spin = 0f, zoom = 1f, zoomEnd = null, hueShift = 0f, sparkles = 0f, mirrorX = false, mirrorY = false, blur = 0f))
         }) { Text("Reset") }
     }
 }
@@ -1419,6 +1523,7 @@ internal fun MusicSheet(
     selectedTrack: Track?,
     onDismiss: () -> Unit,
     onChange: (Sequence) -> Unit,
+    onTapLyrics: (String) -> Unit = {},
 ) {
     val container = LocalAppContainer.current
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1568,7 +1673,51 @@ internal fun MusicSheet(
                     onDismiss()
                 }) { Text("Create ${seq.marks.size / every} effects") }
             }
+
+            HorizontalDivider()
+            LyricsSection(seq, selectedTrack, onChange, onTapLyrics = { onTapLyrics(it); onDismiss() })
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/**
+ * The song's words, for singing faces (like xLights' lyric track): paste them, then either let
+ * them spread over the song or tap along as each line is sung. Each word gets its mouth shapes.
+ */
+@Composable
+private fun LyricsSection(seq: Sequence, selectedTrack: Track?, onChange: (Sequence) -> Unit, onTapLyrics: (String) -> Unit) {
+    var text by remember(seq.id) { mutableStateOf(seq.lyrics?.phrases?.joinToString("\n") { it.label } ?: "") }
+    val lyrics = seq.lyrics
+    Text("Lyrics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    Text(
+        "Paste the words, one line per sung line. Singing faces (the Sing effect) then mouth each word: closed, open or wide for every sound.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    OutlinedTextField(
+        text, { text = it }, label = { Text("Words") }, minLines = 3, maxLines = 8,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FilledTonalButton(enabled = text.isNotBlank() && seq.audioFile != null, onClick = { onTapLyrics(text) }) { Text("Tap along") }
+        OutlinedButton(enabled = text.isNotBlank(), onClick = { onChange(seq.copy(lyrics = LyricSync.breakdown(text, 0, seq.durationMs))) }) { Text("Spread over the song") }
+        if (lyrics != null) OutlinedButton(onClick = { onChange(seq.copy(lyrics = null)) }) { Text("Clear") }
+    }
+    Text(
+        "Tap along plays the song: tap as each line starts. Spread shares the whole song out by syllables (a rough start to fine-tune).",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (lyrics != null && !lyrics.isEmpty) {
+        Text("${lyrics.phrases.size} lines, ${lyrics.words.size} words timed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        if (selectedTrack != null) {
+            OutlinedButton(onClick = {
+                // One Sing effect from the first word to the last on the selected track.
+                val s = lyrics.phrases.first().startMs; val e = lyrics.phrases.last().endMs
+                val clip = Clip(UUID.randomUUID().toString(), s, (e - s).coerceAtLeast(500), SeqEffect.SING, listOf(0xFFFFFFFF.toInt(), 0xFFFF2020.toInt()))
+                onChange(seq.copy(tracks = seq.tracks.map { t -> if (t.id == selectedTrack.id) t.copy(clips = t.clips + clip) else t }))
+            }) { Text("Sing them on \"${selectedTrack.name}\"") }
         }
     }
 }

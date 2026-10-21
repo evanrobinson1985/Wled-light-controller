@@ -19,6 +19,8 @@ data class XsqSequence(
     val mediaFile: String?,
     val marks: List<Long>,
     val elements: List<XsqElement>,
+    /** A lyric timing track (phrases, words, phonemes), when the sequence has one. */
+    val lyrics: Lyrics? = null,
 )
 
 /**
@@ -59,11 +61,23 @@ object XsqImport {
 
         val marks = ArrayList<Long>()
         val elements = ArrayList<XsqElement>()
+        var lyrics: Lyrics? = null
+        fun labels(layer: Element?) = layer?.children("Effect")?.mapNotNull { e ->
+            val s = e.getAttribute("startTime").toLongOrNull() ?: return@mapNotNull null
+            val t = e.getAttribute("endTime").toLongOrNull() ?: return@mapNotNull null
+            TimedLabel(s, t, e.getAttribute("label"))
+        }.orEmpty()
         for (el in root.child("ElementEffects")?.children("Element").orEmpty()) {
             val name = el.getAttribute("name")
             when (el.getAttribute("type")) {
-                "timing" -> if (marks.isEmpty()) {
-                    el.children("EffectLayer").firstOrNull()?.children("Effect")?.forEach { e -> e.getAttribute("startTime").toLongOrNull()?.let(marks::add) }
+                "timing" -> {
+                    val layers = el.children("EffectLayer")
+                    val first = labels(layers.firstOrNull())
+                    // A lyric track has labelled phrases, then words and phonemes underneath.
+                    if (lyrics == null && layers.size >= 2 && first.any { it.label.isNotBlank() }) {
+                        lyrics = Lyrics(first.filter { it.label.isNotBlank() }, labels(layers[1]).filter { it.label.isNotBlank() },
+                            labels(layers.getOrNull(2)).filter { Phoneme.parse(it.label) != null })
+                    } else if (marks.isEmpty()) first.forEach { marks += it.startMs }
                 }
                 "model" -> {
                     val layers = el.children("EffectLayer").map(::effectsIn)
@@ -77,7 +91,7 @@ object XsqImport {
             }
         }
         val end = maxOf(durationMs, elements.flatMap { e -> e.layers.flatten() }.maxOfOrNull { it.endMs } ?: 0L)
-        return XsqSequence(end, media, marks.sorted(), elements)
+        return XsqSequence(end, media, marks.sorted(), elements, lyrics)
     }
 
     /** "A=1,B=x,y" style settings (values may contain commas only inside other fields' text). */
@@ -222,6 +236,7 @@ object XsqImport {
             tracks = tracks,
             marks = xsq.marks,
             audioTitle = xsq.mediaFile,
+            lyrics = xsq.lyrics,
         )
         return seq to skipped
     }

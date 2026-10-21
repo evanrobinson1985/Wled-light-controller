@@ -195,9 +195,13 @@ data class Clip(
     /** Shown left-to-right reversed / upside down. */
     val mirrorX: Boolean = false,
     val mirrorY: Boolean = false,
+    /** 0..1: softens the effect along the lights. */
+    val blur: Float = 0f,
+    /** When set, the colours change to these over the effect (xLights' colour curves). */
+    val colorsEnd: List<Int>? = null,
 ) {
     /** Whether any layer setting changes the effect. */
-    val hasLayerSettings get() = rotation != 0f || spin != 0f || zoom != 1f || zoomEnd != null || hueShift != 0f || sparkles > 0f || mirrorX || mirrorY
+    val hasLayerSettings get() = rotation != 0f || spin != 0f || zoom != 1f || zoomEnd != null || hueShift != 0f || sparkles > 0f || mirrorX || mirrorY || blur > 0f
 
     val speedCurveOrRamp get() = speedCurve ?: speedEnd?.let { ValueCurve(CurveShape.RAMP, it) }
     val intensityCurveOrRamp get() = intensityCurve ?: intensityEnd?.let { ValueCurve(CurveShape.RAMP, it) }
@@ -214,7 +218,17 @@ data class Track(
     val muted: Boolean = false,
     /** How this track mixes with the tracks below it. */
     val blend: BlendMode = BlendMode.MAX,
+    /** For a group or the whole house: one effect across them all, or one on each prop. */
+    val style: RenderStyle = RenderStyle.AS_ONE,
 )
+
+/** How a track spreads an effect over several props (xLights' render buffer styles). */
+@Serializable
+enum class RenderStyle(val label: String, val help: String) {
+    AS_ONE("As one", "One effect across all the props, as they stand on the house."),
+    PER_PROP("Each prop", "The effect on every prop on its own, all in step."),
+    SINGLE_LINE("One line", "The props strung end to end as one long line."),
+}
 
 @Serializable
 data class Sequence(
@@ -230,6 +244,8 @@ data class Sequence(
     val marks: List<Long> = emptyList(),
     /** Detected tempo, for display. */
     val bpm: Float? = null,
+    /** The song's words, timed: singing faces follow them. */
+    val lyrics: Lyrics? = null,
     /** For shows imported from xLights: the .fseq file, played instead of [tracks]. */
     val fseqFile: String? = null,
     /** Where each controller's LEDs are in the .fseq channel data. */
