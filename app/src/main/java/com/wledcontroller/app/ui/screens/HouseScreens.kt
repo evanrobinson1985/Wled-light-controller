@@ -263,11 +263,16 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                 return@Column
             }
 
+            val fixtureList by container.store.fixtures.collectAsStateWithLifecycle(emptyList())
+            val fixtureIds = remember(fixtureList) { fixtureList.map { it.id }.toSet() }
             HouseCanvas(map, photo) {
                 leds.forEachIndexed { i, led ->
                     if (led.hidden) return@forEachIndexed // Out of sight in the photo.
                     val o = Offset(led.x * size.width, led.y * size.height)
-                    drawPixel(HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun), o, pixelRadius(pixel, gaps[i]))
+                    val c = HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun)
+                    // DMX spotlights shine straight up in the effect's colour.
+                    if (led.deviceId in fixtureIds) com.wledcontroller.app.ui.components.drawSpotlight(o, c, 0.5f, 0.5f, 0.8f)
+                    else drawPixel(c, o, pixelRadius(pixel, gaps[i]))
                 }
             }
             Text(

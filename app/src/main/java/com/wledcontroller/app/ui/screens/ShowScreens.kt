@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.foundation.horizontalScroll
 import com.wledcontroller.app.ui.components.LocalPixelStyle
 import com.wledcontroller.app.ui.components.drawPixel
+import com.wledcontroller.app.ui.components.drawSpotlight
 import com.wledcontroller.app.ui.components.neighbourGaps
 import com.wledcontroller.app.ui.components.pixelRadius
 import androidx.compose.foundation.Canvas
@@ -558,12 +559,22 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
             val landscape = maxWidth > maxHeight
             val preview: @Composable (Modifier) -> Unit = { m ->
                 Box(m, contentAlignment = Alignment.Center) {
-                    val colors = remember(pos, seq, layout) { SequenceRenderer.render(seq, layout, pos, audio = envelope) }
+                    // Colours, and where moving heads point, at this moment of the show.
+                    val motion = remember(layout) { FloatArray(layout.leds.size * 2) }
+                    val colors = remember(pos, seq, layout) { SequenceRenderer.render(seq, layout, pos, audio = envelope, motion = motion) }
                     val pixel = LocalPixelStyle.current
                     val gaps = remember(layout, map.aspect) { neighbourGaps(layout.leds, map.aspect) }
+                    val fixtures by LocalAppContainer.current.store.fixtures.collectAsStateWithLifecycle(emptyList())
+                    val fixtureIds = remember(fixtures) { fixtures.map { it.id }.toSet() }
                     HouseCanvas(map, photo, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp)) {
+                        // DMX fixtures as spotlights with their beams, behind the other lights.
                         layout.leds.forEachIndexed { i, l ->
-                            if (!l.hidden) drawPixel(colors[i], Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
+                            if (l.deviceId in fixtureIds) {
+                                drawSpotlight(Offset(l.x * size.width, l.y * size.height), colors[i], motion.getOrElse(i * 2) { 0.5f }, motion.getOrElse(i * 2 + 1) { 0.5f }, 0.8f)
+                            }
+                        }
+                        layout.leds.forEachIndexed { i, l ->
+                            if (!l.hidden && l.deviceId !in fixtureIds) drawPixel(colors[i], Offset(l.x * size.width, l.y * size.height), pixelRadius(pixel, gaps[i]))
                         }
                     }
                 }
