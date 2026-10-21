@@ -544,21 +544,24 @@ class DeviceController(
 
     /**
      * Applies a three-colour theme to the selected segments with WLED's built-in palettes that
-     * use the segment colours, plus the first suggested effect this firmware has.
+     * use the segment colours. With an [effect], switches to it (at [speed] / [intensity]);
+     * with none, the effect playing stays as it is.
      */
     fun applyTheme(colors: List<Int>, effect: String?, bands: Boolean, speed: Int, intensity: Int) {
         val snap = _snapshot.value
-        val fx = effect?.let { name -> snap.effects.indexOfFirst { it.equals(name, ignoreCase = true) } }?.takeIf { it >= 0 } ?: 0
+        val fx = effect?.let { name -> snap.effects.indexOfFirst { it.equals(name, ignoreCase = true) }.takeIf { it >= 0 } ?: 0 }
         val palName = if (bands) "* Colors Only" else "* Color Gradient"
         val pal = snap.palettes.indexOfFirst { it.equals(palName, ignoreCase = true) }.takeIf { it >= 0 } ?: if (bands) 5 else 4
         send(buildJsonObject {
             put("on", true)
             putJsonObject("seg") {
                 put("col", buildJsonArray { colors.take(3).forEach { add(WledColor.fromRgb(it).toJson(withWhite)) } })
-                put("fx", fx)
                 put("pal", pal)
-                put("sx", speed)
-                put("ix", intensity)
+                if (fx != null) {
+                    put("fx", fx)
+                    put("sx", speed)
+                    put("ix", intensity)
+                }
             }
         })
     }

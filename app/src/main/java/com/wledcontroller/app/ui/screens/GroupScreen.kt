@@ -160,6 +160,8 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
             Spacer(Modifier.height(16.dp))
             HolidayThemesSection(
                 availableEffects = lead?.effects ?: emptyList(),
+                // "Keep" names the effect when every light is playing the same one.
+                currentEffect = online.map { (_, sn) -> sn.state?.activeSegment?.let { sn.effects.getOrNull(it.fx) } }.distinct().singleOrNull(),
                 onApply = { colors, effect, theme ->
                     online.forEach { (c, s) ->
                         val p = profiles.profileFor(c.id, s.state?.activeSegment?.id)

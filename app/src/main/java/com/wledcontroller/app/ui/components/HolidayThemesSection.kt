@@ -73,7 +73,8 @@ private fun ThemeBar(colors: List<Int>, bands: Boolean, height: Dp, modifier: Mo
  * the colours, pick an effect and apply.
  *
  * @param availableEffects effect names on the target device(s), to offer only effects that exist.
- * @param onApply colours, chosen effect name (null = keep Solid), theme.
+ * @param onApply colours, chosen effect name (null = keep the effect that's playing), theme.
+ * @param currentEffect the effect playing now, for the "keep it" choice (null when it varies).
  */
 @Composable
 fun HolidayThemesSection(
@@ -81,6 +82,7 @@ fun HolidayThemesSection(
     onApply: (colors: List<Int>, effect: String?, theme: HolidayTheme) -> Unit,
     modifier: Modifier = Modifier,
     preferBands: Boolean = false,
+    currentEffect: String? = null,
 ) {
     val themes = remember { HolidayThemes.forToday() }
     var open by remember { mutableStateOf<HolidayTheme?>(null) }
@@ -116,7 +118,7 @@ fun HolidayThemesSection(
     }
 
     open?.let { t ->
-        ThemeSheet(t, t.bands || preferBands, availableEffects, onDismiss = { open = null }) { colors, effect ->
+        ThemeSheet(t, t.bands || preferBands, availableEffects, currentEffect, onDismiss = { open = null }) { colors, effect ->
             onApply(colors, effect, t)
             open = null
         }
@@ -128,6 +130,7 @@ private fun ThemeSheet(
     theme: HolidayTheme,
     bands: Boolean,
     availableEffects: List<String>,
+    currentEffect: String?,
     onDismiss: () -> Unit,
     onApply: (List<Int>, String?) -> Unit,
 ) {
@@ -135,9 +138,11 @@ private fun ThemeSheet(
     val effects = remember(theme.id, availableEffects) {
         val have = availableEffects.map { it.lowercase() }.toSet()
         // Before the device list loads, show the theme's suggestions as-is.
-        (if (have.isEmpty()) theme.effects else theme.effects.filter { it.lowercase() in have }) + "Solid"
+        ((if (have.isEmpty()) theme.effects else theme.effects.filter { it.lowercase() in have }) + "Solid")
+            .filterNot { it.equals(currentEffect, ignoreCase = true) }
     }
-    var effect by remember(theme.id) { mutableStateOf(effects.first()) }
+    // Keeps the effect that's playing unless another is picked: a theme is mainly its colours.
+    var effect by remember(theme.id) { mutableStateOf<String?>(null) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding()) {
@@ -166,8 +171,18 @@ private fun ThemeSheet(
             Text("Effect", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(6.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = effect == null, onClick = { effect = null },
+                    label = { Text(if (currentEffect != null) "Keep $currentEffect" else "Keep each light's effect") },
+                )
                 effects.forEach { e -> FilterChip(selected = e == effect, onClick = { effect = e }, label = { Text(e) }) }
             }
+            Text(
+                if (effect == null) "Only the colours change." else "Switches to $effect with the theme's speed.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
             Spacer(Modifier.height(20.dp))
             Button(onClick = { onApply(colors, effect) }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Text("Apply ${theme.name}")

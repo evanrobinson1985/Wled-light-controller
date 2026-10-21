@@ -516,6 +516,7 @@ fun PalettesTab(controller: DeviceController, snap: DeviceSnapshot) {
             HolidayThemesSection(
                 availableEffects = snap.effects,
                 preferBands = profile?.preferBands == true,
+                currentEffect = snap.effects.getOrNull(seg.fx),
                 onApply = { colors, effect, theme ->
                     val scale = profile?.speedScale ?: 1f
                     controller.applyTheme(colors, effect, theme.bands || profile?.preferBands == true, (theme.speed * scale).toInt(), theme.intensity)
