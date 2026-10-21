@@ -87,6 +87,9 @@ object SetupCheck {
                     if (c.effect == SeqEffect.PICTURE && (c.imageFile == null || !fileExists(c.imageFile))) problem(where, "$at has no picture.")
                     if (c.effect == SeqEffect.VIDEO && (c.videoFile == null || !fileExists(c.videoFile))) problem(where, "$at has no video.")
                     if (c.effect == SeqEffect.TEXT && c.text.isNullOrBlank()) warn(where, "$at has no words.")
+                    if (c.effect == SeqEffect.GLEDIATOR && (c.videoFile == null || !fileExists(c.videoFile))) problem(where, "$at has no Glediator recording.")
+                    if (c.effect == SeqEffect.DUPLICATE && s.tracks.none { it.id == c.duplicateTrackId }) warn(where, "$at doesn't say which track to copy.")
+                    if (c.effect == SeqEffect.STATE && s.timingTracks.none { it.id == c.timingTrackId }) warn(where, "$at has no timing track to follow.")
                     if (c.intensity <= 0f && c.intensityCurveOrRamp == null) warn(where, "$at is at zero brightness.")
                 }
             }

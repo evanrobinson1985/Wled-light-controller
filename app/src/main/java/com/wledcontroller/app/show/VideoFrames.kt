@@ -56,6 +56,21 @@ class VideoFrames(val width: Int, val height: Int, val fps: Float, val count: In
             d.flush()
         }
 
+        /**
+         * A Glediator recording (raw RGB frames of a [width] × [height] matrix, row by row) as
+         * frames for the lights, written to [out]. Returns how many frames it held.
+         */
+        fun fromGlediator(raw: ByteArray, width: Int, height: Int, fps: Float, out: OutputStream): Int {
+            require(width in 1..512 && height in 1..512) { "Width and height must be 1–512." }
+            val frameBytes = width * height * 3
+            val count = raw.size / frameBytes
+            require(count >= 1) { "That file is smaller than one ${width}×$height frame — check the size." }
+            writeHeader(out, width, height, fps, count)
+            out.write(raw, 0, count * frameBytes)
+            out.flush()
+            return count
+        }
+
         /** The frame size for a video [w] × [h] with its longer side at most [maxSide]. */
         fun fit(w: Int, h: Int, maxSide: Int = 96): Pair<Int, Int> {
             val s = maxSide.toFloat() / maxOf(w, h).coerceAtLeast(1)

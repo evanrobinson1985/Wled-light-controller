@@ -78,10 +78,14 @@ enum class SeqEffect(val label: String) {
     STATE("State"),
     SKETCH("Sketch"),
     SHADER("Shader (formula)"),
+    GUITAR("Guitar (music)"),
+    SERVO("Servo / level"),
+    DUPLICATE("Duplicate"),
+    GLEDIATOR("Glediator"),
     ;
 
     /** Effects that follow the song's loudness (need a song on the show). */
-    val musical get() = this == VU_METER || this == MUSIC_PULSE || this == BEAT_FLASH || this == SING || this == PIANO || this == MUSIC
+    val musical get() = this == VU_METER || this == MUSIC_PULSE || this == BEAT_FLASH || this == SING || this == PIANO || this == MUSIC || this == GUITAR
 }
 
 /** How a track mixes with the tracks below it in the list. */
@@ -217,6 +221,8 @@ data class Clip(
     val sketch: List<com.wledcontroller.app.house.MapPoint> = emptyList(),
     /** For the Shader effect: the formula (see [Formula]). */
     val formula: String? = null,
+    /** For the Duplicate effect: the track whose effects play here too. */
+    val duplicateTrackId: String? = null,
     /** When set, the colours change to these over the effect (xLights' colour curves). */
     val colorsEnd: List<Int>? = null,
 ) {

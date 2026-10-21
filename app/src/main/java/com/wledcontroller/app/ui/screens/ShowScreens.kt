@@ -751,6 +751,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                         hasSong = seq.audioFile != null,
                         modifier = m,
                         timingTracks = seq.timingTracks,
+                        otherTracks = seq.tracks.filter { it.id != trackId }.map { it.id to it.name },
                     )
                 } else {
                     Column(m.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1320,6 +1321,8 @@ private fun ClipInspector(
     hasSong: Boolean,
     modifier: Modifier,
     timingTracks: List<com.wledcontroller.app.show.TimingTrack> = emptyList(),
+    /** The show's other tracks (id, name), for the Duplicate effect. */
+    otherTracks: List<Pair<String, String>> = emptyList(),
 ) {
     var editingSlot by remember { mutableIntStateOf(-1) }
     var editingCurve by remember { mutableStateOf<String?>(null) }
@@ -1330,6 +1333,15 @@ private fun ClipInspector(
     var sketching by remember { mutableStateOf(false) }
     if (sketching) SketchDialog(clip.sketch, onDismiss = { sketching = false }) { onChange(clip.copy(sketch = it)); sketching = false }
     var videoError by remember { mutableStateOf<String?>(null) }
+    var gledSize by remember { mutableStateOf(32 to 16) }
+    val pickGled = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) container.scope.launch {
+            videoError = null
+            runCatching { container.sequences.importGlediator(context, uri, gledSize.first, gledSize.second) }
+                .onSuccess { onChange(clip.copy(videoFile = it)) }
+                .onFailure { videoError = it.message ?: "Couldn't read that recording." }
+        }
+    }
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) container.scope.launch {
             videoProgress = 0f; videoError = null
@@ -1403,6 +1415,35 @@ private fun ClipInspector(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     timingTracks.forEach { tt -> FilterChip(selected = clip.timingTrackId == tt.id, onClick = { onChange(clip.copy(timingTrackId = tt.id)) }, label = { Text(tt.name) }) }
                 }
+            }
+            clip.effect == SeqEffect.DUPLICATE -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Plays whatever another track is playing, on this track's lights.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    otherTracks.forEach { (id, name) -> FilterChip(selected = clip.duplicateTrackId == id, onClick = { onChange(clip.copy(duplicateTrackId = id)) }, label = { Text(name) }) }
+                }
+            }
+            clip.effect == SeqEffect.SERVO -> Text(
+                "One level for all its lights, set by Size (give Size a curve to move it): drives servos and dimmers on DMX, turns moving heads, or fades plain lights.",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            clip.effect == SeqEffect.GUITAR -> Text(
+                "Six strings across the lights that shake with the song — bass on the bottom string, treble on the top. Best on a matrix.",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            clip.effect == SeqEffect.GLEDIATOR -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                var gw by remember { mutableStateOf("32") }
+                var gh by remember { mutableStateOf("16") }
+                Text("Plays a Glediator recording (raw matrix frames). Enter the matrix size it was recorded at, then choose the file.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(gw, { gw = it.filter(Char::isDigit).take(3) }, label = { Text("Width") }, singleLine = true, modifier = Modifier.width(90.dp))
+                    OutlinedTextField(gh, { gh = it.filter(Char::isDigit).take(3) }, label = { Text("Height") }, singleLine = true, modifier = Modifier.width(90.dp))
+                    OutlinedButton(enabled = (gw.toIntOrNull() ?: 0) > 0 && (gh.toIntOrNull() ?: 0) > 0, onClick = {
+                        gledSize = (gw.toIntOrNull() ?: 32) to (gh.toIntOrNull() ?: 16)
+                        pickGled.launch(arrayOf("*/*"))
+                    }) { Text(if (clip.videoFile == null) "Choose file" else "Change") }
+                }
+                videoError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
             }
             clip.effect == SeqEffect.SHADER -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 var text by remember(clip.id) { mutableStateOf(clip.formula ?: com.wledcontroller.app.show.Formula.examples.first().second) }

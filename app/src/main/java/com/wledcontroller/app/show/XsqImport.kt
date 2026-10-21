@@ -165,7 +165,7 @@ object XsqImport {
         "strobe" -> SeqEffect.STROBE
         "text" -> SeqEffect.TEXT
         "twinkle" -> SeqEffect.TWINKLE
-        "sparkle", "glediator" -> SeqEffect.SPARKLE
+        "sparkle" -> SeqEffect.SPARKLE
         "vu meter", "vumeter" -> SeqEffect.VU_METER
         "music" -> SeqEffect.MUSIC
         "faces" -> SeqEffect.SING
@@ -174,6 +174,10 @@ object XsqImport {
         "state" -> SeqEffect.STATE
         "sketch" -> SeqEffect.SKETCH
         "shader" -> SeqEffect.SHADER
+        "guitar" -> SeqEffect.GUITAR
+        "servo", "dmx" -> SeqEffect.SERVO
+        "duplicate" -> SeqEffect.DUPLICATE
+        "glediator" -> SeqEffect.GLEDIATOR
         "rainbow" -> SeqEffect.RAINBOW
         "pulse" -> SeqEffect.PULSE
         else -> null

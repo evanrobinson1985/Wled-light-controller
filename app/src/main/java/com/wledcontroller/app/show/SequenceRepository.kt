@@ -128,6 +128,15 @@ class SequenceRepository(context: Context, scope: CoroutineScope) {
         Triple(file.absolutePath, title.substringBeforeLast('.'), duration)
     }
 
+    /** Turns a Glediator recording into frames for the Glediator effect. Returns the file. */
+    suspend fun importGlediator(context: Context, uri: android.net.Uri, width: Int, height: Int, fps: Float = 20f): String = withContext(Dispatchers.IO) {
+        val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IllegalArgumentException("Couldn't open that file")
+        val dir = File(dir.parentFile, "pictures").apply { mkdirs() }
+        val file = File(dir, "${java.util.UUID.randomUUID()}.vid")
+        file.outputStream().buffered().use { VideoFrames.fromGlediator(raw, width, height, fps, it) }
+        file.absolutePath
+    }
+
     /**
      * Shrinks a video to frames for the Video effect: [fps] frames a second (up to [maxSeconds]),
      * each at most 96 pixels on its longer side. [onProgress] gets 0..1. Returns the file.

@@ -202,7 +202,13 @@ object SequenceRenderer {
             if (track.muted) continue
             val tl = layout.tracks.getOrNull(ti) ?: continue
             // The latest-starting clip that covers this moment wins within a track.
-            val stored = track.clips.lastOrNull { timeMs >= it.startMs && timeMs < it.endMs } ?: continue
+            val own = track.clips.lastOrNull { timeMs >= it.startMs && timeMs < it.endMs } ?: continue
+            // Duplicate: whatever the other track is playing now plays on this track's lights.
+            val stored = if (own.effect == SeqEffect.DUPLICATE) {
+                val src = seq.tracks.firstOrNull { it.id == own.duplicateTrackId && it.id != track.id }
+                    ?.clips?.lastOrNull { timeMs >= it.startMs && timeMs < it.endMs && it.effect != SeqEffect.DUPLICATE } ?: continue
+                src.copy(intensity = src.intensity * own.intensity, fadeInMs = 0, fadeOutMs = 0)
+            } else own
             val local = timeMs - stored.startMs
             val progress = local.toFloat() / stored.durationMs.coerceAtLeast(1)
             val intensity = stored.intensityCurveOrRamp?.at(stored.intensity, progress) ?: stored.intensity
@@ -216,6 +222,11 @@ object SequenceRenderer {
                 }
             } ?: stored.colors
             val clip = if (speed != stored.speed || size != stored.size || colors !== stored.colors) stored.copy(speed = speed, size = size, colors = colors) else stored
+            if (motion != null && stored.effect == SeqEffect.SERVO && stored.pan == null) {
+                // Servo: its level also turns moving heads (and anything else driven by pan).
+                val v = stored.sizeCurve?.at(stored.size, progress) ?: stored.size
+                for (li in tl.ledIndex) motion[li * 2] = v
+            }
             if (motion != null && (stored.pan != null || stored.tilt != null)) {
                 val pan = stored.pan?.let { stored.panCurve?.at(it, progress) ?: it }
                 val tilt = stored.tilt?.let { stored.tiltCurve?.at(it, progress) ?: it }
@@ -680,6 +691,27 @@ object SequenceRenderer {
                 }
             }
             SeqEffect.STATE -> 0 // Drawn in render(), which knows the timing track.
+            SeqEffect.DUPLICATE -> 0 // Replaced in render() by the other track's effect.
+            SeqEffect.SERVO -> {
+                // One level for everything (size, with its curve): servos, dimmers, or a plain fade.
+                HouseRenderer.scale(cols[0], c.size)
+            }
+            SeqEffect.GLEDIATOR -> {
+                // A recorded Glediator matrix animation, stretched over the lights.
+                val v = c.videoFile?.let { Rasters.video(it) } ?: return 0
+                v.at(t * c.speed * 2f).sample(lx.coerceIn(0f, 0.9999f), (1f - ly).coerceIn(0f, 0.9999f)) and 0xFFFFFF
+            }
+            SeqEffect.GUITAR -> {
+                // Six strings across the lights, each shaking when its part of the sound is loud.
+                val strings = 6
+                val row = (ly * strings).toInt().coerceIn(0, strings - 1)
+                val centre = (row + 0.5f) / strings
+                val energy = spectrum?.let { it[(row * it.size / strings).coerceIn(0, it.lastIndex)] } ?: (level * (0.6f + 0.4f * beat))
+                val wave = sin((lx * (3f + row) - t * (6f + row * 2f)) * 2f * PI.toFloat()) * energy * (0.45f / strings) * sin(lx * PI.toFloat())
+                val d = abs(ly - (centre + wave))
+                val thick = 0.18f / strings
+                if (d < thick) HouseRenderer.scale(cols[row % cols.size], (0.35f + 0.65f * energy) * (1f - d / thick)) else 0
+            }
             SeqEffect.SHADER -> {
                 val f = formulas.get(c.formula ?: Formula.examples.first().second) ?: return 0
                 val v = Formula.Vars(lx, ly, t, pos, c.speed, c.size)

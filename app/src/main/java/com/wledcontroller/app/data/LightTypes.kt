@@ -131,6 +131,10 @@ object EffectFit {
             SeqEffect.STATE -> setOf(m, a, p)
             SeqEffect.SKETCH -> setOf(m)
             SeqEffect.SHADER -> setOf(m, t, s)
+            SeqEffect.GUITAR -> setOf(m)
+            SeqEffect.SERVO -> setOf(f, p)
+            SeqEffect.DUPLICATE -> setOf(s, p, m, t, a, f)
+            SeqEffect.GLEDIATOR -> setOf(m)
         }
     }
 
