@@ -117,6 +117,7 @@ import com.wledcontroller.app.house.XlightsModels
 import com.wledcontroller.app.house.placedLeds
 import com.wledcontroller.app.sim.SimDevice
 import com.wledcontroller.app.sim.SimHub
+import com.wledcontroller.app.ui.components.drawSpotlight
 import com.wledcontroller.app.ui.components.LocalPixelStyle
 import com.wledcontroller.app.ui.components.drawPixel
 import com.wledcontroller.app.ui.components.neighbourGaps
@@ -164,7 +165,7 @@ private class SimSpot(val fixture: com.wledcontroller.app.data.DmxFixture, val h
 /** A spotlight as the simulated DMX node last received it. */
 private fun DrawScope.spotlight(s: SimSpot, scale: Float) {
     val look = SimHub.dmxUniverse(s.host, s.fixture.universe)?.let { s.fixture.read(it) }
-    com.wledcontroller.app.ui.components.drawSpotlight(
+    drawSpotlight(
         Offset(s.x * size.width, s.y * size.height), look?.rgb ?: 0, look?.pan ?: 0.5f, look?.tilt ?: 0.5f, scale,
     )
 }

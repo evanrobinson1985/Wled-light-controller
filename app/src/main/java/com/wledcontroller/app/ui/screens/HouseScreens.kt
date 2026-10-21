@@ -2,6 +2,7 @@
 
 package com.wledcontroller.app.ui.screens
 
+import com.wledcontroller.app.ui.components.drawSpotlight
 import com.wledcontroller.app.ui.components.LocalPixelStyle
 import com.wledcontroller.app.ui.components.drawPixel
 import com.wledcontroller.app.ui.components.neighbourGaps
@@ -271,7 +272,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                     val o = Offset(led.x * size.width, led.y * size.height)
                     val c = HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun)
                     // DMX spotlights shine straight up in the effect's colour.
-                    if (led.deviceId in fixtureIds) com.wledcontroller.app.ui.components.drawSpotlight(o, c, 0.5f, 0.5f, 0.8f)
+                    if (led.deviceId in fixtureIds) drawSpotlight(o, c, 0.5f, 0.5f, 0.8f)
                     else drawPixel(c, o, pixelRadius(pixel, gaps[i]))
                 }
             }
