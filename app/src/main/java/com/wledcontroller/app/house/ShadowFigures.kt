@@ -35,6 +35,8 @@ internal object ShadowFigures {
     /** Width / height of a typical house photo, so figures aren't squashed. */
     private const val ASPECT = 1.5f
     private const val MAX_FIGURES = 8
+    /** How far down a hopping figure's feet (or a pumpkin's base) are, in its own units. */
+    private const val FOOT = 0.95f
 
     /** Where one figure is: its origin on the house, whether it faces left, and its turn (radians). */
     private class Pose(val gx: Float, val gy: Float, val flip: Boolean, val rot: Float = 0f, val dangle: Boolean = false)
@@ -49,7 +51,7 @@ internal object ShadowFigures {
         var glow = 0f
         for (k in 0 until p.count.coerceIn(1, MAX_FIGURES)) {
             val fig = figures[k % figures.size]
-            val pose = pose(fig.move, k, t, speed)
+            val pose = pose(fig.move, k, t, speed, w)
             var u = (x - pose.gx) / w
             var v = (y - pose.gy) / (w * ASPECT)
             // A spider hanging on its thread: the thread runs up from it to the top of the house.
@@ -89,7 +91,7 @@ internal object ShadowFigures {
         return (if (left) 1f - x else x) to left
     }
 
-    private fun pose(move: Move, k: Int, t: Float, speed: Float): Pose {
+    private fun pose(move: Move, k: Int, t: Float, speed: Float, w: Float): Pose {
         fun h(salt: Int) = HouseRenderer.hash(k, salt)
         return when (move) {
             Move.FLOAT -> {
@@ -103,9 +105,12 @@ internal object ShadowFigures {
                 Pose(gx, 0.3f + 0.25f * h(7) - bounce, left)
             }
             Move.HOP -> {
+                // Landing on a line across the house: the first along the bottom, the others
+                // higher up, so they cover the whole display from top to bottom.
                 val (gx, left) = cross(k, t, speed * 0.06f)
                 val f = HouseRenderer.frac(t * (0.4f + speed * 0.6f) + h(9))
-                Pose(gx, 0.35f + 0.25f * h(7) - sin(f * PI.toFloat()) * 0.18f, left)
+                val ground = 0.98f - (k % 3) * 0.26f - 0.03f * h(7)
+                Pose(gx, ground - FOOT * w * ASPECT - sin(f * PI.toFloat()) * 0.12f, left)
             }
             Move.CRAWL -> if (k % 2 == 0) {
                 // Crawling across, head first.

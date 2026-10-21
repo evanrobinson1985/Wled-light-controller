@@ -78,4 +78,20 @@ class GhostsTest {
         }
         assertTrue("the skull has eye sockets: $holes", holes > 4)
     }
+
+    @Test
+    fun hoppersCoverTheWholeHeight() {
+        // Pumpkins and bunnies land in lanes from the bottom of the house up, not just the top half.
+        for (fx in listOf(HouseEffect.PUMPKINS, HouseEffect.BUNNIES)) {
+            val p = HouseEffectParams(effect = fx, colors = listOf(0xFFFFFF), count = 3, size = 0.5f, speed = 0.5f, brightness = 1f)
+            var low = 0; var high = 0
+            for (t in listOf(2f, 5f, 9f, 14f, 20f, 27f)) for (i in 0 until 80) for (j in 0 until 50) {
+                val c = HouseRenderer.color(p, i / 79f, j / 49f, t, i * 50 + j, i)
+                val lum = ((c shr 16) and 0xFF) + ((c shr 8) and 0xFF) + (c and 0xFF)
+                if (lum < 60) { if (j >= 25) low++ else high++ }
+            }
+            assertTrue("${fx.label} reach the bottom half: low $low, high $high", low > high / 2)
+            assertTrue("${fx.label} still reach the top half: low $low, high $high", high > 0)
+        }
+    }
 }
