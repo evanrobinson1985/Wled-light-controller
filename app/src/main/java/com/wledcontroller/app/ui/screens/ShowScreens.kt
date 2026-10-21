@@ -1180,8 +1180,13 @@ private fun ClipInspector(
         }
 
         SectionTitle("Effect")
+        // Only the effects that suit a kind of light, when one is picked (the clip's own stays shown).
+        var lightType by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<com.wledcontroller.app.data.LightType?>(null) }
+        com.wledcontroller.app.ui.components.LightTypeFilter(lightType, { lightType = it })
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SeqEffect.entries.forEach { e -> FilterChip(selected = clip.effect == e, onClick = { onChange(clip.copy(effect = e)) }, label = { Text(e.label) }) }
+            SeqEffect.entries
+                .filter { e -> lightType == null || e == clip.effect || lightType in com.wledcontroller.app.data.EffectFit.show(e) }
+                .forEach { e -> FilterChip(selected = clip.effect == e, onClick = { onChange(clip.copy(effect = e)) }, label = { Text(e.label) }) }
         }
         when {
             clip.effect == SeqEffect.TEXT -> OutlinedTextField(

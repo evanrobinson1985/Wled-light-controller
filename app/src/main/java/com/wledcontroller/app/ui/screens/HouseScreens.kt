@@ -93,6 +93,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -288,6 +289,11 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             SectionTitle("Effect")
             // Older settings had the shadow as the effect itself; show them the new way.
             val shown = params.normalized()
+            // Only the effects that look best when most of the house is one kind of light.
+            var lightType by rememberSaveable { mutableStateOf<com.wledcontroller.app.data.LightType?>(null) }
+            com.wledcontroller.app.ui.components.LightTypeFilter(lightType, { lightType = it })
+            fun fits(e: HouseEffect) = lightType == null || e == shown.effect || e == shown.shadow ||
+                lightType in com.wledcontroller.app.data.EffectFit.house(e)
             @Composable
             fun effectChips(list: List<HouseEffect>) = FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 list.forEach { e ->
@@ -298,7 +304,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                     )
                 }
             }
-            effectChips(HouseEffect.entries.filter { it.holiday == null })
+            effectChips(HouseEffect.entries.filter { it.holiday == null && fits(it) })
             // Shadow figures moving about over the effect, by holiday.
             SectionTitle("Holiday shadows")
             Text(
@@ -307,7 +313,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            HouseEffect.entries.filter { it.holiday != null }.groupBy { it.holiday!! }.forEach { (holiday, list) ->
+            HouseEffect.entries.filter { it.holiday != null && fits(it) }.groupBy { it.holiday!! }.forEach { (holiday, list) ->
                 Text(holiday, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                 effectChips(list)
             }

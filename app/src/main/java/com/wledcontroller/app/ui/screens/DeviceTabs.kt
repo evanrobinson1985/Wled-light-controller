@@ -296,22 +296,30 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
     val effectSettings by container.store.effectSettings.collectAsStateWithLifecycle(emptyMap())
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableIntStateOf(0) }
-    val filters = EffectFilters + listOfNotNull(profile?.let { "Best for ${it.label.substringBefore(" /").lowercase()}" })
+    val filters = EffectFilters
     if (filter >= filters.size) filter = 0
+    // The kind of lights to find effects for; the controller's own kind is starred.
+    var lightType by rememberSaveable { mutableStateOf<com.wledcontroller.app.data.LightType?>(null) }
+    val mine = profile?.let(com.wledcontroller.app.data.EffectFit::of)
 
-    val items = remember(snap.effects, snap.fxData, query, filter, favorites, profile) {
+    val items = remember(snap.effects, snap.fxData, query, filter, favorites, lightType) {
         snap.effects.withIndex()
             .filter { (_, n) -> isRealName(n) }
-            .filter { (_, n) -> query.isBlank() || n.contains(query.trim(), ignoreCase = true) }
+            // Searching "strip", "tree" or "matrix" finds the effects for that kind of light too.
+            .filter { (i, n) ->
+                val q = query.trim()
+                q.isBlank() || n.contains(q, ignoreCase = true) ||
+                    (q.length >= 3 && com.wledcontroller.app.data.EffectFit.wled(n, snap.effectMeta(i)).any { it.label.contains(q, ignoreCase = true) })
+            }
             .filter { (i, n) ->
                 when (filter) {
                     1 -> n in favorites
                     2 -> snap.effectMeta(i).is2D
                     3 -> snap.effectMeta(i).isAudio
-                    4 -> profile?.suggests(n, snap.effectMeta(i)) ?: true
                     else -> true
                 }
             }
+            .filter { (i, n) -> lightType == null || lightType in com.wledcontroller.app.data.EffectFit.wled(n, snap.effectMeta(i)) }
             .sortedWith(compareBy<IndexedValue<String>>({ it.index != 0 }, { it.value.lowercase() }))
     }
 
@@ -354,6 +362,7 @@ fun EffectsTab(controller: DeviceController, snap: DeviceSnapshot) {
                     FilterChip(selected = filter == i, onClick = { filter = i }, label = { Text(label) })
                 }
             }
+            com.wledcontroller.app.ui.components.LightTypeFilter(lightType, { lightType = it }, mine = mine)
         }
         if (items.isEmpty()) {
             item { Text("No effects match.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
