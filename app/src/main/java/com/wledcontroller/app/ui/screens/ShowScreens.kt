@@ -222,6 +222,30 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
             }.onFailure { importError = it.message ?: "Couldn't read that sequence." }
         }
     }
+    // Exporting a show to xLights.
+    var exportingXsq by remember { mutableStateOf<Sequence?>(null) }
+    var xsqNote by remember { mutableStateOf<String?>(null) }
+    val xsqExporter = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/xml")
+    ) { uri ->
+        val s = exportingXsq
+        exportingXsq = null
+        if (uri != null && s != null) scope.launch {
+            runCatching {
+                val xml = com.wledcontroller.app.show.XsqExport.export(s, map)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(xml.toByteArray()) }
+                }
+            }.onSuccess {
+                xsqNote = "Saved. In xLights, open it with your layout: props, groups and parts with the same names get the effects" +
+                    (if (s.audioFile != null) "; point it at the song when xLights asks." else ".")
+            }.onFailure { importError = "Export failed: ${it.message}" }
+        }
+    }
+    xsqNote?.let { n ->
+        AlertDialog(onDismissRequest = { xsqNote = null }, title = { Text("Exported to xLights") }, text = { Text(n) },
+            confirmButton = { TextButton(onClick = { xsqNote = null }) { Text("OK") } })
+    }
     // Exporting a show to .fseq.
     var exporting by remember { mutableStateOf<Sequence?>(null) }
     var exported by remember { mutableStateOf<List<com.wledcontroller.app.show.ChannelRange>?>(null) }
@@ -342,6 +366,13 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                                     menu = false; exporting = s
                                     exporter.launch(s.name.replace(Regex("[^A-Za-z0-9 _-]"), "").ifBlank { "show" } + ".fseq")
                                 })
+                                if (s.fseqFile == null) DropdownMenuItem(
+                                    text = { Column { Text("Export to xLights (.xsq)"); Text("Open and edit it in xLights", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = {
+                                        menu = false; exportingXsq = s
+                                        xsqExporter.launch(s.name.replace(Regex("[^A-Za-z0-9 _-]"), "").ifBlank { "show" } + ".xsq")
+                                    },
+                                )
                                 DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; deleting = s })
                             }
                         }
