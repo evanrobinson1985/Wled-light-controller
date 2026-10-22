@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }, onOpenTest = { nav.navigate("test") }, onOpenFirmware = { nav.navigate("firmware") })
                         }
                         composable("house/controllers") { com.wledcontroller.app.ui.screens.ControllerMapScreen(onBack = { nav.popBackStack() }) }
+                        composable("house/model3d") { com.wledcontroller.app.ui.screens.Model3DScreen(onBack = { nav.popBackStack() }) }
                         composable("house/power") { com.wledcontroller.app.ui.screens.PowerScreen(onBack = { nav.popBackStack() }) }
                         composable("firmware") { com.wledcontroller.app.ui.screens.FirmwareScreen(onBack = { nav.popBackStack() }, onOpenWebUi = { nav.navigate("web/$it") }) }
                         composable("jukebox") { com.wledcontroller.app.ui.screens.JukeboxScreen(onBack = { nav.popBackStack() }) }
@@ -124,7 +125,7 @@ class MainActivity : ComponentActivity() {
                             SequenceEditorScreen(sequenceId = entry.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
                         }
                         composable("house/map") {
-                            HouseMapEditor(onBack = { nav.popBackStack() }, onScan = { nav.navigate("house/scan") }, onControllers = { nav.navigate("house/controllers") }, onPower = { nav.navigate("house/power") })
+                            HouseMapEditor(onBack = { nav.popBackStack() }, onScan = { nav.navigate("house/scan") }, onControllers = { nav.navigate("house/controllers") }, onPower = { nav.navigate("house/power") }, onModel3d = { nav.navigate("house/model3d") })
                         }
                         composable("house/scan") {
                             CameraScanScreen(

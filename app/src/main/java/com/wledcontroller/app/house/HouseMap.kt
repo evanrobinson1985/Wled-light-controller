@@ -46,6 +46,8 @@ data class LightRun(
     val upsideDown: Boolean = false,
     /** How far in front of the house wall it stands (yard props), in cm, for the 3D view. */
     val depthCm: Float = 0f,
+    /** Traced on the 3D house model (metres), for lights the photo can't show. */
+    val points3d: List<com.wledcontroller.app.house.model3d.P3>? = null,
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
@@ -74,6 +76,8 @@ data class HouseMap(
     val scaleCm: Float? = null,
     /** Show lengths in inches and feet rather than centimetres and metres. */
     val useInches: Boolean = true,
+    /** The house in 3D, if one has been built or imported. */
+    val model3d: com.wledcontroller.app.house.model3d.House3D? = null,
 ) {
     /** Real centimetres per picture height, or null until a scale is set. */
     val cmPerHeight: Float?

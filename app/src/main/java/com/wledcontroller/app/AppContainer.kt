@@ -56,6 +56,8 @@ class AppContainer(context: Context) {
     )
     /** Alerts when a controller drops out during shows. */
     val health = com.wledcontroller.app.data.HealthMonitor(context, store, api, scope, showsOn = { showRunner.state.value.running || house.running.value })
+    /** The 3D house model's files. */
+    val models = com.wledcontroller.app.house.model3d.ModelStore(context)
     /** Saved house layouts and light models. */
     val library = com.wledcontroller.app.data.Library(context.filesDir)
     val backup = com.wledcontroller.app.data.Backup(context, store, sequences, library)

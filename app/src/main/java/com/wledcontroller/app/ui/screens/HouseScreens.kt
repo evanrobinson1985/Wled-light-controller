@@ -279,7 +279,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             val overlay = remember(map, leds) { com.wledcontroller.app.house.LiveTextOverlay(map, leds) }
             val frame = IntArray(leds.size) { i -> leds[i].let { l -> HouseRenderer.color(params, l.x, l.y, t, i, l.orderInRun) } }
             params.liveText?.let { lt -> overlay.apply(frame, lt, container.house.liveWords(lt), t) }
-            if (view3d) com.wledcontroller.app.ui.components.House3DView(map, leds, { i -> frame[i] })
+            if (view3d) com.wledcontroller.app.ui.components.HousePreview3D(map, leds, { i -> frame[i] })
             else HouseCanvas(map, photo) {
                 leds.forEachIndexed { i, led ->
                     if (led.hidden) return@forEachIndexed // Out of sight in the photo.
@@ -408,7 +408,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
 // ================================================================== map editor
 
 @Composable
-fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> Unit = {}, onPower: () -> Unit = {}) {
+fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> Unit = {}, onPower: () -> Unit = {}, onModel3d: () -> Unit = {}) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
@@ -618,6 +618,10 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
                                 DropdownMenuItem(
                                     text = { Column { Text("Power planner"); Text("Amps, power supplies and injection points", style = MaterialTheme.typography.labelSmall) } },
                                     onClick = { libraryMenu = false; onPower() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Column { Text("3D house model"); Text("Build or import your house in 3D and put your lights on it", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = { libraryMenu = false; onModel3d() },
                                 )
                             }
                         }

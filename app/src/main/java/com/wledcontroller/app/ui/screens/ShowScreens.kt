@@ -668,7 +668,7 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                     val fixtures by LocalAppContainer.current.store.fixtures.collectAsStateWithLifecycle(emptyList())
                     val fixtureIds = remember(fixtures) { fixtures.map { it.id }.toSet() }
                     var view3d by remember { mutableStateOf(false) }
-                    if (view3d) com.wledcontroller.app.ui.components.House3DView(map, layout.leds, { colors.getOrElse(it) { 0 } }, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp))
+                    if (view3d) com.wledcontroller.app.ui.components.HousePreview3D(map, layout.leds, { colors.getOrElse(it) { 0 } }, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp))
                     else HouseCanvas(map, photo, Modifier.heightIn(max = if (landscape) 260.dp else 200.dp)) {
                         // DMX fixtures as spotlights with their beams, behind the other lights.
                         layout.leds.forEachIndexed { i, l ->
