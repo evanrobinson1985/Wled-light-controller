@@ -52,6 +52,7 @@ object ShowControl {
     suspend fun status(context: Context): JsonObject {
         val c = ((context.applicationContext) as WledApp).container
         val s = c.showRunner.state.value
+        val playlists = c.store.playlists.first().filter { it.sequenceIds.isNotEmpty() }
         val next = if (s.mode == "jukebox") c.jukebox.queued().map { it.title } else s.upNext
         return buildJsonObject {
             put("running", s.running)
@@ -62,7 +63,7 @@ object ShowControl {
             s.nextStart?.let { put("nextStart", it.toLocalTime().withSecond(0).withNano(0).toString()) }
             putJsonArray("upNext") { next.take(10).forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
             putJsonArray("playlists") {
-                c.store.playlists.first().filter { it.sequenceIds.isNotEmpty() }.forEach { p -> addJsonObject { put("id", p.id); put("name", p.name) } }
+                playlists.forEach { p -> addJsonObject { put("id", p.id); put("name", p.name) } }
             }
         }
     }
