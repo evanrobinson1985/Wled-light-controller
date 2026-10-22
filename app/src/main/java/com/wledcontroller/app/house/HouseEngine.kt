@@ -147,7 +147,8 @@ class HouseEngine(private val context: Context, private val store: AppStore, pri
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(uri).use { BitmapFactory.decodeStream(it, null, bounds) }
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1600) sample *= 2
+        // Kept sharp enough to zoom into when tracing (up to about 4000 px).
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 4200) sample *= 2
         val bmp = resolver.openInputStream(uri).use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
         } ?: throw IllegalArgumentException("Couldn't read that image")
@@ -159,7 +160,7 @@ class HouseEngine(private val context: Context, private val store: AppStore, pri
 
     private fun savePhoto(bmp: Bitmap): Pair<String, Float> {
         val file = File(context.filesDir, "house_${System.currentTimeMillis()}.jpg")
-        file.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 88, it) }
+        file.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
         context.filesDir.listFiles { f -> f.name.startsWith("house_") && f != file }?.forEach { it.delete() }
         return file.absolutePath to bmp.width.toFloat() / bmp.height
     }

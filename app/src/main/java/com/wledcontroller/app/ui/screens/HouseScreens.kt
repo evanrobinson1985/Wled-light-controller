@@ -48,6 +48,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -169,12 +175,137 @@ import java.util.UUID
 
 // ================================================================== shared canvas
 
+/** The house photo, no bigger than about [maxSide] across (full size for zooming in to trace). */
 @Composable
-internal fun rememberPhoto(path: String?): ImageBitmap? {
-    val photo by produceState<ImageBitmap?>(null, path) {
-        value = path?.let { withContext(Dispatchers.IO) { BitmapFactory.decodeFile(it)?.asImageBitmap() } }
+internal fun rememberPhoto(path: String?, maxSide: Int = 2048): ImageBitmap? {
+    val photo by produceState<ImageBitmap?>(null, path, maxSide) {
+        value = path?.let {
+            withContext(Dispatchers.IO) {
+                val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(it, o)
+                var s = 1
+                while (maxOf(o.outWidth, o.outHeight) / s > maxSide * 1.4f) s *= 2
+                BitmapFactory.decodeFile(it, BitmapFactory.Options().apply { inSampleSize = s })?.asImageBitmap()
+            }
+        }
     }
     return photo
+}
+
+/**
+ * The house photo with an overlay, that zooms: pinch (or the buttons) to zoom, drag to move
+ * round when zoomed in, tap to place a point exactly. [handles] can be dragged into place.
+ * [overlay] gets how far it's zoomed in, to keep lines and dots thin. With [fitScreen] it
+ * fills the space it's given (keeping the photo's shape) instead of the width.
+ */
+@Composable
+internal fun ZoomableHouseCanvas(
+    map: HouseMap,
+    photo: ImageBitmap?,
+    modifier: Modifier = Modifier,
+    fitScreen: Boolean = false,
+    handles: List<MapPoint> = emptyList(),
+    onMoveHandle: ((Int, MapPoint) -> Unit)? = null,
+    onTap: ((MapPoint) -> Unit)? = null,
+    onFullScreen: (() -> Unit)? = null,
+    overlay: DrawScope.(zoom: Float) -> Unit,
+) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
+    var boxSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    val tap by rememberUpdatedState(onTap)
+    val move by rememberUpdatedState(onMoveHandle)
+    val currentHandles by rememberUpdatedState(handles)
+    fun clamp(p: Offset, s: Float) = Offset(
+        p.x.coerceIn(boxSize.width - boxSize.width * s, 0f),
+        p.y.coerceIn(boxSize.height - boxSize.height * s, 0f),
+    )
+    fun zoomBy(f: Float) {
+        val c = Offset(boxSize.width / 2, boxSize.height / 2)
+        val ns = (scale * f).coerceIn(1f, 10f)
+        pan = clamp(c - (c - pan) * (ns / scale), ns); scale = ns
+    }
+    Box(
+        modifier
+            .then(if (fitScreen) Modifier else Modifier.fillMaxWidth())
+            .aspectRatio(map.aspect.coerceIn(0.4f, 3f))
+            .clip(RoundedCornerShape(if (fitScreen) 0.dp else 16.dp))
+            .background(Color(0xFF101218))
+            .onSizeChanged { boxSize = androidx.compose.ui.geometry.Size(it.width.toFloat(), it.height.toFloat()) }
+    ) {
+        Box(
+            Modifier.fillMaxSize().graphicsLayer {
+                scaleX = scale; scaleY = scale
+                translationX = pan.x; translationY = pan.y
+                transformOrigin = TransformOrigin(0f, 0f)
+            }
+        ) {
+            if (photo != null) Image(photo, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds, alpha = 0.75f, filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
+            Canvas(Modifier.fillMaxSize()) { overlay(scale) }
+        }
+        Box(
+            Modifier.fillMaxSize().pointerInput(Unit) {
+                fun toMap(screen: Offset): MapPoint {
+                    val c = (screen - pan) / scale
+                    return MapPoint((c.x / size.width).coerceIn(0f, 1f), (c.y / size.height).coerceIn(0f, 1f))
+                }
+                fun hit(screen: Offset): Int? {
+                    if (move == null) return null
+                    val radius = 22.dp.toPx()
+                    var best: Int? = null; var bestD = Float.MAX_VALUE
+                    currentHandles.forEachIndexed { i, p ->
+                        val d = (Offset(p.x * size.width, p.y * size.height) * scale + pan - screen).getDistance()
+                        if (d < radius && d < bestD) { bestD = d; best = i }
+                    }
+                    return best
+                }
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val target = hit(down.position)
+                    var dragging = false; var multi = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.filter { it.pressed }
+                        if (pressed.isEmpty()) break
+                        if (pressed.size >= 2) {
+                            multi = true
+                            val zoom = event.calculateZoom(); val centroid = event.calculateCentroid()
+                            val ns = (scale * zoom).coerceIn(1f, 10f)
+                            pan = clamp(centroid - (centroid - pan) * (ns / scale) + event.calculatePan(), ns)
+                            scale = ns
+                            event.changes.forEach { it.consume() }
+                        } else if (!multi) {
+                            val ch = pressed.first()
+                            if (!dragging && (ch.position - down.position).getDistance() > viewConfiguration.touchSlop) dragging = true
+                            if (dragging) {
+                                if (target != null) { move?.invoke(target, toMap(ch.position)); ch.consume() }
+                                else if (scale > 1f) { pan = clamp(pan + (ch.position - ch.previousPosition), scale); ch.consume() }
+                            }
+                        }
+                    }
+                    if (!dragging && !multi && target == null) tap?.invoke(toMap(down.position))
+                }
+            }
+        )
+        // Zoom buttons, for one hand.
+        Column(Modifier.align(Alignment.TopEnd).padding(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            @Composable
+            fun Btn(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+                Surface(onClick = onClick, shape = RoundedCornerShape(10.dp), color = Color.Black.copy(alpha = 0.55f), contentColor = Color.White) {
+                    Icon(icon, label, Modifier.padding(6.dp).size(20.dp))
+                }
+            }
+            Btn(Icons.Filled.ZoomIn, "Zoom in") { zoomBy(2f) }
+            if (scale > 1f) Btn(Icons.Filled.ZoomOut, "Zoom out") { zoomBy(0.5f) }
+            if (scale > 1f) Btn(Icons.Filled.FitScreen, "Whole photo") { scale = 1f; pan = Offset.Zero }
+            onFullScreen?.let { Btn(if (fitScreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, if (fitScreen) "Exit full screen" else "Full screen", it) }
+        }
+        if (scale > 1f) Text(
+            "${(scale * 10).roundToInt() / 10f}×",
+            style = MaterialTheme.typography.labelSmall, color = Color.White,
+            modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
 }
 
 /** The house photo (or a dark canvas) with an overlay drawn in the same normalised coordinates. */
@@ -424,7 +555,9 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
     val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
     val devices by container.devices.list.collectAsStateWithLifecycle()
     val targets = rememberLightTargets()
-    val photo = rememberPhoto(map.photoPath)
+    // Full size, for zooming in to trace.
+    val photo = rememberPhoto(map.photoPath, maxSide = 4200)
+    var bigMap by remember { mutableStateOf(false) }
 
     var drawingRunId by remember { mutableStateOf<String?>(null) }
     val draft = remember { mutableStateListOf<MapPoint>() }
@@ -597,6 +730,86 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
         container.house.identifyLed(host, run.startLed + i)
     }
 
+    fun undoTrace() {
+        if (draft.isNotEmpty()) draft.removeAt(draft.lastIndex)
+        draftHidden.removeAll { it.after >= draft.size - 1 }
+    }
+    fun finishTrace() {
+        val run = drawingRun ?: return
+        saveRun(run.copy(points = draft.toList(), ledPoints = null, hidden = if (run.model != null) emptyList() else draftHidden.toList(), hiddenLeds = emptySet()))
+        drawingRunId = null; draft.clear(); draftHidden.clear()
+    }
+    val canFinishTrace = drawingRun != null &&
+        (if (drawingRun.model != null) draft.size == 2 else draft.size >= 2 || (drawingRun.count == 1 && draft.size == 1))
+
+    // The map being traced on: on the page, or full screen.
+    val mapCanvas: @Composable (Modifier, Boolean) -> Unit = { mod, fit ->
+        val pixel = LocalPixelStyle.current
+        ZoomableHouseCanvas(
+            map, photo, mod, fitScreen = fit,
+            // Points traced so far can be dragged into place.
+            handles = if (drawingRun != null) draft.toList() else emptyList(),
+            onMoveHandle = if (drawingRun != null) { { i, p -> if (i < draft.size) draft[i] = p } } else null,
+            onFullScreen = { bigMap = !bigMap },
+            onTap = if (drawingRun != null) { { p ->
+            // A model needs just the two corners of its box; one with a real size, just its centre.
+            val w = drawingRun.realWidthCm; val h = drawingRun.realHeightCm
+            val sized = if (drawingRun.model != null && w != null && h != null) map.boxAround(p, w, h) else null
+            if (sized != null) { draft.clear(); draft.addAll(sized) }
+            else if (drawingRun.model == null || draft.size < 2) draft.add(p)
+            if (drawingRun.model == null && nextHidden && draft.size >= 2) {
+                val k = draft.size - 2
+                draftHidden.add(HiddenStretch(k)); askHidden = k; nextHidden = false
+            }
+        } }
+        else if (scaling) { { p -> if (scaleDraft.size < 2) scaleDraft.add(p); if (scaleDraft.size == 2) askScale = true } }
+            else null,
+        ) { z ->
+        val stroke = 2.dp.toPx() / z
+        // The scale: a dashed yellow line between the two measured points.
+        val scalePts = if (scaling) scaleDraft.toList() else listOfNotNull(map.scaleA, map.scaleB)
+        if (scalePts.size == 2) drawRun(scalePts, Color(0xFFFFE06B), stroke * 0.8f, dashed = true)
+        scalePts.forEach { p -> drawCircle(Color(0xFFFFE06B), 4.dp.toPx() / z, Offset(p.x * size.width, p.y * size.height)) }
+        map.runs.forEachIndexed { r, run ->
+            if (run.id == drawingRunId) return@forEachIndexed
+            val col = RunColors[r % RunColors.size]
+            val positions = map.positions(run)
+            val placed = positions.filterNotNull()
+            if (run.isPlacedPerLed) drawRun(placed, col, stroke, dashed = false)
+            else if (run.model != null) drawBox(run.points, col.copy(alpha = 0.5f), stroke)
+            else run.shaped(map.aspect).let { shown -> drawTracedRun(shown.points, shown.hidden.map { it.after }.toSet(), col, stroke) }
+            val runGaps = neighbourGaps(positions, map.aspect)
+            val hiddenLed = run.hiddenFlags(map.aspect, map.cmPerHeight)
+            positions.forEachIndexed { i, p ->
+                if (p == null) return@forEachIndexed
+                val o = Offset(p.x * size.width, p.y * size.height)
+                val r = pixelRadius(pixel, runGaps[i], scale = 1f / z)
+                // Out-of-sight lights: hollow rings.
+                if (hiddenLed.getOrElse(i) { false }) drawCircle(col.copy(alpha = 0.7f), r, o, style = Stroke(1.dp.toPx() / z))
+                else drawCircle(col, r, o)
+            }
+            placed.firstOrNull()?.let { s ->
+                drawCircle(Color.White, 6.dp.toPx() / z, Offset(s.x * size.width, s.y * size.height), style = Stroke(stroke))
+            }
+        }
+        if (drawingRun != null) {
+            if (drawingRun.model != null) drawBox(draft.toList(), Color.White, stroke)
+            else drawTracedRun(draft.toList(), draftHidden.map { it.after }.toSet(), Color.White, stroke)
+            val previewRun = drawingRun.copy(points = draft.toList(), ledPoints = null, hidden = draftHidden.toList())
+            val preview = map.positions(previewRun)
+            val previewHidden = previewRun.hiddenFlags(map.aspect, map.cmPerHeight)
+            val previewGaps = neighbourGaps(preview, map.aspect)
+            preview.forEachIndexed { i, p ->
+                if (p == null) return@forEachIndexed
+                val o = Offset(p.x * size.width, p.y * size.height)
+                val r = pixelRadius(pixel, previewGaps[i], scale = 1f / z)
+                if (previewHidden.getOrElse(i) { false }) drawCircle(Color.White.copy(alpha = 0.6f), r, o, style = Stroke(1.dp.toPx() / z))
+                else drawCircle(Color.White, r, o)
+            }
+            draft.firstOrNull()?.let { s -> drawCircle(Color.Red, 6.dp.toPx() / z, Offset(s.x * size.width, s.y * size.height)) }
+        }
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -830,67 +1043,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
                 return@Column
             }
 
-            val pixel = LocalPixelStyle.current
-            HouseCanvas(
-                map, photo,
-                onTap = if (drawingRun != null) { { p ->
-                    // A model needs just the two corners of its box; one with a real size, just its centre.
-                    val w = drawingRun.realWidthCm; val h = drawingRun.realHeightCm
-                    val sized = if (drawingRun.model != null && w != null && h != null) map.boxAround(p, w, h) else null
-                    if (sized != null) { draft.clear(); draft.addAll(sized) }
-                    else if (drawingRun.model == null || draft.size < 2) draft.add(p)
-                    if (drawingRun.model == null && nextHidden && draft.size >= 2) {
-                        val k = draft.size - 2
-                        draftHidden.add(HiddenStretch(k)); askHidden = k; nextHidden = false
-                    }
-                } }
-                else if (scaling) { { p -> if (scaleDraft.size < 2) scaleDraft.add(p); if (scaleDraft.size == 2) askScale = true } }
-                else null,
-            ) {
-                val stroke = 2.dp.toPx()
-                // The scale: a dashed yellow line between the two measured points.
-                val scalePts = if (scaling) scaleDraft.toList() else listOfNotNull(map.scaleA, map.scaleB)
-                if (scalePts.size == 2) drawRun(scalePts, Color(0xFFFFE06B), stroke * 0.8f, dashed = true)
-                scalePts.forEach { p -> drawCircle(Color(0xFFFFE06B), 4.dp.toPx(), Offset(p.x * size.width, p.y * size.height)) }
-                map.runs.forEachIndexed { r, run ->
-                    if (run.id == drawingRunId) return@forEachIndexed
-                    val col = RunColors[r % RunColors.size]
-                    val positions = map.positions(run)
-                    val placed = positions.filterNotNull()
-                    if (run.isPlacedPerLed) drawRun(placed, col, stroke, dashed = false)
-                    else if (run.model != null) drawBox(run.points, col.copy(alpha = 0.5f), stroke)
-                    else run.shaped(map.aspect).let { shown -> drawTracedRun(shown.points, shown.hidden.map { it.after }.toSet(), col, stroke) }
-                    val runGaps = neighbourGaps(positions, map.aspect)
-                    val hiddenLed = run.hiddenFlags(map.aspect, map.cmPerHeight)
-                    positions.forEachIndexed { i, p ->
-                        if (p == null) return@forEachIndexed
-                        val o = Offset(p.x * size.width, p.y * size.height)
-                        val r = pixelRadius(pixel, runGaps[i])
-                        // Out-of-sight lights: hollow rings.
-                        if (hiddenLed.getOrElse(i) { false }) drawCircle(col.copy(alpha = 0.7f), r, o, style = Stroke(1.dp.toPx()))
-                        else drawCircle(col, r, o)
-                    }
-                    placed.firstOrNull()?.let { s ->
-                        drawCircle(Color.White, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height), style = Stroke(stroke))
-                    }
-                }
-                if (drawingRun != null) {
-                    if (drawingRun.model != null) drawBox(draft.toList(), Color.White, stroke)
-                    else drawTracedRun(draft.toList(), draftHidden.map { it.after }.toSet(), Color.White, stroke)
-                    val previewRun = drawingRun.copy(points = draft.toList(), ledPoints = null, hidden = draftHidden.toList())
-                    val preview = map.positions(previewRun)
-                    val previewHidden = previewRun.hiddenFlags(map.aspect, map.cmPerHeight)
-                    val previewGaps = neighbourGaps(preview, map.aspect)
-                    preview.forEachIndexed { i, p ->
-                        if (p == null) return@forEachIndexed
-                        val o = Offset(p.x * size.width, p.y * size.height)
-                        val r = pixelRadius(pixel, previewGaps[i])
-                        if (previewHidden.getOrElse(i) { false }) drawCircle(Color.White.copy(alpha = 0.6f), r, o, style = Stroke(1.dp.toPx()))
-                        else drawCircle(Color.White, r, o)
-                    }
-                    draft.firstOrNull()?.let { s -> drawCircle(Color.Red, 6.dp.toPx(), Offset(s.x * size.width, s.y * size.height)) }
-                }
-            }
+            if (!bigMap) mapCanvas(Modifier, false)
 
             if (scaling) {
                 Text(
@@ -1094,6 +1247,47 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
                 }
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    // The map full screen, to trace hard-to-see lights (turn the phone sideways for the most room).
+    if (bigMap) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { bigMap = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                mapCanvas(Modifier.align(Alignment.Center), true)
+                Column(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
+                        .background(Color.Black.copy(alpha = 0.65f)).padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    val run = drawingRun
+                    Text(
+                        when {
+                            run != null && run.model == null -> "${run.name}: tap along the lights (${draft.size} point${if (draft.size == 1) "" else "s"}). Drag a point to fix it."
+                            run != null -> "${run.name}: tap its corners. Drag one to fix it."
+                            scaling -> "Tap the two ends of something you know the length of."
+                            else -> "Pinch to zoom; drag to look round."
+                        },
+                        color = Color.White, style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (run != null) {
+                            TextButton(enabled = draft.isNotEmpty(), onClick = { undoTrace() }) {
+                                Icon(Icons.AutoMirrored.Filled.Undo, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Undo")
+                            }
+                            if (run.model == null) FilterChip(
+                                selected = nextHidden, enabled = draft.isNotEmpty(), onClick = { nextHidden = !nextHidden },
+                                label = { Text(if (nextHidden) "Tap where they reappear" else "Out of sight next", color = Color.White) },
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { bigMap = false }) { Text("Exit full screen") }
+                        if (run != null) Button(enabled = canFinishTrace, onClick = { finishTrace(); bigMap = false }) { Text("Done") }
+                    }
+                }
+            }
         }
     }
 
