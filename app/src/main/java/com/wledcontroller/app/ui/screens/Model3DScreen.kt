@@ -244,7 +244,7 @@ private fun ModelEditor(
     val scope = rememberCoroutineScope()
     var loaded by remember { mutableStateOf<Pair<Mesh, List<File>>?>(null) }
     var missing by remember { mutableStateOf(false) }
-    LaunchedEffect(model.dir, meshVersion) {
+    LaunchedEffect(model.dir, meshVersion, model.sharpened) {
         loaded = null; missing = false
         runCatching { container.models.mesh(model) to container.models.textures(model) }
             .onSuccess { loaded = it }.onFailure { missing = true }
@@ -410,6 +410,37 @@ private fun ModelEditor(
                         if (run.points3d != null) TextButton(onClick = { save { m -> m.copy(runs = m.runs.map { if (it.id == run.id) it.copy(points3d = null) else it }) } }) { Text("Use photo") }
                         if (run.model == null) TextButton(onClick = { draft.clear(); run.points3d?.let { draft.addAll(it) }; tracing = run.id; onMessage(null) }) { Text("Trace") }
                     }
+                }
+            }
+        }
+        // Colours from the scan's photos (optional).
+        if (model.kind == House3D.Kind.SCAN && (model.photos > 0 || model.sharpened)) Card(Modifier.fillMaxWidth()) {
+            var progress by remember { mutableStateOf<Float?>(null) }
+            val mb = remember(model.photos) { container.models.photoBytes(model) / 1_000_000 }
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Colours", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (model.sharpened) "Painted from the photos taken while scanning."
+                    else "The scan's own colours. The ${model.photos} photos taken while scanning can paint it much sharper (a minute or two).",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                progress?.let { p -> androidx.compose.material3.LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth()) }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!model.sharpened && model.photos > 0) Button(enabled = progress == null, onClick = {
+                        scope.launch {
+                            progress = 0f
+                            runCatching { container.models.sharpen(model) { progress = it } }
+                                .onSuccess { s -> save { it.copy(model3d = s) }; onMessage("Colours sharpened.") }
+                                .onFailure { onMessage(it.message ?: "Couldn't sharpen the colours.") }
+                            progress = null
+                        }
+                    }) { Text("Sharpen colours") }
+                    if (model.sharpened) OutlinedButton(enabled = progress == null, onClick = {
+                        scope.launch { val s = container.models.plainColours(model); save { it.copy(model3d = s) } }
+                    }) { Text("Back to the scan's colours") }
+                    if (model.photos > 0) TextButton(enabled = progress == null, onClick = {
+                        val s = container.models.dropPhotos(model); save { it.copy(model3d = s) }
+                    }) { Text("Delete the photos ($mb MB)") }
                 }
             }
         }

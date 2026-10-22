@@ -126,7 +126,10 @@ class ModelStore(private val context: Context) {
         m.copy(triangles = mesh.triangleCount)
     }
 
-    /** Keeps a scan made with the phone. */
+    /** Where the phone's scanner keeps its photos until the scan is saved. */
+    fun scanPhotoDir() = File(root, "scan_photos")
+
+    /** Keeps a scan made with the phone, with the photos it took. */
     suspend fun saveScanned(scanned: Mesh, name: String = "Phone scan"): House3D = withContext(Dispatchers.IO) {
         require(scanned.triangleCount > 0) { "Nothing was scanned — scan more of the house before finishing." }
         val m = House3D(UUID.randomUUID().toString(), House3D.Kind.SCAN, name)
@@ -136,17 +139,98 @@ class ModelStore(private val context: Context) {
         val mesh = scanned.transformed { it + shift }
         File(dir, MESH).outputStream().use { MeshFile.write(mesh, it) }
         cached = m.dir to mesh
-        m.copy(triangles = mesh.triangleCount)
+        // The photos, moved the same way as the model.
+        val photos = File(dir, PHOTOS)
+        var count = 0
+        if (scanPhotoDir().renameTo(photos)) {
+            photos.listFiles { f -> f.name.endsWith(".bin") }.orEmpty().forEach { f ->
+                val frame = f.inputStream().use { ScanFrame.read(it) }
+                val pose = frame.pose.copyOf().also { it[12] += shift.x; it[13] += shift.y; it[14] += shift.z }
+                f.outputStream().use { ScanFrame(pose, frame.fx, frame.fy, frame.cx, frame.cy, frame.width, frame.height, frame.depthW, frame.depthH, frame.depth).write(it) }
+                count++
+            }
+        }
+        m.copy(triangles = mesh.triangleCount, photos = count)
+    }
+
+    /** How much room the scan's photos take, bytes. */
+    fun photoBytes(m: House3D): Long = File(dir(m), PHOTOS).listFiles().orEmpty().sumOf { it.length() }
+
+    /** Deletes the scan's photos (the colours stay as they are). */
+    fun dropPhotos(m: House3D): House3D { File(dir(m), PHOTOS).deleteRecursively(); return m.copy(photos = 0) }
+
+    /**
+     * Paints the scan from its photos: much sharper colours. The scan's own colours are kept,
+     * to go back to. [onProgress] gets 0..1.
+     */
+    suspend fun sharpen(m: House3D, onProgress: (Float) -> Unit): House3D = withContext(Dispatchers.IO) {
+        val dir = dir(m)
+        val plainFile = File(dir, PLAIN)
+        if (!plainFile.exists()) File(dir, MESH).copyTo(plainFile)
+        val plain = plainFile.inputStream().use { MeshFile.read(it) }
+        val part = plain.parts.firstOrNull() ?: throw IllegalStateException("The model is empty.")
+        val photos = File(dir, PHOTOS)
+        val ids = photos.listFiles { f -> f.name.endsWith(".bin") }.orEmpty()
+            .mapNotNull { it.name.removePrefix("photo").removeSuffix(".bin").toIntOrNull() }.sorted()
+            .filter { File(photos, "photo$it.jpg").exists() }
+        require(ids.isNotEmpty()) { "The scan's photos have been deleted." }
+        val frames = ids.map { i -> File(photos, "photo$i.bin").inputStream().use { ScanFrame.read(it) } }
+        textures(m).forEach { it.delete() }
+        val page = 2048
+        val mesh = PhotoTexturer.texture(
+            part, frames,
+            image = { k ->
+                BitmapFactory.decodeFile(File(photos, "photo${ids[k]}.jpg").absolutePath)?.let { b ->
+                    IntArray(b.width * b.height).also { px -> b.getPixels(px, 0, b.width, 0, 0, b.width, b.height); b.recycle() }
+                        .takeIf { b.width == frames[k].width && b.height == frames[k].height }
+                }
+            },
+            pageSize = page,
+            onPage = { i, px ->
+                val bmp = Bitmap.createBitmap(px, page, page, Bitmap.Config.ARGB_8888)
+                File(dir, "tex$i.jpg").outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+                bmp.recycle()
+            },
+            onProgress = onProgress,
+        )
+        File(dir, MESH).outputStream().use { MeshFile.write(mesh, it) }
+        cached = m.dir to mesh
+        m.copy(sharpened = true)
+    }
+
+    /** Back to the scan's own colours. */
+    suspend fun plainColours(m: House3D): House3D = withContext(Dispatchers.IO) {
+        val dir = dir(m)
+        val plainFile = File(dir, PLAIN)
+        if (plainFile.exists()) {
+            plainFile.copyTo(File(dir, MESH), overwrite = true)
+            textures(m).forEach { it.delete() }
+            cached = null
+        }
+        m.copy(sharpened = false)
     }
 
     /** Turns the model a quarter turn about x (on its back ↔ upright) or y; any line-up is lost. */
     suspend fun turn(m: House3D, aboutX: Boolean): House3D = withContext(Dispatchers.IO) {
-        var mesh = mesh(m).transformed { p -> if (aboutX) P3(p.x, -p.z, p.y) else P3(p.z, p.y, -p.x) }
+        val rot: (P3) -> P3 = { p -> if (aboutX) P3(p.x, -p.z, p.y) else P3(p.z, p.y, -p.x) }
+        var mesh = mesh(m).transformed(rot)
         val (lo, hi) = mesh.bounds
         val shift = P3(-(lo.x + hi.x) / 2, -lo.y, -(lo.z + hi.z) / 2)
         mesh = mesh.transformed { it + shift }
         File(dir(m), MESH).outputStream().use { MeshFile.write(mesh, it) }
         cached = m.dir to mesh
+        // The scan's own colours and its photos turn with it.
+        File(dir(m), PLAIN).takeIf { it.exists() }?.let { f ->
+            val plain = f.inputStream().use { MeshFile.read(it) }.transformed { rot(it) + shift }
+            f.outputStream().use { MeshFile.write(plain, it) }
+        }
+        File(dir(m), PHOTOS).listFiles { f -> f.name.endsWith(".bin") }.orEmpty().forEach { f ->
+            val fr = f.inputStream().use { ScanFrame.read(it) }
+            val p = fr.pose.copyOf()
+            for (c in 0 until 3) { val v = rot(P3(p[c * 4], p[c * 4 + 1], p[c * 4 + 2])); p[c * 4] = v.x; p[c * 4 + 1] = v.y; p[c * 4 + 2] = v.z }
+            val e = rot(P3(p[12], p[13], p[14])) + shift; p[12] = e.x; p[13] = e.y; p[14] = e.z
+            f.outputStream().use { ScanFrame(p, fr.fx, fr.fy, fr.cx, fr.cy, fr.width, fr.height, fr.depthW, fr.depthH, fr.depth).write(it) }
+        }
         m.copy(lineup = null, lineupModel = null, lineupPhoto = null)
     }
 
@@ -181,6 +265,8 @@ class ModelStore(private val context: Context) {
 
     companion object {
         private const val MESH = "mesh.bin"
+        private const val PLAIN = "mesh_plain.bin"
+        private const val PHOTOS = "photos"
         private const val MAX_TEX = 2048f
         const val MAX_TRIANGLES = 3_000_000
     }

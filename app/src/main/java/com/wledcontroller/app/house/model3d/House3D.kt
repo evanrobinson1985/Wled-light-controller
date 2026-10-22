@@ -27,6 +27,10 @@ data class House3D(
     /** The same four points on the house photo. */
     val lineupPhoto: List<MapPoint>? = null,
     val triangles: Int = 0,
+    /** Photos kept from scanning with the phone, for sharpening the colours. */
+    val photos: Int = 0,
+    /** Painted from those photos (rather than the scan's own colours). */
+    val sharpened: Boolean = false,
 ) {
     @Serializable
     enum class Kind { PHOTOS, SCAN }

@@ -17,6 +17,7 @@ import com.google.ar.core.exceptions.NotYetAvailableException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.sqrt
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -32,6 +33,8 @@ data class ScanStatus(
     val views: Int = 0,
     /** About how much surface has been scanned, m². */
     val areaM2: Float = 0f,
+    /** Photos kept for sharpening the colours afterwards. */
+    val photos: Int = 0,
 )
 
 /**
@@ -39,7 +42,7 @@ data class ScanStatus(
  * how far away things are from the camera's movement, and combines every view into one
  * coloured surface ([TsdfVolume]), 5 cm cubes at a time.
  */
-class ArScanner(private val context: Context) {
+class ArScanner(private val context: Context, private val photoDir: java.io.File) {
     @Volatile var session: Session? = null
         private set
     val volume = TsdfVolume(voxel = 0.05f, truncation = 0.15f)
@@ -54,6 +57,10 @@ class ArScanner(private val context: Context) {
     private var lastDepthTime = 0L
     @Volatile var preview: Pair<FloatArray, IntArray>? = null
         private set
+    // The last photo kept: where from, and when.
+    private var lastPhotoPose: FloatArray? = null
+    private var lastPhotoAt = 0L
+    private var photos = 0
 
     /** Sets ARCore up. Returns why it can't, or null when it's ready; "install" when it's being installed. */
     fun open(activity: Activity): String? {
@@ -63,7 +70,14 @@ class ArScanner(private val context: Context) {
                 ArCoreApk.InstallStatus.INSTALL_REQUESTED -> return "install"
                 else -> Unit
             }
+            photoDir.deleteRecursively(); photoDir.mkdirs()
             val s = Session(context)
+            // The sharpest camera pictures it offers (up to 1080p), for colour and photos.
+            runCatching {
+                val filter = com.google.ar.core.CameraConfigFilter(s).setFacingDirection(com.google.ar.core.CameraConfig.FacingDirection.BACK)
+                s.getSupportedCameraConfigs(filter).filter { it.imageSize.width <= 1920 }
+                    .maxByOrNull { it.imageSize.width * it.imageSize.height }?.let { s.cameraConfig = it }
+            }
             val mode = when {
                 s.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY) -> Config.DepthMode.RAW_DEPTH_ONLY
                 s.isDepthModeSupported(Config.DepthMode.AUTOMATIC) -> Config.DepthMode.AUTOMATIC
@@ -175,10 +189,44 @@ class ArScanner(private val context: Context) {
             k++
         }
         volume.integrate(P3(m[12], m[13], m[14]), pts, cols, wts, k)
+        if (wantPhoto(m)) runCatching { keepPhoto(v) }
         val views = _status.value.views + 1
         if (views % 4 == 1) preview = volume.surfacePoints(160_000)
         val area = (preview?.second?.size ?: 0) * volume.voxel * volume.voxel
-        _status.value = ScanStatus(true, "Scanning — walk slowly along the house, sweeping up to the roof edge and down to the ground.", views, area)
+        _status.value = ScanStatus(true, "Scanning — walk slowly along the house, sweeping up to the roof edge and down to the ground.", views, area, photos)
+    }
+
+    /** A photo every so often: when the phone has moved or turned enough since the last. */
+    private fun wantPhoto(m: FloatArray): Boolean {
+        if (photos >= MAX_PHOTOS || System.currentTimeMillis() - lastPhotoAt < 500) return false
+        val last = lastPhotoPose ?: return true
+        val moved = sqrt((m[12] - last[12]).let { it * it } + (m[13] - last[13]).let { it * it } + (m[14] - last[14]).let { it * it })
+        val facing = m[8] * last[8] + m[9] * last[9] + m[10] * last[10]
+        return moved > 0.35f || facing < 0.978f
+    }
+
+    private fun keepPhoto(v: View) {
+        // The camera picture as a JPEG (NV21 is what Android's encoder takes).
+        val w = v.iw; val h = v.ih
+        val nv21 = ByteArray(w * h * 3 / 2)
+        for (r in 0 until h) System.arraycopy(v.y, r * v.yRow, nv21, r * w, minOf(w, v.y.size - r * v.yRow))
+        for (r in 0 until h / 2) for (c in 0 until w / 2) {
+            val o = r * v.uvRow + c * v.uvPix
+            nv21[w * h + r * w + c * 2] = v.v.getOrElse(o) { -128 }
+            nv21[w * h + r * w + c * 2 + 1] = v.u.getOrElse(o) { -128 }
+        }
+        val i = photos
+        java.io.File(photoDir, "photo$i.jpg").outputStream().use {
+            android.graphics.YuvImage(nv21, android.graphics.ImageFormat.NV21, w, h, null).compressToJpeg(android.graphics.Rect(0, 0, w, h), 90, it)
+        }
+        // Where it was taken from, its lens (for this picture's size), and the trusted depths.
+        val sx = w.toFloat() / v.imgW; val sy = h.toFloat() / v.imgH
+        val depth = ShortArray(v.dw * v.dh) { k -> if ((v.conf[k].toInt() and 0xFF) >= 60) v.depth[k] else 0 }
+        java.io.File(photoDir, "photo$i.bin").outputStream().use {
+            ScanFrame(v.pose.copyOf(), v.fx * sx, v.fy * sy, v.cx * sx, v.cy * sy, w, h, v.dw, v.dh, depth).write(it)
+        }
+        photos++
+        lastPhotoPose = v.pose.copyOf(); lastPhotoAt = System.currentTimeMillis()
     }
 
     private fun colorAt(v: View, x: Int, y: Int): Int {
@@ -195,6 +243,8 @@ class ArScanner(private val context: Context) {
 }
 
 /** The camera's view while scanning, with what's been scanned so far drawn over it. */
+private const val MAX_PHOTOS = 400
+
 class ArScanView(context: Context, private val scanner: ArScanner) : GLSurfaceView(context) {
     init {
         setEGLContextClientVersion(2)

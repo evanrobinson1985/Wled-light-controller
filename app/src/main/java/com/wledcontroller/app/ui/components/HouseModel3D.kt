@@ -93,7 +93,7 @@ fun HousePreview3D(map: HouseMap, leds: List<PlacedLed>, colorOf: (Int) -> Int, 
     val model = map.model3d?.takeIf { it.show }
     if (model == null) { House3DView(map, leds, colorOf, modifier); return }
     val container = LocalAppContainer.current
-    val loaded by produceState<Pair<Mesh, List<File>>?>(null, model.dir) {
+    val loaded by produceState<Pair<Mesh, List<File>>?>(null, model.dir, model.sharpened) {
         value = runCatching { container.models.mesh(model) to container.models.textures(model) }.getOrNull()
     }
     val mesh = loaded

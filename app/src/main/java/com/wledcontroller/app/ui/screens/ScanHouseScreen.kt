@@ -66,7 +66,7 @@ fun ScanHouseScreen(onBack: () -> Unit, onDone: () -> Unit) {
     val context = LocalContext.current
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
-    val scanner = remember { ArScanner(context.applicationContext) }
+    val scanner = remember { ArScanner(context.applicationContext, container.models.scanPhotoDir()) }
     val view = remember { ArScanView(context, scanner) }
     var granted by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
     val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
@@ -101,6 +101,10 @@ fun ScanHouseScreen(onBack: () -> Unit, onDone: () -> Unit) {
         onDispose { lifecycle.removeObserver(observer); view.onPause(); scanner.close() }
     }
 
+    // Done scanning: sharpen the colours from the photos now, or later (or never).
+    var offerSharpen by remember { mutableStateOf<com.wledcontroller.app.house.model3d.House3D?>(null) }
+    var sharpening by remember { mutableStateOf<Float?>(null) }
+
     fun finish() {
         scanner.recording = false; recording = false
         scope.launch {
@@ -112,7 +116,8 @@ fun ScanHouseScreen(onBack: () -> Unit, onDone: () -> Unit) {
                 val old = container.store.houseMap.first().model3d
                 container.store.updateHouseMap { it.copy(model3d = m, runs = it.runs.map { r -> r.copy(points3d = null) }) }
                 if (old != null) container.models.delete(old)
-            }.onSuccess { finishing = null; onDone() }
+                m
+            }.onSuccess { m -> finishing = null; if (m.photos > 0) offerSharpen = m else onDone() }
                 .onFailure { finishing = null; problem = it.message ?: "Couldn't build the model." }
         }
     }
@@ -165,6 +170,34 @@ fun ScanHouseScreen(onBack: () -> Unit, onDone: () -> Unit) {
                 Text(it, color = Color.White, modifier = Modifier.padding(top = 12.dp))
             }
         }
+    }
+
+    offerSharpen?.let { m ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Sharpen the colours?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Your house is scanned. The scan kept ${m.photos} photos as you went: the app can paint the model from them for much sharper colours. It takes a minute or two. You can also do it later from the 3D house model screen.")
+                    sharpening?.let { p ->
+                        androidx.compose.material3.LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
+                        Text("${(p * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = sharpening == null, onClick = {
+                    scope.launch {
+                        sharpening = 0f
+                        runCatching { container.models.sharpen(m) { p -> sharpening = p } }
+                            .onSuccess { s -> container.store.updateHouseMap { it.copy(model3d = s) } }
+                            .onFailure { problem = it.message }
+                        sharpening = null; offerSharpen = null; onDone()
+                    }
+                }) { Text("Sharpen now") }
+            },
+            dismissButton = { TextButton(enabled = sharpening == null, onClick = { offerSharpen = null; onDone() }) { Text("Later") } },
+        )
     }
 
     if (showTips && granted) AlertDialog(
