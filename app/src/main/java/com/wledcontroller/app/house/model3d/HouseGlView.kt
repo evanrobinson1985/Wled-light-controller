@@ -134,7 +134,8 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
         private var pending: Pair<Mesh, List<File>>? = null
         private var w = 1; private var h = 1
 
-        inner class GpuPart(val vbo: Int, val ibo: Int, val count: Int, val textured: Boolean, val tex: Int, val color: Int)
+        /** [mode]: 0 flat colour, 1 picture, 2 colour at each corner. */
+        inner class GpuPart(val vbo: Int, val ibo: Int, val count: Int, val mode: Int, val tex: Int, val color: Int)
 
         fun load(mesh: Mesh, files: List<File>) { if (mesh !== loaded) pending = mesh to files }
 
@@ -167,11 +168,14 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
             }
             parts = mesh.parts.map { p ->
                 val textured = p.uvs != null && p.texture in textures.indices
-                val stride = if (textured) 5 else 3
-                val data = ByteBuffer.allocateDirect(p.vertexCount * stride * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+                val vc = p.vertexColors?.takeIf { it.size == p.vertexCount }
+                // Position, picture coordinates, colour.
+                val data = ByteBuffer.allocateDirect(p.vertexCount * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
                 for (i in 0 until p.vertexCount) {
                     data.put(p.positions, i * 3, 3)
-                    if (textured) data.put(p.uvs!!, i * 2, 2)
+                    if (textured) data.put(p.uvs!!, i * 2, 2) else { data.put(0f); data.put(0f) }
+                    val c = vc?.get(i) ?: 0
+                    data.put(((c shr 16) and 0xFF) / 255f); data.put(((c shr 8) and 0xFF) / 255f); data.put((c and 0xFF) / 255f)
                 }
                 data.position(0)
                 val idx = ByteBuffer.allocateDirect(p.indices.size * 4).order(ByteOrder.nativeOrder()).asIntBuffer().put(p.indices).also { it.position(0) }
@@ -180,7 +184,7 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
                 GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, data.capacity() * 4, data, GLES30.GL_STATIC_DRAW)
                 GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, ids[1])
                 GLES30.glBufferData(GLES30.GL_ELEMENT_ARRAY_BUFFER, p.indices.size * 4, idx, GLES30.GL_STATIC_DRAW)
-                GpuPart(ids[0], ids[1], p.indices.size, textured, if (textured) textures[p.texture] else 0, p.color)
+                GpuPart(ids[0], ids[1], p.indices.size, if (textured) 1 else if (vc != null) 2 else 0, if (textured) textures[p.texture] else 0, p.color)
             }
             loaded = mesh
             loadedFiles = files
@@ -202,27 +206,29 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
             GLES30.glUseProgram(meshProg)
             GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(meshProg, "uMvp"), 1, false, mvp, 0)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(meshProg, "uBright"), brightness)
-            val uTex = GLES30.glGetUniformLocation(meshProg, "uTextured")
+            val uTex = GLES30.glGetUniformLocation(meshProg, "uMode")
             val uColor = GLES30.glGetUniformLocation(meshProg, "uColor")
             for (p in parts) {
                 GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, p.vbo)
                 GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, p.ibo)
-                val stride = if (p.textured) 20 else 12
                 GLES30.glEnableVertexAttribArray(0)
-                GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, stride, 0)
-                if (p.textured) {
-                    GLES30.glEnableVertexAttribArray(1)
-                    GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, stride, 12)
+                GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 32, 0)
+                GLES30.glEnableVertexAttribArray(1)
+                GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 32, 12)
+                GLES30.glEnableVertexAttribArray(3)
+                GLES30.glVertexAttribPointer(3, 3, GLES30.GL_FLOAT, false, 32, 20)
+                if (p.mode == 1) {
                     GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
                     GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, p.tex)
-                } else GLES30.glDisableVertexAttribArray(1)
-                GLES30.glUniform1i(uTex, if (p.textured) 1 else 0)
+                }
+                GLES30.glUniform1i(uTex, p.mode)
                 GLES30.glUniform3f(uColor, ((p.color shr 16) and 0xFF) / 255f, ((p.color shr 8) and 0xFF) / 255f, (p.color and 0xFF) / 255f)
                 GLES30.glDrawElements(GLES30.GL_TRIANGLES, p.count, GLES30.GL_UNSIGNED_INT, 0)
             }
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
             GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, 0)
             GLES30.glDisableVertexAttribArray(1)
+            GLES30.glDisableVertexAttribArray(3)
 
             // The lights: glowing dots, added on top.
             val (buf, n) = lights ?: return
@@ -259,22 +265,23 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
         private const val MESH_VS = """#version 300 es
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aUv;
+layout(location = 3) in vec3 aColor;
 uniform mat4 uMvp;
 out vec2 vUv;
-out float vHeight;
-void main() { vUv = aUv; vHeight = aPos.y; gl_Position = uMvp * vec4(aPos, 1.0); }
+out vec3 vColor;
+void main() { vUv = aUv; vColor = aColor; gl_Position = uMvp * vec4(aPos, 1.0); }
 """
         private const val MESH_FS = """#version 300 es
 precision mediump float;
 in vec2 vUv;
-in float vHeight;
+in vec3 vColor;
 uniform sampler2D uTex;
-uniform int uTextured;
+uniform int uMode;
 uniform vec3 uColor;
 uniform float uBright;
 out vec4 frag;
 void main() {
-    vec3 c = uTextured == 1 ? texture(uTex, vUv).rgb : uColor;
+    vec3 c = uMode == 1 ? texture(uTex, vUv).rgb : (uMode == 2 ? vColor : uColor);
     frag = vec4(c * uBright, 1.0);
 }
 """

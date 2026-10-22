@@ -75,6 +75,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // QR codes for the viewer jukebox sign.
     implementation("com.google.zxing:core:3.5.3")
+    // The phone as a 3D scanner.
+    implementation("com.google.ar:core:1.44.0")
     // The Galaxy Watch / Wear OS app: syncing controllers and passing its commands on.
     implementation("com.google.android.gms:play-services-wearable:18.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")

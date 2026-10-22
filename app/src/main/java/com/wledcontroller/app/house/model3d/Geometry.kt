@@ -86,13 +86,17 @@ data class Camera(val eye: P3, val forward: P3, val up: P3, val focal: Float) {
     }
 }
 
-/** One textured piece of a model: triangles with picture coordinates (u right, v down) into texture [texture], or flat [color]. */
+/**
+ * One piece of a model: triangles with picture coordinates (u right, v down) into texture
+ * [texture], or a colour at each corner ([vertexColors], as from a scan), or flat [color].
+ */
 class MeshPart(
     val positions: FloatArray,
     val uvs: FloatArray?,
     val indices: IntArray,
     val texture: Int = -1,
     val color: Int = 0xFF8A8F99.toInt(),
+    val vertexColors: IntArray? = null,
 ) {
     val vertexCount get() = positions.size / 3
     val triangleCount get() = indices.size / 3
@@ -124,7 +128,7 @@ class Mesh(val parts: List<MeshPart>) {
     fun transformed(f: (P3) -> P3): Mesh = Mesh(parts.map { p ->
         val out = FloatArray(p.positions.size)
         for (i in 0 until p.vertexCount) { val q = f(p.vertex(i)); out[i * 3] = q.x; out[i * 3 + 1] = q.y; out[i * 3 + 2] = q.z }
-        MeshPart(out, p.uvs, p.indices, p.texture, p.color)
+        MeshPart(out, p.uvs, p.indices, p.texture, p.color, p.vertexColors)
     })
 
     /** Where a ray from [origin] along [dir] first meets the model, as a distance along it. */

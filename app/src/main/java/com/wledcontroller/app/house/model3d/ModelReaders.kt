@@ -109,7 +109,17 @@ object GlbReader {
                     (0xFF shl 24) or ((c[0] * 255).toInt().coerceIn(0, 255) shl 16) or ((c[1] * 255).toInt().coerceIn(0, 255) shl 8) or (c[2] * 255).toInt().coerceIn(0, 255)
                 } ?: 0xFFB0B4BC.toInt()
                 val uvOk = uv?.takeIf { tex >= 0 && it.size == vcount * 2 }
-                parts += MeshPart(out, uvOk, idx, if (uvOk != null) tex else -1, color)
+                // Colour at each corner, as some scanners save it.
+                val vc = attrs["COLOR_0"]?.jsonPrimitive?.intOrNull?.let { a ->
+                    val comps = when (accessors[a].jsonObject["type"]?.jsonPrimitive?.content) { "VEC4" -> 4; else -> 3 }
+                    val f = accessor(a)
+                    if (f.size != vcount * comps) null
+                    else IntArray(vcount) { i ->
+                        fun ch(k: Int) = (f[i * comps + k] * 255f).toInt().coerceIn(0, 255)
+                        (0xFF shl 24) or (ch(0) shl 16) or (ch(1) shl 8) or ch(2)
+                    }
+                }
+                parts += MeshPart(out, uvOk, idx, if (uvOk != null) tex else -1, color, vc)
             }
         }
 
@@ -232,29 +242,33 @@ object ObjReader {
 object MeshFile {
     fun write(mesh: Mesh, out: java.io.OutputStream) {
         val d = java.io.DataOutputStream(java.io.BufferedOutputStream(out, 1 shl 16))
-        d.writeInt(MAGIC); d.writeInt(mesh.parts.size)
+        d.writeInt(MAGIC2); d.writeInt(mesh.parts.size)
         for (p in mesh.parts) {
             d.writeInt(p.texture); d.writeInt(p.color)
             d.writeInt(p.positions.size); p.positions.forEach(d::writeFloat)
             val uv = p.uvs
             d.writeInt(uv?.size ?: 0); uv?.forEach(d::writeFloat)
             d.writeInt(p.indices.size); p.indices.forEach(d::writeInt)
+            d.writeInt(p.vertexColors?.size ?: 0); p.vertexColors?.forEach(d::writeInt)
         }
         d.flush()
     }
 
     fun read(input: java.io.InputStream): Mesh {
         val d = java.io.DataInputStream(java.io.BufferedInputStream(input, 1 shl 16))
-        require(d.readInt() == MAGIC) { "Not a house model." }
+        val magic = d.readInt()
+        require(magic == MAGIC || magic == MAGIC2) { "Not a house model." }
         val n = d.readInt()
         return Mesh(List(n) {
             val tex = d.readInt(); val color = d.readInt()
             val pos = FloatArray(d.readInt()) { d.readFloat() }
             val uv = d.readInt().let { k -> if (k == 0) null else FloatArray(k) { d.readFloat() } }
             val idx = IntArray(d.readInt()) { d.readInt() }
-            MeshPart(pos, uv, idx, tex, color)
+            val vc = if (magic == MAGIC2) d.readInt().let { k -> if (k == 0) null else IntArray(k) { d.readInt() } } else null
+            MeshPart(pos, uv, idx, tex, color, vc)
         })
     }
 
     private const val MAGIC = 0x48334431 // "H3D1"
+    private const val MAGIC2 = 0x48334432 // "H3D2": with corner colours
 }

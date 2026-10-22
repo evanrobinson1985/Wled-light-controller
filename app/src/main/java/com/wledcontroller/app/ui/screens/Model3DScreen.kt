@@ -93,7 +93,7 @@ private val CORNER_COLORS = intArrayOf(0xFF5252, 0x69F0AE, 0x40C4FF, 0xFFD740)
  * can't show (round the side, at the back) straight onto the model.
  */
 @Composable
-fun Model3DScreen(onBack: () -> Unit) {
+fun Model3DScreen(onBack: () -> Unit, onScan: () -> Unit = {}) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val map by container.store.houseMap.collectAsStateWithLifecycle(HouseMap())
@@ -148,12 +148,13 @@ fun Model3DScreen(onBack: () -> Unit) {
                     onBusy = { busy = it },
                     onCancel = { building = false },
                 )
-                model == null -> NoModel(onBuild = { building = true; message = null }, onImport = { importer.launch(arrayOf("*/*")) })
+                model == null -> NoModel(onScan = onScan, onBuild = { building = true; message = null }, onImport = { importer.launch(arrayOf("*/*")) })
                 else -> ModelEditor(
                     map, model, meshVersion,
                     onMessage = { message = it },
                     onRebuild = { building = true; message = null },
                     onImport = { importer.launch(arrayOf("*/*")) },
+                    onScan = onScan,
                     onTurn = { aboutX ->
                         scope.launch {
                             busy = "Turning…"
@@ -190,11 +191,21 @@ fun Model3DScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun NoModel(onBuild: () -> Unit, onImport: () -> Unit) {
+private fun NoModel(onScan: () -> Unit, onBuild: () -> Unit, onImport: () -> Unit) {
     Text(
         "Optional: put your house in 3D, with your own photos on it, and your lights where they really are — round the sides and back too. The 3D previews then show your show on it.",
         style = MaterialTheme.typography.bodyMedium,
     )
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Scan it with this phone", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Walk along the house with the camera on it and the app builds a true-size 3D model in colour as you go: porches, posts, set-back parts, bushes and all. Takes a few minutes in daylight. Uses Google Play Services for AR.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onScan) { Text("Scan my house") }
+        }
+    }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Build it from photos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -202,12 +213,12 @@ private fun NoModel(onBuild: () -> Unit, onImport: () -> Unit) {
                 "Take a straight-on photo of each side of the house, mark each wall's corners, and enter its size and roof shape. The app straightens the photos and wraps them onto the walls. Quick, and works with just the front.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(onClick = onBuild) { Text("Build from photos") }
+            OutlinedButton(onClick = onBuild) { Text("Build from photos") }
         }
     }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Import a 3D scan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Import a scan from another app", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
                 "For a true 3D scan, use a free scanning app — Scaniverse, Polycam or KIRI Engine. Walk slowly round the house (or along the front) while it scans, let it finish processing, then export or share it as GLB (or OBJ in a .zip) and import it here. A medium detail level works best; very detailed scans are slow.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -224,6 +235,7 @@ private fun ModelEditor(
     meshVersion: Int,
     onMessage: (String?) -> Unit,
     onRebuild: () -> Unit,
+    onScan: () -> Unit,
     onImport: () -> Unit,
     onTurn: (aboutX: Boolean) -> Unit,
     onRemove: () -> Unit,
@@ -413,6 +425,7 @@ private fun ModelEditor(
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onScan) { Text("Scan again") }
                     OutlinedButton(onClick = onRebuild) { Text(if (model.kind == House3D.Kind.PHOTOS) "Change size or photos" else "Build from photos instead") }
                     OutlinedButton(onClick = onImport) { Text("Import a different scan") }
                     TextButton(onClick = onRemove) { Text("Remove") }

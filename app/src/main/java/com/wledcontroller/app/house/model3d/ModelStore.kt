@@ -116,11 +116,24 @@ class ModelStore(private val context: Context) {
             File(dir, "tex$i.jpg").outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
             bmp.recycle(); true
         }
-        var mesh = Mesh(data.mesh.parts.map { p -> if (p.texture >= 0 && ok.getOrElse(p.texture) { false }) p else MeshPart(p.positions, null, p.indices, -1, p.color) })
+        var mesh = Mesh(data.mesh.parts.map { p -> if (p.texture >= 0 && ok.getOrElse(p.texture) { false }) p else MeshPart(p.positions, null, p.indices, -1, p.color, p.vertexColors) })
         // Stood on the ground, centred.
         val (lo, hi) = mesh.bounds
         val shift = P3(-(lo.x + hi.x) / 2, -lo.y, -(lo.z + hi.z) / 2)
         mesh = mesh.transformed { it + shift }
+        File(dir, MESH).outputStream().use { MeshFile.write(mesh, it) }
+        cached = m.dir to mesh
+        m.copy(triangles = mesh.triangleCount)
+    }
+
+    /** Keeps a scan made with the phone. */
+    suspend fun saveScanned(scanned: Mesh, name: String = "Phone scan"): House3D = withContext(Dispatchers.IO) {
+        require(scanned.triangleCount > 0) { "Nothing was scanned — scan more of the house before finishing." }
+        val m = House3D(UUID.randomUUID().toString(), House3D.Kind.SCAN, name)
+        val dir = dir(m).apply { mkdirs() }
+        val (lo, hi) = scanned.bounds
+        val shift = P3(-(lo.x + hi.x) / 2, -lo.y, -(lo.z + hi.z) / 2)
+        val mesh = scanned.transformed { it + shift }
         File(dir, MESH).outputStream().use { MeshFile.write(mesh, it) }
         cached = m.dir to mesh
         m.copy(triangles = mesh.triangleCount)
