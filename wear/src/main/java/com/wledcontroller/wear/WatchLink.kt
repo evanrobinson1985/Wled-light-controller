@@ -48,6 +48,8 @@ data class HouseFx(val name: String, val label: String, val holiday: String? = n
 data class HouseStatus(
     val running: Boolean = false, val effect: String = "", val speed: Float = 0.5f, val size: Float = 0.5f, val count: Int = 3,
     val shadow: String? = null, val shadowSize: Float = 0.5f, val shadowSpeed: Float = 0.5f,
+    /** Words showing on the matrices, if any. */
+    val text: String? = null,
 )
 
 /** What a controller is doing, enough for the watch. */
@@ -233,12 +235,13 @@ class WatchLink(private val context: Context) {
      */
     suspend fun house(
         action: String? = null, effect: String? = null, speed: Float? = null, size: Float? = null, count: Int? = null,
-        shadowSize: Float? = null, shadowSpeed: Float? = null,
+        shadowSize: Float? = null, shadowSpeed: Float? = null, text: String? = null,
     ): HouseStatus? =
         phone("/wled/house", buildJsonObject {
             action?.let { put("action", it) }; effect?.let { put("effect", it) }
             speed?.let { put("speed", it) }; size?.let { put("size", it) }; count?.let { put("count", it) }
             shadowSize?.let { put("shadowSize", it) }; shadowSpeed?.let { put("shadowSpeed", it) }
+            text?.let { put("text", it) }
         })?.let { runCatching { WledParse.houseStatus(String(it)) }.getOrNull() }
 
     private suspend fun direct(d: WatchDevice, path: String, body: String?): String? = withContext(Dispatchers.IO) {

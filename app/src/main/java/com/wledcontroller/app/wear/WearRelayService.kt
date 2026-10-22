@@ -9,6 +9,7 @@ import com.wledcontroller.app.house.HouseEffect
 import com.wledcontroller.app.house.HouseEffectService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -121,6 +122,16 @@ class WearRelayService : WearableListenerService() {
         req.str("effect")?.let { name -> HouseEffect.entries.firstOrNull { it.name == name }?.let { p = p.pick(it) } }
         req["shadowSize"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(shadowSize = it.coerceIn(0f, 1f)) }
         req["shadowSpeed"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(shadowSpeed = it.coerceIn(0f, 1f)) }
+        // Live text from the watch: a message on the matrices ("" turns it off).
+        req.str("text")?.let { text ->
+            p = if (text.isBlank()) p.copy(liveText = null) else {
+                val runs = runBlocking { container.store.houseMap.first() }.runs
+                val base = p.liveText ?: com.wledcontroller.app.house.LiveText(
+                    runIds = runs.filter { it.model?.kind == com.wledcontroller.app.house.ModelKind.MATRIX || it.prop == com.wledcontroller.app.house.PropType.MATRIX }.map { it.id },
+                )
+                base.copy(kind = com.wledcontroller.app.house.LiveText.Kind.MESSAGE, message = text.take(80))
+            }
+        }
         req["speed"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(speed = it.coerceIn(0f, 1f)) }
         req["size"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(size = it.coerceIn(0f, 1f)) }
         req["count"]?.jsonPrimitive?.intOrNull?.let { p = p.copy(count = it.coerceIn(1, 8)) }
@@ -138,6 +149,7 @@ class WearRelayService : WearableListenerService() {
             put("speed", p.speed); put("size", p.size); put("count", p.count)
             p.shadow?.let { put("shadow", it.name) }
             put("shadowSize", p.shadowSize); put("shadowSpeed", p.shadowSpeed)
+            p.liveText?.let { put("text", it.text()) }
         }.toString().toByteArray()
     }
 }

@@ -69,13 +69,17 @@ class HouseEngine(private val context: Context, private val store: AppStore, pri
         // One buffer per device, sized to its highest mapped LED.
         val buffers = leds.groupBy { it.deviceId }.mapValues { (_, l) -> ByteArray((l.maxOf { it.index } + 1) * 3) }
         val start = SystemClock.elapsedRealtime()
+        val overlay = LiveTextOverlay(map, leds)
+        val colors = IntArray(leds.size)
         DdpSender().use { ddp ->
             while (currentCoroutineContextActive()) {
                 val frameStart = SystemClock.elapsedRealtime()
                 val t = (frameStart - start) / 1000f
                 val p = params.value
+                for ((i, led) in leds.withIndex()) colors[i] = HouseRenderer.color(p, led.x, led.y, t, i, led.orderInRun)
+                p.liveText?.let { lt -> overlay.apply(colors, lt, liveWords(lt), t) }
                 for ((i, led) in leds.withIndex()) {
-                    val rgb = HouseRenderer.color(p, led.x, led.y, t, i, led.orderInRun)
+                    val rgb = colors[i]
                     val buf = buffers.getValue(led.deviceId)
                     val o = led.index * 3
                     buf[o] = (rgb shr 16).toByte(); buf[o + 1] = (rgb shr 8).toByte(); buf[o + 2] = rgb.toByte()
@@ -87,6 +91,27 @@ class HouseEngine(private val context: Context, private val store: AppStore, pri
                 delay(wait.coerceAtLeast(1))
             }
         }
+    }
+
+    /** The outside temperature (°F) for live text, refreshed every 15 minutes. */
+    @Volatile var temperatureF: Float? = null
+    private var temperatureAt = 0L
+
+    /** What live text shows now (fetching the temperature now and then). */
+    fun liveWords(lt: LiveText): String {
+        if (lt.kind == LiveText.Kind.TEMPERATURE && System.currentTimeMillis() - temperatureAt > 15 * 60_000L) {
+            temperatureAt = System.currentTimeMillis()
+            scope.launch(Dispatchers.IO) {
+                val place = store.location.first() ?: return@launch
+                temperatureF = runCatching {
+                    val url = "https://api.open-meteo.com/v1/forecast?latitude=${place.lat}&longitude=${place.lon}&current=temperature_2m&temperature_unit=fahrenheit"
+                    okhttp3.OkHttpClient().newCall(okhttp3.Request.Builder().url(url).build()).execute().use { r ->
+                        Regex("\"temperature_2m\":\\s*(-?[0-9.]+)").findAll(r.body?.string() ?: "").lastOrNull()?.groupValues?.get(1)?.toFloatOrNull()
+                    }
+                }.getOrNull() ?: temperatureF
+            }
+        }
+        return lt.text(temperatureF = temperatureF)
     }
 
     private suspend fun currentCoroutineContextActive() = kotlinx.coroutines.currentCoroutineContext().isActive

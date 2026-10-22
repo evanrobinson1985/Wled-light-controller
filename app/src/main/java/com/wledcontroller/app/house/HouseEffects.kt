@@ -66,6 +66,8 @@ data class HouseEffectParams(
     /** 0..1: the shadow figures' size and speed, apart from the effect's own. */
     val shadowSize: Float = 0.5f,
     val shadowSpeed: Float = 0.5f,
+    /** Words on matrices over the effect, when on. */
+    val liveText: LiveText? = null,
 ) {
     /**
      * The effect and shadow kept apart: settings from before shadows could play over any

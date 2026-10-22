@@ -149,6 +149,8 @@ import com.wledcontroller.app.house.placedLeds
 import com.wledcontroller.app.ui.components.GradientSlider
 import com.wledcontroller.app.ui.components.SectionTitle
 import com.wledcontroller.app.ui.components.themeBrush
+import com.wledcontroller.app.ui.components.ColorSwatch
+import com.wledcontroller.app.ui.components.toComposeColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -273,12 +275,16 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 FilterChip(selected = view3d, onClick = { view3d = !view3d }, label = { Text("3D") })
             }
-            if (view3d) com.wledcontroller.app.ui.components.House3DView(map, leds, { i -> leds[i].let { l -> HouseRenderer.color(params, l.x, l.y, t, i, l.orderInRun) } })
+            // This frame's colours, with any live text on top, as the lights will show them.
+            val overlay = remember(map, leds) { com.wledcontroller.app.house.LiveTextOverlay(map, leds) }
+            val frame = IntArray(leds.size) { i -> leds[i].let { l -> HouseRenderer.color(params, l.x, l.y, t, i, l.orderInRun) } }
+            params.liveText?.let { lt -> overlay.apply(frame, lt, container.house.liveWords(lt), t) }
+            if (view3d) com.wledcontroller.app.ui.components.House3DView(map, leds, { i -> frame[i] })
             else HouseCanvas(map, photo) {
                 leds.forEachIndexed { i, led ->
                     if (led.hidden) return@forEachIndexed // Out of sight in the photo.
                     val o = Offset(led.x * size.width, led.y * size.height)
-                    val c = HouseRenderer.color(params, led.x, led.y, t, i, led.orderInRun)
+                    val c = frame[i]
                     // DMX spotlights shine straight up in the effect's colour.
                     if (led.deviceId in fixtureIds) drawSpotlight(o, c, 0.5f, 0.5f, 0.8f)
                     else drawPixel(c, o, pixelRadius(pixel, gaps[i]))
@@ -322,6 +328,8 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                 Text(holiday, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                 effectChips(list)
             }
+
+            LiveTextSection(shown, map) { container.house.params.value = it }
 
             SectionTitle("Colours")
             val colorSets = remember {
@@ -1542,6 +1550,54 @@ fun StandaloneScreen(onBack: () -> Unit, onOpenDevice: (String) -> Unit) {
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
         )
     }
+}
+
+/** Live text over the whole-house effect: words on the chosen props (matrices by default). */
+@Composable
+private fun LiveTextSection(params: HouseEffectParams, map: HouseMap, onChange: (HouseEffectParams) -> Unit) {
+    val lt = params.liveText
+    fun set(v: com.wledcontroller.app.house.LiveText?) = onChange(params.copy(liveText = v))
+    SectionTitle("Live text") {
+        Switch(checked = lt != null, onCheckedChange = { on ->
+            set(if (on) com.wledcontroller.app.house.LiveText(
+                runIds = map.runs.filter { it.model?.kind == ModelKind.MATRIX || it.prop == PropType.MATRIX }.map { it.id },
+                countdownTo = com.wledcontroller.app.house.LiveText.nextChristmas(java.time.LocalDate.now()).toString(),
+            ) else null)
+        })
+    }
+    if (lt == null) {
+        Text("Scroll a message, a countdown, the time or the temperature across matrices, over the effect.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        com.wledcontroller.app.house.LiveText.Kind.entries.forEach { k -> FilterChip(selected = lt.kind == k, onClick = { set(lt.copy(kind = k)) }, label = { Text(k.label) }) }
+    }
+    when (lt.kind) {
+        com.wledcontroller.app.house.LiveText.Kind.MESSAGE -> {
+            var text by remember { mutableStateOf(lt.message) }
+            OutlinedTextField(text, { text = it.take(80); set(lt.copy(message = text)) }, label = { Text("Message") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
+        com.wledcontroller.app.house.LiveText.Kind.COUNTDOWN -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            var name by remember { mutableStateOf(lt.countdownName) }
+            var day by remember { mutableStateOf(lt.countdownTo) }
+            OutlinedTextField(name, { name = it.take(30); set(lt.copy(countdownName = name)) }, label = { Text("Until") }, singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(day, { day = it.take(10); set(lt.copy(countdownTo = day)) }, label = { Text("Date (yyyy-mm-dd)") }, singleLine = true, modifier = Modifier.weight(1f))
+        }
+        com.wledcontroller.app.house.LiveText.Kind.TEMPERATURE -> Text("Uses the show's location (Shows › Schedule).", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else -> Unit
+    }
+    Text("Shows on", style = MaterialTheme.typography.labelMedium)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        map.runs.forEach { r ->
+            FilterChip(selected = r.id in lt.runIds, onClick = { set(lt.copy(runIds = if (r.id in lt.runIds) lt.runIds - r.id else lt.runIds + r.id)) }, label = { Text(r.name) })
+        }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(0xFFFFFFFF, 0xFFFF2020, 0xFF20D040, 0xFFFFC040, 0xFF40A0FF).map { it.toInt() }.forEach { c ->
+            ColorSwatch(c.toComposeColor(), onClick = { set(lt.copy(color = c)) }, size = 30.dp, selected = lt.color == c)
+        }
+    }
+    GradientSlider(lt.speed, { set(lt.copy(speed = it)) }, label = "Scroll speed", valueText = if (lt.speed < 0.02f) "Still" else "${(lt.speed * 100).toInt()}%", height = 30.dp)
 }
 
 @Composable

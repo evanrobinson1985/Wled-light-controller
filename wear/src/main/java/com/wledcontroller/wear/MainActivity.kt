@@ -324,6 +324,20 @@ private fun HouseScreen(link: WatchLink) {
                 )
             }
         }
+        // Words on the matrices, over the effect.
+        item { ListHeader { Text("Text on matrices") } }
+        items(listOf("Merry Christmas!", "Happy Holidays!", "Happy New Year!", "Happy Halloween!", "Welcome!"), key = { "text-$it" }) { msg ->
+            Chip(
+                label = { Text(msg, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                colors = if (st.text == msg) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                onClick = { status = st.copy(text = msg); update { link.house(text = msg) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (st.text != null) item {
+            Chip(label = { Text("Text off") }, onClick = { status = st.copy(text = null); update { link.house(text = "") } },
+                colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth())
+        }
         // Everyday effects first, then the holiday shadows by holiday, which play over the effect
         // (tap one again to turn it off).
         effects.groupBy { it.holiday ?: "" }.forEach { (holiday, list) ->
