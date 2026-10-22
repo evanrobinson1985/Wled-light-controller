@@ -767,6 +767,9 @@ private fun SequenceEditor(initial: Sequence, onBack: () -> Unit) {
                             }
                             OutlinedButton(onClick = { addingTrack = true }) { Text("Add track") }
                         }
+                        if (seq.tracks.all { it.clips.isEmpty() }) {
+                            FilledTonalButton(onClick = { showMusic = true }) { Text("Build a show automatically (♪ › Auto-sequence)") }
+                        }
                         if (ClipClipboard.items.isNotEmpty()) {
                             OutlinedButton(onClick = { paste() }, enabled = seq.tracks.isNotEmpty()) {
                                 Icon(Icons.Filled.ContentPaste, null); Spacer(Modifier.width(6.dp))
@@ -1825,6 +1828,9 @@ internal fun MusicSheet(
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
+            HorizontalDivider()
+            AutoSequenceSection(seq, envelope, onDone = { onChange(it); onDismiss() })
+
             if (seq.audioFile != null) {
                 HorizontalDivider()
                 LightsDelaySetting()
@@ -1939,6 +1945,88 @@ internal fun MusicSheet(
             TimingTracksSection(seq, position, onChange)
             Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+/**
+ * Builds a whole show from the song in one go (see [com.wledcontroller.app.show.AutoSequencer]):
+ * pick the colours and how busy it should be.
+ */
+@Composable
+private fun AutoSequenceSection(seq: Sequence, envelope: AudioEnvelope?, onDone: (Sequence) -> Unit) {
+    val container = LocalAppContainer.current
+    val scope = rememberCoroutineScope()
+    val themes = remember { HolidayThemes.forToday() }
+    var colors by remember { mutableStateOf(themes.first().colors) }
+    var live by remember { mutableFloatStateOf(0.6f) }
+    var replace by remember { mutableStateOf(true) }
+    var busy by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+
+    fun go() {
+        busy = true; note = null
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    val env = envelope ?: seq.audioFile?.let { runCatching { AudioAnalyzer.envelope(it) }.getOrNull() }
+                    val beats = seq.marks.ifEmpty { env?.let { AudioAnalyzer.detectBeats(it).beats }.orEmpty() }
+                    val map = container.store.houseMap.first()
+                    val fixtures = container.store.fixtures.first().map { it.id }.toSet()
+                    val loud: (Long) -> Float = if (env != null) { ms -> env.at(ms) } else { _ -> 0.5f }
+                    com.wledcontroller.app.show.AutoSequencer.build(
+                        seq, map, loud, beats, fixtures,
+                        com.wledcontroller.app.show.AutoSequencer.Options(colors, live, seed = seq.name.hashCode(), replace = replace),
+                    )
+                }
+            }.onSuccess { out ->
+                if (out.tracks.isEmpty()) note = "No props are placed on the house map yet — place them first, then try again."
+                else onDone(out)
+            }.onFailure { note = "Couldn't build the show: ${it.message}" }
+            busy = false
+        }
+    }
+
+    Text("Auto-sequence", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    Text(
+        if (seq.audioFile != null) "Builds a whole show from the song: it finds the beat and the quiet, lively and big parts, and gives every prop effects that suit it — chases on rooflines, arches taking turns on the beat, spectrum bars on matrices, singing faces, sweeping spotlights. Fine-tune it after; Undo takes it back."
+        else "Builds a whole show at a steady 120 beats a minute. Add a song first for a show that follows the music.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(themes, key = { "auto-" + it.id }) { t ->
+            Surface(
+                onClick = { colors = t.colors }, shape = RoundedCornerShape(10.dp),
+                color = if (colors == t.colors) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(Modifier.padding(8.dp).width(84.dp)) {
+                    Box(Modifier.fillMaxWidth().height(10.dp).clip(CircleShape).background(themeBrush(t.colors, false)))
+                    Text(t.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+    GradientSlider(
+        live, { live = it }, label = "How busy",
+        valueText = when { live < 0.25f -> "Gentle"; live < 0.75f -> "Lively"; else -> "Every beat" }, height = 30.dp,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.Checkbox(checked = replace, onCheckedChange = { replace = it })
+        Text("Replace the show's existing effects", style = MaterialTheme.typography.bodySmall)
+    }
+    Button(enabled = !busy, onClick = { if (replace && seq.tracks.any { it.clips.isNotEmpty() }) confirm = true else go() }) {
+        Text(if (busy) "Building…" else "Build the show")
+    }
+    note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Replace this show's effects?") },
+            text = { Text("The auto-built show takes the place of what's here. Undo brings it back.") },
+            confirmButton = { TextButton(onClick = { confirm = false; go() }) { Text("Build") } },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+        )
     }
 }
 

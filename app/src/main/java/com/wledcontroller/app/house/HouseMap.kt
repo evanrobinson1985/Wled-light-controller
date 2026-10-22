@@ -49,7 +49,7 @@ data class LightRun(
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
-    val placedCount get() = ledPoints?.count { it != null } ?: if (points.size >= 2) count else 0
+    val placedCount get() = ledPoints?.count { it != null } ?: if (points.size >= 2 || (count == 1 && points.size == 1)) count else 0
 }
 
 /**
