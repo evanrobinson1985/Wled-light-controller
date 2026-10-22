@@ -46,6 +46,10 @@ class AppContainer(context: Context) {
     val sequences = SequenceRepository(context, scope)
     val player = SequencePlayer(store, house, scope)
     val showRunner = ShowRunner(store, api, sequences, house, scope)
+    /** The viewer jukebox and the web page visitors use to pick shows. */
+    val jukebox = com.wledcontroller.app.show.Jukebox()
+    val jukeboxServer = com.wledcontroller.app.show.JukeboxServer(jukebox) { jukeboxTitle }
+    @Volatile var jukeboxTitle: String = "Light show"
     /** Saved house layouts and light models. */
     val library = com.wledcontroller.app.data.Library(context.filesDir)
     val backup = com.wledcontroller.app.data.Backup(context, store, sequences, library)

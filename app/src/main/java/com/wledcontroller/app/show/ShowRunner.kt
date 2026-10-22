@@ -22,7 +22,7 @@ import java.time.LocalDateTime
 
 data class RunnerState(
     val running: Boolean = false,
-    /** "schedule" or "playlist" (play now). */
+    /** "schedule", "playlist" (play now) or "jukebox". */
     val mode: String = "",
     val nowPlaying: String? = null,
     val playlistName: String? = null,
@@ -53,6 +53,42 @@ class ShowRunner(
         do {
             if (!playPlaylistOnce(p) { true }) break
         } while (p.loop && currentCoroutineContext().isActive)
+    }
+
+    /** Where the show playing now is, ms. */
+    val position: Long get() = player.position.value
+
+    /** Plays whatever the viewers pick on the [jukebox] (and, when nobody picks, what it chooses). */
+    fun runJukebox(jukebox: Jukebox) = startJob("jukebox") {
+        jukebox.position = { player.position.value }
+        try {
+            while (currentCoroutineContext().isActive) {
+                val song = jukebox.next()
+                if (song == null) { _state.value = _state.value.copy(nowPlaying = null, playlistName = "Jukebox"); delay(1000); continue }
+                val seq = sequences.get(song.id) ?: continue
+                jukebox.audioPath = seq.audioFile
+                jukebox.nowPlaying = song
+                playSequence(seq, "Jukebox")
+                jukebox.nowPlaying = null
+                player.pause()
+                delay(jukebox.gapMs)
+            }
+        } finally {
+            jukebox.nowPlaying = null
+        }
+    }
+
+    /** Plays [seq] once on the lights, to the end. */
+    private suspend fun playSequence(seq: Sequence, label: String) {
+        val map = store.houseMap.first()
+        player.sequence = seq
+        player.layout = SequenceRenderer.prepare(map, seq.tracks)
+        withContext(Dispatchers.IO) { player.loadAudio(seq.audioFile) }
+        _state.value = _state.value.copy(nowPlaying = seq.name, playlistName = label, nextStart = null)
+        player.seek(0)
+        player.setLive(true)
+        player.play()
+        while (player.playing.value && currentCoroutineContext().isActive) delay(200)
     }
 
     fun stop() {
@@ -114,16 +150,8 @@ class ShowRunner(
         for ((i, id) in p.sequenceIds.withIndex()) {
             if (!keepGoing() || !currentCoroutineContext().isActive) break
             val seq = sequences.get(id) ?: continue
-            val map = store.houseMap.first()
-            player.sequence = seq
-            player.layout = SequenceRenderer.prepare(map, seq.tracks)
-            withContext(Dispatchers.IO) { player.loadAudio(seq.audioFile) }
-            _state.value = _state.value.copy(nowPlaying = seq.name, playlistName = p.name, nextStart = null)
-            player.seek(0)
-            player.setLive(true)
-            player.play()
+            playSequence(seq, p.name)
             played = true
-            while (player.playing.value && currentCoroutineContext().isActive) delay(200)
             if (i < p.sequenceIds.lastIndex || p.loop) {
                 player.pause()
                 delay(p.gapSec * 1000L)

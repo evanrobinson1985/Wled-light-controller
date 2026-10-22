@@ -51,10 +51,12 @@ class ShowRunnerService : Service() {
                 stopping = true
                 runBlocking { container.store.setScheduleOn(false) }
                 runner.stop()
+                container.jukeboxServer.stop()
                 stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_PLAY -> intent.getStringExtra(EXTRA_PLAYLIST)?.let { runner.playNow(it) }
+            ACTION_JUKEBOX -> runner.runJukebox(container.jukebox)
             else -> {
                 // Schedule (also used when the system restarts the service).
                 if (!runBlocking { container.store.scheduleOn.first() }) { stopSelf(); return START_NOT_STICKY }
@@ -105,7 +107,7 @@ class ShowRunnerService : Service() {
         val stop = PendingIntent.getService(this, 2, Intent(this, ShowRunnerService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_tile_bulb)
-            .setContentTitle(if (s.mode == "playlist") "Playing light show" else "Show schedule on")
+            .setContentTitle(when (s.mode) { "playlist" -> "Playing light show"; "jukebox" -> "Viewer jukebox on"; else -> "Show schedule on" })
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -126,6 +128,7 @@ class ShowRunnerService : Service() {
         private const val NOTIFICATION_ID = 43
         private const val ACTION_STOP = "stop"
         private const val ACTION_PLAY = "play"
+        private const val ACTION_JUKEBOX = "jukebox"
         private const val EXTRA_PLAYLIST = "playlist"
 
         fun startSchedule(context: Context) {
@@ -136,6 +139,11 @@ class ShowRunnerService : Service() {
             ContextCompat.startForegroundService(
                 context, Intent(context, ShowRunnerService::class.java).setAction(ACTION_PLAY).putExtra(EXTRA_PLAYLIST, playlistId),
             )
+        }
+
+        /** Runs the viewer jukebox on the lights until stopped. */
+        fun startJukebox(context: Context) {
+            ContextCompat.startForegroundService(context, Intent(context, ShowRunnerService::class.java).setAction(ACTION_JUKEBOX))
         }
 
         fun stop(context: Context) {

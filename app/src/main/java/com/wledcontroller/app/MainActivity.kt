@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }, onOpenTest = { nav.navigate("test") })
                         }
                         composable("house/controllers") { com.wledcontroller.app.ui.screens.ControllerMapScreen(onBack = { nav.popBackStack() }) }
+                        composable("jukebox") { com.wledcontroller.app.ui.screens.JukeboxScreen(onBack = { nav.popBackStack() }) }
                         composable("test") { com.wledcontroller.app.ui.screens.TestLightsScreen(onBack = { nav.popBackStack() }) }
                         composable("house") {
                             HouseScreen(
@@ -113,6 +114,7 @@ class MainActivity : ComponentActivity() {
                                 onOpen = { nav.navigate("shows/$it") },
                                 onEditMap = { nav.navigate("house/map") },
                                 onSchedule = { nav.navigate("schedule") },
+                                onJukebox = { nav.navigate("jukebox") },
                             )
                         }
                         composable("schedule") { ScheduleScreen(onBack = { nav.popBackStack() }) }

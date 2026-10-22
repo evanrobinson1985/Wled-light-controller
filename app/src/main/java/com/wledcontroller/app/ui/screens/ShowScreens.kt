@@ -58,6 +58,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FactCheck
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddToPhotos
@@ -176,7 +177,7 @@ import kotlin.math.roundToLong
 // ================================================================== show list
 
 @Composable
-fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> Unit, onSchedule: () -> Unit) {
+fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> Unit, onSchedule: () -> Unit, onJukebox: () -> Unit = {}) {
     val container = LocalAppContainer.current
     val scope = rememberCoroutineScope()
     val shows by container.sequences.all.collectAsStateWithLifecycle()
@@ -296,6 +297,7 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                             )
                         }
                     }
+                    IconButton(onClick = onJukebox) { Icon(Icons.Filled.QueueMusic, "Viewer jukebox") }
                     IconButton(onClick = { checking = true }) { Icon(Icons.Filled.FactCheck, "Check for problems") }
                     TextButton(onClick = onSchedule) {
                         Icon(Icons.Filled.Schedule, null); Spacer(Modifier.width(6.dp)); Text("Schedule")
