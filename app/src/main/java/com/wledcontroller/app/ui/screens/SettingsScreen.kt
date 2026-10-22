@@ -54,7 +54,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTest: () -> Unit = {}) {
+fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTest: () -> Unit = {}, onOpenFirmware: () -> Unit = {}) {
     val container = LocalAppContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -102,6 +102,17 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTe
                     Text(
                         "A walk-through of every feature, with shortcuts to try each one. Also on the home screen's ? button.",
                         style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            Card(onClick = onOpenFirmware, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Controller updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "See every controller's WLED version and update them all to the newest release at once.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

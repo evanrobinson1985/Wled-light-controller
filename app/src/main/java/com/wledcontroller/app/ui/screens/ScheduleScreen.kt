@@ -265,6 +265,7 @@ fun ScheduleScreen(onBack: () -> Unit) {
                 }
             }
             LocationCard()
+            WeatherCard()
             Spacer(Modifier.height(32.dp))
         }
     }
@@ -470,6 +471,51 @@ private fun TimeChooser(
 }
 
 /** Where the show is, so sunset and dusk times can be worked out. */
+@Composable
+private fun WeatherCard() {
+    val container = LocalAppContainer.current
+    val scope = rememberCoroutineScope()
+    val rules by container.store.weatherRules.collectAsStateWithLifecycle(com.wledcontroller.app.show.WeatherRules())
+    val place by container.store.location.collectAsStateWithLifecycle(null)
+    val runner by container.showRunner.state.collectAsStateWithLifecycle()
+    fun set(r: com.wledcontroller.app.show.WeatherRules) = scope.launch { container.store.setWeatherRules(r) }
+    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Weather", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Holds off scheduled shows in bad weather, checking every few minutes and starting once it clears. Uses the weather where the show is (set above).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = rules.enabled, onCheckedChange = { set(rules.copy(enabled = it)) })
+            }
+            if (rules.enabled) {
+                if (place == null) Text("Set the show's location above first.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                Text("Hold off in rain from", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0.5f to "Drizzle", 2.5f to "Steady rain", 7.5f to "Heavy rain", 999f to "Never").forEach { (mm, l) ->
+                        FilterChip(selected = rules.rainMm == mm, onClick = { set(rules.copy(rainMm = mm)) }, label = { Text(l) })
+                    }
+                }
+                Text("…or wind gusts from", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(25f to "25 mph", 40f to "40 mph", 55f to "55 mph", 999f to "Never").forEach { (mph, l) ->
+                        FilterChip(selected = rules.gustMph == mph, onClick = { set(rules.copy(gustMph = mph)) }, label = { Text(l) })
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = rules.thunder, onClick = { set(rules.copy(thunder = !rules.thunder)) }, label = { Text("Thunderstorms") })
+                    FilterChip(selected = rules.snow, onClick = { set(rules.copy(snow = !rules.snow)) }, label = { Text("Snow") })
+                }
+                runner.weatherHold?.let { Text("On hold now for $it.", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun LocationCard() {
     val container = LocalAppContainer.current

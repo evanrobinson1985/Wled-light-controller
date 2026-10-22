@@ -99,6 +99,7 @@ class ShowRunnerService : Service() {
         }
         val text = when {
             s.nowPlaying != null -> "Now playing: ${s.nowPlaying}" + (s.playlistName?.let { " · $it" } ?: "")
+            s.weatherHold != null -> "On hold for ${s.weatherHold}"
             s.nextStart != null -> "Next show: " + s.nextStart.format(DateTimeFormatter.ofPattern("EEE h:mm a"))
             s.mode == "schedule" -> "Waiting for a scheduled show"
             else -> "Starting…"

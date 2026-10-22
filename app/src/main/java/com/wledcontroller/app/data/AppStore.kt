@@ -80,6 +80,7 @@ class AppStore(private val context: Context) {
         val KEEP_STARTUP = androidx.datastore.preferences.core.booleanPreferencesKey("keep_startup_look")
         val HOUSE_EFFECT = stringPreferencesKey("house_effect")
         val EFFECT_PRESETS = stringPreferencesKey("effect_presets")
+        val WEATHER_RULES = stringPreferencesKey("weather_rules")
     }
 
     private inline fun <reified T> listFlow(key: Preferences.Key<String>): Flow<List<T>> =
@@ -267,6 +268,12 @@ class AppStore(private val context: Context) {
             prefs[Keys.EFFECT_SETTINGS] = json.encodeToString(cur + (EffectMemory.key(deviceId, fx) to values))
         }
     }
+
+    /** When to hold off scheduled shows for the weather. */
+    val weatherRules: Flow<com.wledcontroller.app.show.WeatherRules> = context.dataStore.data.map { prefs ->
+        prefs[Keys.WEATHER_RULES]?.let { runCatching { json.decodeFromString<com.wledcontroller.app.show.WeatherRules>(it) }.getOrNull() } ?: com.wledcontroller.app.show.WeatherRules()
+    }
+    suspend fun setWeatherRules(r: com.wledcontroller.app.show.WeatherRules) { context.dataStore.edit { it[Keys.WEATHER_RULES] = mqttJson.encodeToString(r) } }
 
     /** Show effects saved with all their settings, to use again (like xLights' effect presets). */
     val effectPresets: Flow<List<EffectPreset>> = listFlow(Keys.EFFECT_PRESETS)

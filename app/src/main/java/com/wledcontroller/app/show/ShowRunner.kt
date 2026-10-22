@@ -27,6 +27,8 @@ data class RunnerState(
     val nowPlaying: String? = null,
     val playlistName: String? = null,
     val nextStart: LocalDateTime? = null,
+    /** Why a scheduled show is on hold for the weather, if it is. */
+    val weatherHold: String? = null,
 )
 
 /**
@@ -125,6 +127,13 @@ class ShowRunner(
                 delay(15_000)
                 continue
             }
+            // Hold off for bad weather, checking again every few minutes.
+            val hold = weatherHold()
+            if (hold != null) {
+                _state.value = RunnerState(running = true, mode = "schedule", weatherHold = hold)
+                delay(5 * 60_000L)
+                continue
+            }
             val playlist = store.playlists.first().firstOrNull { it.id == active.playlistId }
             if (playlist == null || playlist.sequenceIds.isEmpty()) { delay(15_000); continue }
             val end = active.endTime(now, place)
@@ -160,6 +169,26 @@ class ShowRunner(
         player.stopAll()
         _state.value = _state.value.copy(nowPlaying = null)
         return played
+    }
+
+    private var weatherAt = 0L
+    private var weatherCache: WeatherNow? = null
+
+    /** Why to hold off right now for the weather, or null (also when the weather can't be read). */
+    private suspend fun weatherHold(): String? {
+        val rules = store.weatherRules.first()
+        if (!rules.enabled) return null
+        val place = store.location.first() ?: return null
+        if (System.currentTimeMillis() - weatherAt > 10 * 60_000L) {
+            weatherCache = withContext(Dispatchers.IO) {
+                runCatching {
+                    val req = okhttp3.Request.Builder().url(WeatherService.url(place)).build()
+                    okhttp3.OkHttpClient().newCall(req).execute().use { r -> r.body?.string()?.let(WeatherService::parse) }
+                }.getOrNull()
+            }
+            weatherAt = System.currentTimeMillis()
+        }
+        return weatherCache?.let(rules::holdOff)
     }
 
     private suspend fun turnAllOff() {

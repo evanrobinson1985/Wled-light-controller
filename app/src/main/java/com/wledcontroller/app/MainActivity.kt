@@ -95,10 +95,11 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("settings") {
-                            SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }, onOpenTest = { nav.navigate("test") })
+                            SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }, onOpenTest = { nav.navigate("test") }, onOpenFirmware = { nav.navigate("firmware") })
                         }
                         composable("house/controllers") { com.wledcontroller.app.ui.screens.ControllerMapScreen(onBack = { nav.popBackStack() }) }
                         composable("house/power") { com.wledcontroller.app.ui.screens.PowerScreen(onBack = { nav.popBackStack() }) }
+                        composable("firmware") { com.wledcontroller.app.ui.screens.FirmwareScreen(onBack = { nav.popBackStack() }, onOpenWebUi = { nav.navigate("web/$it") }) }
                         composable("jukebox") { com.wledcontroller.app.ui.screens.JukeboxScreen(onBack = { nav.popBackStack() }) }
                         composable("test") { com.wledcontroller.app.ui.screens.TestLightsScreen(onBack = { nav.popBackStack() }) }
                         composable("house") {
