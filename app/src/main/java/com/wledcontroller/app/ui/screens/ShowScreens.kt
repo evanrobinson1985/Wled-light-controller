@@ -226,6 +226,37 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
             }.onFailure { importError = it.message ?: "Couldn't read that sequence." }
         }
     }
+    // Recording a show as a video.
+    var recording by remember { mutableStateOf<Sequence?>(null) }
+    var recordProgress by remember { mutableStateOf<Float?>(null) }
+    var recordNote by remember { mutableStateOf<String?>(null) }
+    recording?.let { s ->
+        LaunchedEffect(s.id) {
+            recordProgress = 0f; recordNote = null
+            recordNote = runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    com.wledcontroller.app.show.ShowVideo.record(context, s, map) { recordProgress = it }
+                }
+            }.fold({ "Saved \"${s.name}\" to $it." }, { "Couldn't record the video: ${it.message}" })
+            recordProgress = null; recording = null
+        }
+    }
+    if (recordProgress != null || recordNote != null) {
+        AlertDialog(
+            onDismissRequest = { if (recordProgress == null) recordNote = null },
+            title = { Text(if (recordProgress != null) "Recording video…" else "Video") },
+            text = {
+                Column {
+                    recordProgress?.let { p ->
+                        androidx.compose.material3.LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
+                        Text("${(p * 100).toInt()}% — keep the app open; it renders faster than real time.", style = MaterialTheme.typography.labelSmall)
+                    }
+                    recordNote?.let { Text(it) }
+                }
+            },
+            confirmButton = { if (recordProgress == null) TextButton(onClick = { recordNote = null }) { Text("OK") } },
+        )
+    }
     // Exporting a show to xLights.
     var exportingXsq by remember { mutableStateOf<Sequence?>(null) }
     var xsqNote by remember { mutableStateOf<String?>(null) }
@@ -371,6 +402,10 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
                                     menu = false; exporting = s
                                     exporter.launch(s.name.replace(Regex("[^A-Za-z0-9 _-]"), "").ifBlank { "show" } + ".fseq")
                                 })
+                                if (s.fseqFile == null) DropdownMenuItem(
+                                    text = { Column { Text("Record a video"); Text("An MP4 of the show on your house, with the song", style = MaterialTheme.typography.labelSmall) } },
+                                    onClick = { menu = false; recording = s },
+                                )
                                 if (s.fseqFile == null) DropdownMenuItem(
                                     text = { Column { Text("Export to xLights (.xsq)"); Text("Open and edit it in xLights", style = MaterialTheme.typography.labelSmall) } },
                                     onClick = {
