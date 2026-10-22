@@ -48,6 +48,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.Slider
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Edit
@@ -146,6 +153,9 @@ import com.wledcontroller.app.house.fillGaps
 import com.wledcontroller.app.house.formatLength
 import com.wledcontroller.app.house.tracedLength
 import com.wledcontroller.app.house.placedLeds
+import com.wledcontroller.app.house.LineTools
+import com.wledcontroller.app.house.shaped
+import com.wledcontroller.app.house.hooks
 import com.wledcontroller.app.ui.components.GradientSlider
 import com.wledcontroller.app.ui.components.SectionTitle
 import com.wledcontroller.app.ui.components.themeBrush
@@ -438,6 +448,17 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
     val editPoints = remember { mutableStateListOf<MapPoint?>() }
     val editHidden = remember { mutableStateListOf<Int>() }
     var selectedLed by remember { mutableStateOf<Int?>(null) }
+
+    // Fine-tuning a traced line: its points, hidden stretches, sag and hooks, with undo.
+    var adjustingRunId by remember { mutableStateOf<String?>(null) }
+    val adjustPoints = remember { mutableStateListOf<MapPoint>() }
+    val adjustHidden = remember { mutableStateListOf<HiddenStretch>() }
+    var adjustSel by remember { mutableStateOf<Int?>(null) }
+    var adjustSag by remember { mutableFloatStateOf(0f) }
+    var adjustHooks by remember { mutableIntStateOf(0) }
+    val adjustUndo = remember { mutableStateListOf<Pair<List<MapPoint>, List<HiddenStretch>>>() }
+    var lastDrag by remember { mutableStateOf(-1 to 0L) }
+    fun keepUndo() { adjustUndo += adjustPoints.toList() to adjustHidden.toList(); if (adjustUndo.size > 50) adjustUndo.removeAt(0) }
     var placingLed by remember { mutableStateOf<Int?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -546,6 +567,15 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
     }
 
     val drawingRun = map.runs.firstOrNull { it.id == drawingRunId }
+    val adjustingRun = map.runs.firstOrNull { it.id == adjustingRunId }
+
+    fun startAdjusting(run: LightRun) {
+        adjustPoints.clear(); adjustPoints.addAll(run.points)
+        adjustHidden.clear(); adjustHidden.addAll(run.hidden)
+        adjustSag = run.sag; adjustHooks = run.hooksBetween
+        adjustSel = null; adjustUndo.clear()
+        adjustingRunId = run.id
+    }
     val editingRun = map.runs.firstOrNull { it.id == editingRunId }
 
     fun startEditing(run: LightRun) {
@@ -576,13 +606,14 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
                             drawingRun != null -> "Trace ${drawingRun.name}"
                             scaling -> "Set the scale"
                             editingRun != null -> "Edit ${editingRun.name}"
+                            adjustingRun != null -> "Adjust ${adjustingRun.name}"
                             else -> "House map"
                         }
                     )
                 },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
-                    if (drawingRun == null && editingRun == null && !scaling) {
+                    if (drawingRun == null && editingRun == null && adjustingRun == null && !scaling) {
                         Box {
                             IconButton(onClick = { importMenu = true }, enabled = targets.isNotEmpty()) { Icon(Icons.Filled.FileOpen, "Import from xLights") }
                             DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
@@ -652,6 +683,97 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
             }
             importError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             importNote?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+
+            if (adjustingRun != null) {
+                val preview = adjustingRun.copy(points = adjustPoints.toList(), hidden = adjustHidden.toList(), sag = adjustSag, hooksBetween = adjustHooks)
+                val pixelStyle = LocalPixelStyle.current
+                LedEditCanvas(
+                    map = map, photo = photo, editingRunId = adjustingRun.id, points = adjustPoints.toList(), selected = adjustSel,
+                    onTapEmpty = { adjustSel = null },
+                    onTapLed = { i -> adjustSel = i },
+                    onMoveLed = { i, p ->
+                        // One undo step per drag.
+                        val now = System.currentTimeMillis()
+                        if (lastDrag.first != i || now - lastDrag.second > 600) keepUndo()
+                        lastDrag = i to now
+                        adjustPoints[i] = p; adjustSel = i
+                    },
+                    connect = false,
+                    extra = { zoom ->
+                        // The line as it really hangs, the hooks, and where its lights land.
+                        val shown = preview.shaped(map.aspect)
+                        drawTracedRun(shown.points, shown.hidden.map { it.after }.toSet(), Color(0xFFFFB86B), 1.5.dp.toPx() / zoom)
+                        if (adjustHooks > 0) preview.hooks().forEach { h ->
+                            drawCircle(Color(0xFF6BC8FF), 3.dp.toPx() / zoom, Offset(h.x * size.width, h.y * size.height), style = Stroke(1.dp.toPx() / zoom))
+                        }
+                        val r = pixelRadius(pixelStyle, scale = 1f / zoom) * 0.7f
+                        map.positions(preview).forEach { p -> if (p != null) drawCircle(Color(0xFFFFF3B0), r, Offset(p.x * size.width, p.y * size.height)) }
+                    },
+                )
+                // Average span between hooks, for saying how far the middle drops.
+                val hooks = preview.hooks()
+                val spanCm = map.cmPerHeight?.let { cm ->
+                    hooks.zipWithNext { a, b -> kotlin.math.hypot((b.x - a.x) * map.aspect, b.y - a.y) }.takeIf { it.isNotEmpty() }?.average()?.toFloat()?.times(cm)
+                }
+                AdjustLineControls(
+                    points = adjustPoints.size, selected = adjustSel, sag = adjustSag, hooks = adjustHooks,
+                    inches = map.useInches, spanCm = spanCm, canUndo = adjustUndo.isNotEmpty(),
+                    onNudge = { dx, dy ->
+                        adjustSel?.let { i ->
+                            val now = System.currentTimeMillis()
+                            if (lastDrag.first != i || now - lastDrag.second > 600) keepUndo()
+                            lastDrag = i to now
+                            val p = adjustPoints[i]
+                            adjustPoints[i] = MapPoint((p.x + dx / map.aspect).coerceIn(0f, 1f), (p.y + dy).coerceIn(0f, 1f))
+                        }
+                    },
+                    onAddAfter = {
+                        adjustSel?.takeIf { it < adjustPoints.lastIndex }?.let { i ->
+                            keepUndo()
+                            val a = adjustPoints[i]; val b = adjustPoints[i + 1]
+                            adjustPoints.add(i + 1, MapPoint((a.x + b.x) / 2, (a.y + b.y) / 2))
+                            val h = LineTools.hiddenAfterInserting(adjustHidden.toList(), i)
+                            adjustHidden.clear(); adjustHidden.addAll(h)
+                            adjustSel = i + 1
+                        }
+                    },
+                    onDelete = {
+                        adjustSel?.takeIf { adjustPoints.size > 2 }?.let { i ->
+                            keepUndo()
+                            adjustPoints.removeAt(i)
+                            val h = LineTools.hiddenAfterRemoving(adjustHidden.toList(), i)
+                            adjustHidden.clear(); adjustHidden.addAll(h)
+                            adjustSel = null
+                        }
+                    },
+                    onLevel = {
+                        adjustSel?.takeIf { it < adjustPoints.lastIndex }?.let { i ->
+                            keepUndo()
+                            val l = LineTools.level(adjustPoints.toList(), i, map.aspect)
+                            adjustPoints.clear(); adjustPoints.addAll(l)
+                        }
+                    },
+                    onStraighten = {
+                        keepUndo()
+                        val l = LineTools.straighten(adjustPoints.toList(), map.aspect)
+                        adjustPoints.clear(); adjustPoints.addAll(l)
+                    },
+                    onSag = { adjustSag = it },
+                    onHooks = { adjustHooks = it.coerceIn(0, 50) },
+                    onUndo = {
+                        adjustUndo.removeLastOrNull()?.let { (p, h) ->
+                            adjustPoints.clear(); adjustPoints.addAll(p); adjustHidden.clear(); adjustHidden.addAll(h)
+                            adjustSel = adjustSel?.takeIf { it < p.size }
+                        }
+                    },
+                    onCancel = { adjustingRunId = null },
+                    onSave = {
+                        saveRun(adjustingRun.copy(points = adjustPoints.toList(), hidden = adjustHidden.toList(), sag = adjustSag, hooksBetween = adjustHooks))
+                        adjustingRunId = null
+                    },
+                )
+                return@Column
+            }
 
             if (editingRun != null) {
                 LedEditCanvas(
@@ -737,7 +859,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
                     val placed = positions.filterNotNull()
                     if (run.isPlacedPerLed) drawRun(placed, col, stroke, dashed = false)
                     else if (run.model != null) drawBox(run.points, col.copy(alpha = 0.5f), stroke)
-                    else drawTracedRun(run.points, run.hidden.map { it.after }.toSet(), col, stroke)
+                    else run.shaped(map.aspect).let { shown -> drawTracedRun(shown.points, shown.hidden.map { it.after }.toSet(), col, stroke) }
                     val runGaps = neighbourGaps(positions, map.aspect)
                     val hiddenLed = run.hiddenFlags(map.aspect, map.cmPerHeight)
                     positions.forEachIndexed { i, p ->
@@ -880,6 +1002,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
                                             else -> ""
                                         } +
                                         (run.spacingCm?.takeIf { !run.isPlacedPerLed }?.let { " · ${formatLength(it, map.useInches)} apart" } ?: "") +
+                                        (if (run.sag > 0f && !run.isPlacedPerLed) " · sags ${Math.round(run.sag * 100)}%" else "") +
                                         run.hiddenSummary(map),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -899,6 +1022,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
                                     }
                                 )
                             }
+                            if (run.model == null) TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { startAdjusting(run) }) { Text("Adjust") }
                             TextButton(enabled = run.points.size >= 2 && !run.isPlacedPerLed, onClick = { saveRun(run.copy(points = run.points.reversed(), hidden = run.hidden.map { it.copy(after = run.points.size - 2 - it.after) })) }) {
                                 Icon(Icons.Filled.SwapHoriz, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Flip start")
                             }
@@ -1628,6 +1752,10 @@ private fun LedEditCanvas(
     onTapEmpty: (MapPoint) -> Unit,
     onTapLed: (Int) -> Unit,
     onMoveLed: (Int, MapPoint) -> Unit,
+    /** Join the points in order with a thin line. */
+    connect: Boolean = true,
+    /** Drawn under the points; gets how far it's zoomed in. */
+    extra: (DrawScope.(Float) -> Unit)? = null,
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
@@ -1661,10 +1789,11 @@ private fun LedEditCanvas(
             Canvas(Modifier.fillMaxSize()) {
                 val r = pixelRadius(pixel, scale = 1f / scale)
                 others.forEach { p -> drawCircle(Color.White.copy(alpha = 0.25f), r * 0.8f, Offset(p.x * size.width, p.y * size.height)) }
+                extra?.invoke(this, scale)
                 // Thin line through the run in LED order makes misplaced LEDs obvious.
                 val placed = points.withIndex().filter { it.value != null }
                 placed.zipWithNext { a, b ->
-                    if (b.index == a.index + 1) drawLine(
+                    if (connect && b.index == a.index + 1) drawLine(
                         Color(0xFFFFB86B).copy(alpha = 0.6f),
                         Offset(a.value!!.x * size.width, a.value!!.y * size.height),
                         Offset(b.value!!.x * size.width, b.value!!.y * size.height),
@@ -1741,6 +1870,72 @@ private fun LedEditCanvas(
                     }
                 }
         )
+    }
+}
+
+/** Fine-tuning a traced line: nudging points, straightening, and how it hangs. */
+@Composable
+private fun AdjustLineControls(
+    points: Int, selected: Int?, sag: Float, hooks: Int, inches: Boolean, spanCm: Float?, canUndo: Boolean,
+    onNudge: (dx: Float, dy: Float) -> Unit,
+    onAddAfter: () -> Unit, onDelete: () -> Unit, onLevel: () -> Unit, onStraighten: () -> Unit,
+    onSag: (Float) -> Unit, onHooks: (Int) -> Unit, onUndo: () -> Unit, onCancel: () -> Unit, onSave: () -> Unit,
+) {
+    val step = 0.0012f
+    Column(Modifier.padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (selected == null) Text(
+            "Pinch to zoom. Drag a point to move it, or tap one to select it and nudge it a little at a time. The start is red.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        ) else Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Point ${selected + 1} of $points", fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Nudge", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 4.dp))
+                    IconButton(onClick = { onNudge(-step, 0f) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Left") }
+                    IconButton(onClick = { onNudge(0f, -step) }) { Icon(Icons.Filled.KeyboardArrowUp, "Up") }
+                    IconButton(onClick = { onNudge(0f, step) }) { Icon(Icons.Filled.KeyboardArrowDown, "Down") }
+                    IconButton(onClick = { onNudge(step, 0f) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Right") }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(enabled = selected < points - 1, onClick = onLevel) { Text("Level to next point") }
+                    TextButton(enabled = selected < points - 1, onClick = onAddAfter) { Text("Add point after") }
+                    TextButton(enabled = points > 2, onClick = onDelete) { Text("Delete point") }
+                }
+            }
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onStraighten) { Text("Make straight") }
+            OutlinedButton(enabled = canUndo, onClick = onUndo) { Icon(Icons.AutoMirrored.Filled.Undo, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Undo") }
+        }
+        Text(
+            "Make straight lines up every point on one straight line — for a strip that's straight on the house but was marked a little crooked. Level to next point makes one piece exactly level (or upright).",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider()
+        Text("Hung from hooks", style = MaterialTheme.typography.titleSmall)
+        Text(
+            when {
+                sag <= 0f -> "No sag: pulled tight."
+                spanCm != null -> "Sags ${Math.round(sag * 100)}% of each span — about ${formatLength(sag * spanCm, inches)} in the middle."
+                else -> "Sags ${Math.round(sag * 100)}% of each span."
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Slider(value = sag, onValueChange = { onSag((Math.round(it * 200) / 200f)) }, valueRange = 0f..0.25f)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Hooks between points: $hooks", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            IconButton(enabled = hooks > 0, onClick = { onHooks(hooks - 1) }) { Icon(Icons.Filled.Remove, "Fewer hooks") }
+            IconButton(onClick = { onHooks(hooks + 1) }) { Icon(Icons.Filled.Add, "More hooks") }
+        }
+        Text(
+            "Each point you traced is a hook, and the strand droops between them; the lights follow the droop. Hooks spaced evenly along it? Trace just the ends and corners, then add the hooks in between here.",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+            Spacer(Modifier.weight(1f))
+            Button(onClick = onSave) { Text("Save") }
+        }
     }
 }
 

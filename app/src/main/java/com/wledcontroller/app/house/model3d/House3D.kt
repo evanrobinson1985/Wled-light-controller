@@ -75,8 +75,9 @@ object Led3D {
     }
 
     /** [run]'s LEDs along a line traced on the model: every [LightRun.spacingCm], or spread end to end. */
-    fun along(points: List<P3>, run: LightRun): List<P3> {
+    fun along(traced: List<P3>, run: LightRun): List<P3> {
         val n = run.count
+        val points = droop(traced, run.sag, run.hooksBetween)
         if (n <= 0) return emptyList()
         if (points.size == 1 || n == 1) return List(n) { points[0] }
         val segs = points.zipWithNext { a, b -> (b - a).length }
@@ -89,6 +90,22 @@ object Led3D {
             val f = if (segs[k] > 0f) d / segs[k] else 0f
             points[k] + (points[k + 1] - points[k]) * f
         }
+    }
+
+    /** A line hung between hooks on the model: extra hooks put in, and each span drooping straight down by [sag] of its length. */
+    fun droop(points: List<P3>, sag: Float, hooksBetween: Int, steps: Int = 12): List<P3> {
+        if (points.size < 2 || (sag <= 0f && hooksBetween <= 0)) return points
+        val out = ArrayList<P3>()
+        points.zipWithNext().forEach { (a, b) ->
+            val hooks = (0..hooksBetween).map { j -> a + (b - a) * (j / (hooksBetween + 1f)) } + b
+            hooks.zipWithNext().forEach { (p, q) ->
+                val drop = sag * (q - p).length
+                val n = if (drop > 0f) steps else 1
+                for (s in 0 until n) { val f = s / n.toFloat(); out += p + (q - p) * f - P3.UP * (4f * drop * f * (1f - f)) }
+            }
+        }
+        out += points.last()
+        return out
     }
 
     /** Spots on the house photo for points on the model, through the line-up (for runs traced only on the model). */

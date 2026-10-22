@@ -48,6 +48,13 @@ data class LightRun(
     val depthCm: Float = 0f,
     /** Traced on the 3D house model (metres), for lights the photo can't show. */
     val points3d: List<com.wledcontroller.app.house.model3d.P3>? = null,
+    /**
+     * How far a strand hung between hooks droops in the middle of each span, as a share of
+     * the span's length (0 = pulled tight). The traced points are the hooks.
+     */
+    val sag: Float = 0f,
+    /** Hooks spaced evenly between each pair of traced points, for sag. */
+    val hooksBetween: Int = 0,
 ) {
     val endLed get() = startLed + count
     val isPlacedPerLed get() = ledPoints != null
@@ -196,6 +203,8 @@ fun LightRun.hiddenFlags(aspect: Float, cmPerHeight: Float? = null): BooleanArra
 
 private fun LightRun.tracedLayout(aspect: Float, cmPerHeight: Float?): Pair<List<MapPoint>, BooleanArray> {
     if (count <= 0 || points.isEmpty()) return emptyList<MapPoint>() to BooleanArray(0)
+    // Hung between hooks: lay the lights along the drooping line instead.
+    if ((sag > 0f || hooksBetween > 0) && points.size >= 2) return shaped(aspect).tracedLayout(aspect, cmPerHeight)
     if (points.size == 1 || count == 1) return List(count) { points.first() } to BooleanArray(count)
     val segs = points.zipWithNext { a, b -> hypot((b.x - a.x) * aspect, b.y - a.y) }
     val hiddenAt = hidden.filter { it.after in segs.indices }.associateBy { it.after }
@@ -259,6 +268,91 @@ private fun LightRun.tracedLayout(aspect: Float, cmPerHeight: Float?): Pair<List
     }
     while (pos.size < count) { pos += points.last(); flags += false }
     return pos.take(count) to flags.take(count).toBooleanArray()
+}
+
+/** The hooks of a run hung between them: the traced points, plus any extra hooks spaced between. */
+fun LightRun.hooks(): List<MapPoint> {
+    if (hooksBetween <= 0 || points.size < 2) return points
+    val hiddenAt = hidden.map { it.after }.toSet()
+    val out = ArrayList<MapPoint>()
+    points.zipWithNext().forEachIndexed { k, (a, b) ->
+        out += a
+        if (k !in hiddenAt) for (h in 1..hooksBetween) {
+            val f = h / (hooksBetween + 1f)
+            out += MapPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
+        }
+    }
+    out += points.last()
+    return out
+}
+
+/**
+ * The run as it really hangs: extra hooks put in, and each span between hooks drooping in
+ * the middle by [LightRun.sag] of its length. Out-of-sight stretches stay straight. The result
+ * has no sag of its own: its points follow the curve.
+ */
+fun LightRun.shaped(aspect: Float, steps: Int = 12): LightRun {
+    if (points.size < 2 || (sag <= 0f && hooksBetween <= 0)) return copy(sag = 0f, hooksBetween = 0)
+    val hiddenAt = hidden.associateBy { it.after }
+    val out = ArrayList<MapPoint>()
+    val newHidden = ArrayList<HiddenStretch>()
+    points.zipWithNext().forEachIndexed { k, (a, b) ->
+        val h = hiddenAt[k]
+        if (h != null) { newHidden += h.copy(after = out.size); out += a; return@forEachIndexed }
+        // This piece's hooks, then the droop between each pair.
+        val hooks = (0..hooksBetween).map { j -> val f = j / (hooksBetween + 1f); MapPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f) } + b
+        hooks.zipWithNext().forEach { (p, q) ->
+            val len = hypot((q.x - p.x) * aspect, q.y - p.y)
+            val drop = sag * len
+            val n = if (drop > 0f) steps else 1
+            for (s in 0 until n) {
+                val f = s / n.toFloat()
+                out += MapPoint(p.x + (q.x - p.x) * f, p.y + (q.y - p.y) * f + 4f * drop * f * (1f - f))
+            }
+        }
+    }
+    out += points.last()
+    return copy(points = out, hidden = newHidden, sag = 0f, hooksBetween = 0)
+}
+
+/** Fine-tuning a traced line. */
+object LineTools {
+    /** All the points moved onto the one straight line that fits them best, in the same order. */
+    fun straighten(points: List<MapPoint>, aspect: Float): List<MapPoint> {
+        if (points.size < 2) return points
+        // In real proportions, so "straight" means straight on the house.
+        val xs = points.map { it.x * aspect }; val ys = points.map { it.y }
+        val mx = xs.average(); val my = ys.average()
+        var sxx = 0.0; var syy = 0.0; var sxy = 0.0
+        for (i in points.indices) { val dx = xs[i] - mx; val dy = ys[i] - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy }
+        val angle = 0.5 * kotlin.math.atan2(2 * sxy, sxx - syy)
+        val ux = kotlin.math.cos(angle); val uy = kotlin.math.sin(angle)
+        return points.indices.map { i ->
+            val t = (xs[i] - mx) * ux + (ys[i] - my) * uy
+            MapPoint(((mx + ux * t) / aspect).toFloat(), (my + uy * t).toFloat())
+        }
+    }
+
+    /** The piece from point [k] to the next made exactly level (or plumb, if it's nearer upright). */
+    fun level(points: List<MapPoint>, k: Int, aspect: Float): List<MapPoint> {
+        if (k !in 0 until points.size - 1) return points
+        val a = points[k]; val b = points[k + 1]
+        val out = points.toMutableList()
+        if (kotlin.math.abs((b.x - a.x) * aspect) >= kotlin.math.abs(b.y - a.y)) {
+            val y = (a.y + b.y) / 2; out[k] = a.copy(y = y); out[k + 1] = b.copy(y = y)
+        } else {
+            val x = (a.x + b.x) / 2; out[k] = a.copy(x = x); out[k + 1] = b.copy(x = x)
+        }
+        return out
+    }
+
+    /** Hidden stretches after point [k] is removed: the stretches either side of it go, later ones move up. */
+    fun hiddenAfterRemoving(hidden: List<HiddenStretch>, k: Int): List<HiddenStretch> =
+        hidden.filter { it.after != k && it.after != k - 1 }.map { if (it.after > k) it.copy(after = it.after - 1) else it }
+
+    /** Hidden stretches after a point is put in after point [k]. */
+    fun hiddenAfterInserting(hidden: List<HiddenStretch>, k: Int): List<HiddenStretch> =
+        hidden.map { if (it.after > k) it.copy(after = it.after + 1) else it }
 }
 
 /** A length for people: feet and inches, or centimetres and metres. */
