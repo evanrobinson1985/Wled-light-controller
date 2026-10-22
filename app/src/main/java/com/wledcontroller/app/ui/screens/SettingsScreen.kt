@@ -145,6 +145,33 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTe
             }
 
             Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                val alerts by container.health.enabled.collectAsStateWithLifecycle()
+                val events by container.health.events.collectAsStateWithLifecycle()
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Controller alerts", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "While a show, the schedule, the jukebox or a whole-house effect is running, every controller is checked every 20 seconds. You get a notification if one stops answering, restarts by itself or has a weak Wi-Fi signal.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = alerts, onCheckedChange = { container.health.setEnabled(it) })
+                    }
+                    if (events.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        events.take(6).forEach { e ->
+                            Text(
+                                java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(e.atMs)) + "  " + e.message,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                }
+            }
+
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                 val keep by container.store.keepStartupLook.collectAsStateWithLifecycle(true)
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

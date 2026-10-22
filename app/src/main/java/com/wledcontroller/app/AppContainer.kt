@@ -50,6 +50,8 @@ class AppContainer(context: Context) {
     val jukebox = com.wledcontroller.app.show.Jukebox()
     val jukeboxServer = com.wledcontroller.app.show.JukeboxServer(jukebox) { jukeboxTitle }
     @Volatile var jukeboxTitle: String = "Light show"
+    /** Alerts when a controller drops out during shows. */
+    val health = com.wledcontroller.app.data.HealthMonitor(context, store, api, scope, showsOn = { showRunner.state.value.running || house.running.value })
     /** Saved house layouts and light models. */
     val library = com.wledcontroller.app.data.Library(context.filesDir)
     val backup = com.wledcontroller.app.data.Backup(context, store, sequences, library)
@@ -67,6 +69,7 @@ class AppContainer(context: Context) {
         }
         scope.launch { store.mqtt.collect { s -> mqtt.update(s ?: com.wledcontroller.app.data.MqttSettings()) } }
         scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }
+        health.start()
         // Every real controller ever added comes back, whatever replaced the list (the simulator
         // keeps its own, so not while it's on).
         scope.launch { if (!simulator.active.value) runCatching { store.restoreRememberedDevices() } }
