@@ -129,7 +129,7 @@ class WearRelayService : WearableListenerService() {
                 val base = p.liveText ?: com.wledcontroller.app.house.LiveText(
                     runIds = runs.filter { it.model?.kind == com.wledcontroller.app.house.ModelKind.MATRIX || it.prop == com.wledcontroller.app.house.PropType.MATRIX }.map { it.id },
                 )
-                base.copy(kind = com.wledcontroller.app.house.LiveText.Kind.MESSAGE, message = text.take(80))
+                p.copy(liveText = base.copy(kind = com.wledcontroller.app.house.LiveText.Kind.MESSAGE, message = text.take(80)))
             }
         }
         req["speed"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(speed = it.coerceIn(0f, 1f)) }
