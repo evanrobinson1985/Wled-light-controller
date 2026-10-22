@@ -32,4 +32,12 @@ class WledParseTest {
         val p = WledParse.effectPatch(9, mapOf("sx" to 40, "o1" to 1))
         assertEquals("""{"on":true,"seg":{"fx":9,"sx":40,"o1":true}}""", p.toString())
     }
+
+    @Test
+    fun readsTheShowStatus() {
+        val s = WledParse.showStatus("""{"running":true,"mode":"playlist","now":"Carol","playlist":"Christmas","upNext":["Jingle","Silent"],"playlists":[{"id":"p1","name":"Christmas"}],"extra":1}""")
+        assertEquals("Carol", s.now)
+        assertEquals(listOf("Jingle", "Silent"), s.upNext)
+        assertEquals(ShowPlaylist("p1", "Christmas"), s.playlists.single())
+    }
 }

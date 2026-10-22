@@ -95,6 +95,8 @@ class WearBridge(private val context: Context, private val store: AppStore, scop
         const val GROUP_PATH = "/wled/group"
         /** Whole-house effects: read the status, play, change or stop. */
         const val HOUSE_PATH = "/wled/house"
+        /** Shows: what's playing and what's next; "action" plays, skips or stops. */
+        const val SHOW_PATH = "/wled/show"
         /** The watch asking for everything at once. */
         const val SYNC_PATH = "/wled/sync"
     }

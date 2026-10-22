@@ -1,4 +1,12 @@
 <resources>
     <string name="app_name">WLED Controller</string>
     <string name="tile_label">WLED Lights</string>
+    <string name="shortcut_play">Start the show</string>
+    <string name="shortcut_play_long">Start the light show</string>
+    <string name="shortcut_skip">Next song</string>
+    <string name="shortcut_skip_long">Next song in the show</string>
+    <string name="shortcut_stop">Stop the show</string>
+    <string name="shortcut_stop_long">Stop the light show</string>
+    <string name="shortcut_jukebox">Jukebox</string>
+    <string name="shortcut_jukebox_long">Start the viewer jukebox</string>
 </resources>

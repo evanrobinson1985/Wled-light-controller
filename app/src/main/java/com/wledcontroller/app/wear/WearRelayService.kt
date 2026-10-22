@@ -47,6 +47,7 @@ class WearRelayService : WearableListenerService() {
                         WearBridge.SCENE_PATH -> scene(container, req)
                         WearBridge.GROUP_PATH -> group(container, req)
                         WearBridge.HOUSE_PATH -> house(container, req)
+                        WearBridge.SHOW_PATH -> show(req)
                         WearBridge.SYNC_PATH -> container.wear.current().toString().toByteArray()
                         else -> throw IOException("Unknown request $path")
                     },
@@ -116,6 +117,14 @@ class WearRelayService : WearableListenerService() {
      * on over it or, if on already, off), "speed", "size", "count", "shadowSize" and
      * "shadowSpeed". Answers with what's running.
      */
+    private suspend fun show(req: JsonObject): ByteArray {
+        val problem = req.str("action")?.let { com.wledcontroller.app.show.ShowControl.perform(this, it, req.str("arg")) }
+        // A moment for the show to start or move on before saying what's playing.
+        if (req.str("action") != null) kotlinx.coroutines.delay(600)
+        val status = com.wledcontroller.app.show.ShowControl.status(this)
+        return (if (problem == null) status else JsonObject(status + ("problem" to kotlinx.serialization.json.JsonPrimitive(problem)))).toString().toByteArray()
+    }
+
     private fun house(container: AppContainer, req: JsonObject): ByteArray {
         val house = container.house
         var p = house.params.value.normalized()

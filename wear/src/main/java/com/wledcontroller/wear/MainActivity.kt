@@ -24,6 +24,9 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Workspaces
 import androidx.compose.material.icons.filled.AutoAwesomeMosaic
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmarks
@@ -118,10 +121,11 @@ private fun WatchApp(link: WatchLink) {
         composable("home") {
             HomeScreen(
                 link, devices, onOpen = { nav.navigate("device/${it.id}") },
-                onHouse = { nav.navigate("house") }, onScenes = { nav.navigate("scenes") }, onGroups = { nav.navigate("groups") },
+                onHouse = { nav.navigate("house") }, onShows = { nav.navigate("shows") }, onScenes = { nav.navigate("scenes") }, onGroups = { nav.navigate("groups") },
             )
         }
         composable("house") { HouseScreen(link) }
+        composable("shows") { ShowsScreen(link) }
         composable("scenes") { ScenesScreen(link) }
         composable("groups") { GroupsScreen(link) }
         composable("device/{id}") { e ->
@@ -150,6 +154,7 @@ private fun HomeScreen(
     devices: List<WatchDevice>,
     onOpen: (WatchDevice) -> Unit,
     onHouse: () -> Unit,
+    onShows: () -> Unit,
     onScenes: () -> Unit,
     onGroups: () -> Unit,
 ) {
@@ -223,6 +228,7 @@ private fun HomeScreen(
                 )
             }
             item { NavChip("Whole house", Icons.Filled.Home, onHouse) }
+            item { NavChip("Shows", Icons.Filled.QueueMusic, onShows) }
             if (scenes.isNotEmpty()) item { NavChip("Scenes", Icons.Filled.AutoAwesomeMosaic, onScenes) }
             if (groups.isNotEmpty()) item { NavChip("Groups", Icons.Filled.Workspaces, onGroups) }
         }
@@ -354,6 +360,88 @@ private fun HouseScreen(link: WatchLink) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+        }
+    }
+}
+
+/** The phone's shows: what's playing and what's next, skip or stop, or start a playlist, the schedule or the jukebox. */
+@Composable
+private fun ShowsScreen(link: WatchLink) {
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf<ShowStatus?>(null) }
+    var noPhone by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val s = link.show()
+            if (s != null) { status = s; noPhone = false } else if (status == null) noPhone = true
+            delay(3000)
+        }
+    }
+    fun send(action: String, arg: String? = null) {
+        scope.launch { link.show(action, arg)?.let { status = it; problem = it.problem } }
+    }
+    WatchList {
+        item { ListHeader { Text("Shows") } }
+        val st = status
+        if (st == null) {
+            item {
+                if (noPhone) Text("Shows play from your phone: keep it nearby with the app installed.", textAlign = TextAlign.Center, style = MaterialTheme.typography.body2)
+                else CircularProgressIndicator(Modifier.size(28.dp))
+            }
+            return@WatchList
+        }
+        item {
+            Text(
+                when {
+                    st.now != null -> st.now
+                    st.hold != null -> "On hold: ${st.hold}"
+                    st.running && st.nextStart != null -> "Next show at ${st.nextStart}"
+                    st.running -> "Waiting…"
+                    else -> "No show playing"
+                },
+                textAlign = TextAlign.Center, style = MaterialTheme.typography.title3, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        st.playlist?.takeIf { st.now != null }?.let { item { Text(it, style = MaterialTheme.typography.caption2) } }
+        problem?.let { item { Text(it, textAlign = TextAlign.Center, style = MaterialTheme.typography.caption2) } }
+        if (st.running) {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { send("skip") }, enabled = st.now != null) { Icon(Icons.Filled.SkipNext, "Next song") }
+                    Button(onClick = { status = st.copy(running = false, now = null); send("stop") }, colors = ButtonDefaults.secondaryButtonColors()) { Icon(Icons.Filled.Stop, "Stop") }
+                }
+            }
+        }
+        if (st.upNext.isNotEmpty()) {
+            item { ListHeader { Text("Up next") } }
+            items(st.upNext.take(5).withIndex().toList(), key = { "next-${it.index}" }) { (_, name) ->
+                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.body2)
+            }
+        }
+        item { ListHeader { Text("Play") } }
+        items(st.playlists, key = { "pl-${it.id}" }) { p ->
+            Chip(
+                label = { Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                icon = { Icon(Icons.Filled.PlayArrow, null) },
+                colors = if (st.mode == "playlist" && st.playlist == p.name) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                onClick = { send("play", p.id) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            Chip(
+                label = { Text("Schedule") }, icon = { Icon(Icons.Filled.Schedule, null) },
+                colors = if (st.mode == "schedule") ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                onClick = { send("schedule") }, modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            Chip(
+                label = { Text("Jukebox") }, icon = { Icon(Icons.Filled.QueueMusic, null) },
+                colors = if (st.mode == "jukebox") ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                onClick = { send("jukebox") }, modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

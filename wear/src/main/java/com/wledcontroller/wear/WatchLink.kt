@@ -52,6 +52,19 @@ data class HouseStatus(
     val text: String? = null,
 )
 
+@Serializable
+data class ShowPlaylist(val id: String, val name: String)
+
+/** The phone's show player: what's on, what's next, and the playlists it can start. */
+@Serializable
+data class ShowStatus(
+    val running: Boolean = false, val mode: String = "", val now: String? = null, val playlist: String? = null,
+    val hold: String? = null, val nextStart: String? = null,
+    val upNext: List<String> = emptyList(), val playlists: List<ShowPlaylist> = emptyList(),
+    /** Why the last command couldn't be done. */
+    val problem: String? = null,
+)
+
 /** What a controller is doing, enough for the watch. */
 data class LightState(val on: Boolean, val bri: Int, val fx: Int, val pal: Int, val ledCount: Int)
 
@@ -66,6 +79,8 @@ object WledParse {
         text?.let { runCatching { json.decodeFromString<List<T>>(it) }.getOrNull() } ?: emptyList()
 
     fun houseStatus(text: String): HouseStatus = json.decodeFromString(text)
+
+    fun showStatus(text: String): ShowStatus = json.decodeFromString(text)
 
     fun effectSettings(text: String?): Map<String, Map<String, Int>> =
         text?.let { runCatching { json.decodeFromString<Map<String, Map<String, Int>>>(it) }.getOrNull() } ?: emptyMap()
@@ -243,6 +258,11 @@ class WatchLink(private val context: Context) {
             shadowSize?.let { put("shadowSize", it) }; shadowSpeed?.let { put("shadowSpeed", it) }
             text?.let { put("text", it) }
         })?.let { runCatching { WledParse.houseStatus(String(it)) }.getOrNull() }
+
+    /** The shows: [action] "play" (playlist id [arg]), "schedule", "jukebox", "skip", "stop", or null to just ask. */
+    suspend fun show(action: String? = null, arg: String? = null): ShowStatus? =
+        phone("/wled/show", buildJsonObject { action?.let { put("action", it) }; arg?.let { put("arg", it) } })
+            ?.let { runCatching { WledParse.showStatus(String(it)) }.getOrNull() }
 
     private suspend fun direct(d: WatchDevice, path: String, body: String?): String? = withContext(Dispatchers.IO) {
         runCatching {

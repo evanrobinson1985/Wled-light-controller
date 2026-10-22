@@ -29,6 +29,8 @@ data class RunnerState(
     val nextStart: LocalDateTime? = null,
     /** Why a scheduled show is on hold for the weather, if it is. */
     val weatherHold: String? = null,
+    /** The shows still to come in the playlist playing now. */
+    val upNext: List<String> = emptyList(),
 )
 
 /**
@@ -91,6 +93,11 @@ class ShowRunner(
         player.setLive(true)
         player.play()
         while (player.playing.value && currentCoroutineContext().isActive) delay(200)
+    }
+
+    /** Ends the show playing now; the next one starts after the usual gap. */
+    fun skip() {
+        if (_state.value.nowPlaying != null) player.pause()
     }
 
     fun stop() {
@@ -159,6 +166,8 @@ class ShowRunner(
         for ((i, id) in p.sequenceIds.withIndex()) {
             if (!keepGoing() || !currentCoroutineContext().isActive) break
             val seq = sequences.get(id) ?: continue
+            val rest = p.sequenceIds.drop(i + 1) + if (p.loop) p.sequenceIds.take(i + 1) else emptyList()
+            _state.value = _state.value.copy(upNext = rest.mapNotNull { sequences.get(it)?.name })
             playSequence(seq, p.name)
             played = true
             if (i < p.sequenceIds.lastIndex || p.loop) {

@@ -26,6 +26,8 @@ data class MqttSettings(
     val wledPort: Int = 1883,
     val user: String = "",
     val password: String = "",
+    /** Shows offered to Home Assistant (MQTT discovery). */
+    val homeAssistant: Boolean = false,
     /** Start of every controller's topic; random, so strangers on a shared broker can't guess it. */
     val prefix: String = "wled-" + UUID.randomUUID().toString().take(10),
 ) {
@@ -44,6 +46,10 @@ class MqttLink {
         private set
     private var client: MqttClient? = null
     private val listeners = ConcurrentHashMap<String, (sub: String, payload: String) -> Unit>()
+    /** Everything under a topic prefix, for the app's own topics. */
+    private val prefixListeners = ConcurrentHashMap<String, (topic: String, payload: String) -> Unit>()
+    /** Last-will topic and message; "online" is published there on every connect. Set before [update]. */
+    @Volatile var will: Pair<String, String>? = null
 
     val ready get() = settings.usable
 
@@ -51,6 +57,7 @@ class MqttLink {
     fun update(s: MqttSettings) {
         if (s == settings) return
         settings = s
+        prefixListeners.clear()
         disconnect()
     }
 
@@ -72,6 +79,7 @@ class MqttLink {
         if (s.user.isNotBlank()) userName = s.user
         if (s.password.isNotEmpty()) password = s.password.toCharArray()
         if (s.tls) socketFactory = SSLSocketFactory.getDefault()
+        will?.let { (t, m) -> setWill(t, m.toByteArray(), 1, true) }
     }
 
     /** Connects if needed; blocking, so call off the main thread. */
@@ -84,13 +92,21 @@ class MqttLink {
         val c = MqttClient(serverUri(s), "wled-app-" + UUID.randomUUID().toString().take(8), MemoryPersistence())
         c.setCallback(object : MqttCallbackExtended {
             override fun connectComplete(reconnect: Boolean, serverURI: String) {
-                if (reconnect) listeners.keys.forEach { t -> runCatching { c.subscribe(arrayOf("$t/v", "$t/status"), intArrayOf(0, 0)) } }
+                // Not on the callback thread: the client waits for it.
+                Thread {
+                    if (reconnect) {
+                        listeners.keys.forEach { t -> runCatching { c.subscribe(arrayOf("$t/v", "$t/status"), intArrayOf(0, 0)) } }
+                        prefixListeners.keys.forEach { p -> runCatching { c.subscribe("$p#", 1) } }
+                    }
+                    will?.let { (t, _) -> runCatching { c.publish(t, "online".toByteArray(), 1, true) } }
+                }.start()
             }
             override fun connectionLost(cause: Throwable?) = Unit
             override fun deliveryComplete(token: IMqttDeliveryToken?) = Unit
             override fun messageArrived(topic: String, message: MqttMessage) {
                 val payload = String(message.payload)
                 for ((t, l) in listeners) if (topic.startsWith("$t/")) l(topic.removePrefix("$t/"), payload)
+                for ((p, l) in prefixListeners) if (topic.startsWith(p)) l(topic, payload)
             }
         })
         c.connect(options(s))
@@ -110,6 +126,16 @@ class MqttLink {
         listeners.remove(topic)
         runCatching { client?.takeIf { it.isConnected }?.unsubscribe(arrayOf("$topic/v", "$topic/status")) }
         Unit
+    }
+
+    /** Every message under [prefix] (ending in "/") goes to [listener]. */
+    suspend fun subscribeAll(prefix: String, listener: (topic: String, payload: String) -> Unit) = withContext(Dispatchers.IO) {
+        prefixListeners[prefix] = listener
+        connected().subscribe("$prefix#", 1)
+    }
+
+    suspend fun publish(topic: String, payload: String, retained: Boolean = false) = withContext(Dispatchers.IO) {
+        connected().publish(topic, payload.toByteArray(), 1, retained)
     }
 
     /** Sends a JSON API command to the controller on [topic]. */

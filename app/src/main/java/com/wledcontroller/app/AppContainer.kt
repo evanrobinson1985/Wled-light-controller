@@ -50,6 +50,10 @@ class AppContainer(context: Context) {
     val jukebox = com.wledcontroller.app.show.Jukebox()
     val jukeboxServer = com.wledcontroller.app.show.JukeboxServer(jukebox) { jukeboxTitle }
     @Volatile var jukeboxTitle: String = "Light show"
+    /** The shows in Home Assistant, over the MQTT broker. */
+    val homeAssistant = com.wledcontroller.app.data.HomeAssistantBridge(
+        context, mqtt, com.wledcontroller.app.data.HomeAssistantBridge.playlistNames(store), showRunner.state, scope,
+    )
     /** Alerts when a controller drops out during shows. */
     val health = com.wledcontroller.app.data.HealthMonitor(context, store, api, scope, showsOn = { showRunner.state.value.running || house.running.value })
     /** Saved house layouts and light models. */
@@ -67,7 +71,14 @@ class AppContainer(context: Context) {
             kotlinx.coroutines.flow.combine(store.fixtures, store.outputs) { f, o -> f to o }
                 .collect { (f, o) -> com.wledcontroller.app.data.DmxRegistry.update(f, o) }
         }
-        scope.launch { store.mqtt.collect { s -> mqtt.update(s ?: com.wledcontroller.app.data.MqttSettings()) } }
+        scope.launch {
+            store.mqtt.collect { saved ->
+                val s = saved ?: com.wledcontroller.app.data.MqttSettings()
+                mqtt.will = homeAssistant.will(s)
+                mqtt.update(s)
+                homeAssistant.apply(s)
+            }
+        }
         scope.launch { store.lightsDelayMs.collect { ShowSettings.lightsDelayMs = it.toLong() } }
         health.start()
         // Every real controller ever added comes back, whatever replaced the list (the simulator

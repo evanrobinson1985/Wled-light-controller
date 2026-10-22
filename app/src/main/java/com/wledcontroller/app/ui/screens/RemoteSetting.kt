@@ -116,6 +116,17 @@ internal fun RemoteSetting() {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Shows in Home Assistant", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Adds a \"Light show\" device to Home Assistant on the same broker: an on/off switch, a choice of playlist, schedule or jukebox, Next song and Stop buttons, and what's playing. Share the switch with Google Home or Alexa in Home Assistant to say \"Hey Google, turn on the light show\". Works while the app is running — keep a schedule on (Shows › Schedule) so Android keeps it going.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = s.homeAssistant, onCheckedChange = { draft = s.copy(homeAssistant = it) })
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(enabled = busy == null && draft != saved, onClick = {

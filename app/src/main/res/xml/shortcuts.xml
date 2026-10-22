@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon; also what Google Assistant and Bixby / Google routines can open. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="show_play" android:enabled="true" android:icon="@drawable/ic_tile_bulb"
+        android:shortcutShortLabel="@string/shortcut_play" android:shortcutLongLabel="@string/shortcut_play_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.wledcontroller.app"
+            android:targetClass="com.wledcontroller.app.ShortcutActivity" android:data="wledshow://show/play" />
+    </shortcut>
+    <shortcut android:shortcutId="show_skip" android:enabled="true" android:icon="@drawable/ic_tile_bulb"
+        android:shortcutShortLabel="@string/shortcut_skip" android:shortcutLongLabel="@string/shortcut_skip_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.wledcontroller.app"
+            android:targetClass="com.wledcontroller.app.ShortcutActivity" android:data="wledshow://show/skip" />
+    </shortcut>
+    <shortcut android:shortcutId="show_stop" android:enabled="true" android:icon="@drawable/ic_tile_bulb"
+        android:shortcutShortLabel="@string/shortcut_stop" android:shortcutLongLabel="@string/shortcut_stop_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.wledcontroller.app"
+            android:targetClass="com.wledcontroller.app.ShortcutActivity" android:data="wledshow://show/stop" />
+    </shortcut>
+    <shortcut android:shortcutId="show_jukebox" android:enabled="true" android:icon="@drawable/ic_tile_bulb"
+        android:shortcutShortLabel="@string/shortcut_jukebox" android:shortcutLongLabel="@string/shortcut_jukebox_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.wledcontroller.app"
+            android:targetClass="com.wledcontroller.app.ShortcutActivity" android:data="wledshow://show/jukebox" />
+    </shortcut>
+</shortcuts>
