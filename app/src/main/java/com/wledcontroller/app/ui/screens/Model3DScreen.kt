@@ -218,12 +218,12 @@ private fun NoModel(onScan: () -> Unit, onBuild: () -> Unit, onImport: () -> Uni
     }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Import a scan from another app", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Load a 3D model", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "For a true 3D scan, use a free scanning app — Scaniverse, Polycam or KIRI Engine. Walk slowly round the house (or along the front) while it scans, let it finish processing, then export or share it as GLB (or OBJ in a .zip) and import it here. A medium detail level works best; very detailed scans are slow.",
+                "A model you exported from here before, one made in 3D software like Blender or SketchUp, or a scan from another app (Scaniverse, Polycam, KIRI Engine). GLB, or OBJ in a .zip with its pictures. In metres, the right way up; a medium level of detail works best.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(onClick = onImport) { Text("Import .glb / .obj / .zip") }
+            OutlinedButton(onClick = onImport) { Text("Load .glb / .obj / .zip") }
         }
     }
 }
@@ -257,6 +257,51 @@ private fun ModelEditor(
     val runColors = remember(leds) {
         IntArray(leds.size) { i -> android.graphics.Color.HSVToColor(floatArrayOf((leds[i].runIndex * 47f) % 360f, 0.7f, 1f)) and 0xFFFFFF }
     }
+
+    // Saving the model for other 3D software.
+    var exporting by remember { mutableStateOf(false) }
+    var exportLights by remember { mutableStateOf(true) }
+    var exportBusy by remember { mutableStateOf(false) }
+    fun exportTo(uri: android.net.Uri?, glb: Boolean) {
+        if (uri == null) return
+        val lights = if (exportLights) positions?.let { com.wledcontroller.app.house.model3d.ModelExport.lightMarkers(it, runColors) } else null
+        scope.launch {
+            exportBusy = true
+            runCatching { container.models.export(model, uri, glb, lights) }
+                .onSuccess { onMessage("Exported. Open it in Blender or other 3D software: it's in metres, the right way up.") }
+                .onFailure { onMessage("Couldn't export: ${it.message}") }
+            exportBusy = false; exporting = false
+        }
+    }
+    val saveGlb = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("model/gltf-binary")) { exportTo(it, true) }
+    val saveObj = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { exportTo(it, false) }
+    val fileName = model.name.ifBlank { "My house" }.replace(Regex("[^A-Za-z0-9 _-]"), "").ifBlank { "house" }
+    if (exporting) AlertDialog(
+        onDismissRequest = { if (!exportBusy) exporting = false },
+        title = { Text("Export the 3D model") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("For Blender, SketchUp, Windows 3D Viewer and other 3D software. In metres, the right way up, with its colours and pictures.", style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = exportLights, onCheckedChange = { exportLights = it })
+                    Column {
+                        Text("Include the lights")
+                        Text("A small marker at each light, coloured by run, as an object of its own.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (exportBusy) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Text("Saving…")
+                }
+                Button(enabled = !exportBusy, onClick = { saveGlb.launch("$fileName.glb") }, modifier = Modifier.fillMaxWidth()) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("GLB (recommended)"); Text("One file, pictures inside", style = MaterialTheme.typography.labelSmall) }
+                }
+                OutlinedButton(enabled = !exportBusy, onClick = { saveObj.launch("$fileName-obj.zip") }, modifier = Modifier.fillMaxWidth()) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("OBJ (.zip)"); Text("For older software: model, materials and pictures", style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+        },
+        confirmButton = { TextButton(enabled = !exportBusy, onClick = { exporting = false }) { Text("Close") } },
+    )
 
     // Lining up: four corners on the model, then on the photo.
     var picking by remember { mutableStateOf(false) }
@@ -456,9 +501,10 @@ private fun ModelEditor(
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { exporting = true }) { Text("Export…") }
                     OutlinedButton(onClick = onScan) { Text("Scan again") }
                     OutlinedButton(onClick = onRebuild) { Text(if (model.kind == House3D.Kind.PHOTOS) "Change size or photos" else "Build from photos instead") }
-                    OutlinedButton(onClick = onImport) { Text("Import a different scan") }
+                    OutlinedButton(onClick = onImport) { Text("Load a different model") }
                     TextButton(onClick = onRemove) { Text("Remove") }
                 }
             }

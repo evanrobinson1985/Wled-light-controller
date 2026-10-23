@@ -182,7 +182,9 @@ object ObjReader {
     /** [file] gives another file from beside the .obj by name (its .mtl and pictures), or null. */
     fun read(obj: String, file: (String) -> ByteArray?): ModelData {
         val v = ArrayList<Float>(); val vt = ArrayList<Float>()
-        class Group(val material: String?) { val pos = ArrayList<Float>(); val uv = ArrayList<Float>(); val idx = ArrayList<Int>(); val seen = HashMap<Long, Int>() }
+        // Colour at each corner, when written as "v x y z r g b".
+        val vc = ArrayList<Int?>()
+        class Group(val material: String?) { val pos = ArrayList<Float>(); val uv = ArrayList<Float>(); val col = ArrayList<Int>(); var colored = false; val idx = ArrayList<Int>(); val seen = HashMap<Long, Int>() }
         val groups = LinkedHashMap<String?, Group>()
         var current: Group = Group(null).also { groups[null] = it }
         val mtlFiles = ArrayList<String>()
@@ -191,7 +193,13 @@ object ObjReader {
             if (line.isEmpty() || line[0] == '#') continue
             val t = line.split(Regex("\\s+"))
             when (t[0]) {
-                "v" -> { v += t[1].toFloat(); v += t[2].toFloat(); v += t[3].toFloat() }
+                "v" -> {
+                    v += t[1].toFloat(); v += t[2].toFloat(); v += t[3].toFloat()
+                    vc += if (t.size >= 7) {
+                        fun ch(s: String) = (s.toFloat() * 255f).toInt().coerceIn(0, 255)
+                        (0xFF shl 24) or (ch(t[4]) shl 16) or (ch(t[5]) shl 8) or ch(t[6])
+                    } else null
+                }
                 "vt" -> { vt += t[1].toFloat(); vt += t.getOrNull(2)?.toFloatOrNull() ?: 0f }
                 "mtllib" -> mtlFiles += line.substringAfter(' ').trim()
                 "usemtl" -> { val name = t.getOrNull(1); current = groups.getOrPut(name) { Group(name) } }
@@ -204,6 +212,7 @@ object ObjReader {
                         val key = pi.toLong() shl 32 or (ti.toLong() and 0xFFFFFFFFL)
                         current.seen.getOrPut(key) {
                             current.pos += v[pi * 3]; current.pos += v[pi * 3 + 1]; current.pos += v[pi * 3 + 2]
+                            current.col += vc[pi]?.also { current.colored = true } ?: 0xFFB0B4BC.toInt()
                             // OBJ pictures run bottom to top.
                             if (ti >= 0) { current.uv += vt[ti * 2]; current.uv += 1f - vt[ti * 2 + 1] } else { current.uv += 0f; current.uv += 0f }
                             current.pos.size / 3 - 1
@@ -231,7 +240,10 @@ object ObjReader {
         val parts = groups.values.filter { it.idx.isNotEmpty() }.map { g ->
             val pic = g.material?.let { pictures[it] }
             val tex = pic?.let { p -> imageOf.getOrPut(p) { file(p)?.let { images += it; images.size - 1 } ?: -1 } } ?: -1
-            MeshPart(g.pos.toFloatArray(), g.uv.toFloatArray().takeIf { tex >= 0 }, g.idx.toIntArray(), tex, g.material?.let { colors[it] } ?: 0xFFB0B4BC.toInt())
+            MeshPart(
+                g.pos.toFloatArray(), g.uv.toFloatArray().takeIf { tex >= 0 }, g.idx.toIntArray(), tex,
+                g.material?.let { colors[it] } ?: 0xFFB0B4BC.toInt(), g.col.toIntArray().takeIf { g.colored && tex < 0 },
+            )
         }
         require(parts.isNotEmpty()) { "No shapes in that model." }
         return ModelData(Mesh(parts), images)

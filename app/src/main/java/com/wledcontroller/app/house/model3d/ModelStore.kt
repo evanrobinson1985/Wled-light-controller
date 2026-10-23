@@ -210,6 +210,16 @@ class ModelStore(private val context: Context) {
         m.copy(sharpened = false)
     }
 
+    /** Saves the model to [uri] for other 3D software: .glb, or .obj in a .zip; [lights] as markers. */
+    suspend fun export(m: House3D, uri: Uri, glb: Boolean, lights: MeshPart?) = withContext(Dispatchers.IO) {
+        val mesh = mesh(m)
+        val count = mesh.parts.maxOfOrNull { it.texture }?.plus(1) ?: 0
+        val images = (0 until count).map { i -> File(dir(m), "tex$i.jpg").takeIf { it.exists() }?.readBytes() ?: ByteArray(0) }
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            if (glb) ModelExport.writeGlb(mesh, images, out, lights) else ModelExport.writeObjZip(mesh, images, out, lights)
+        } ?: throw IllegalStateException("Couldn't write there.")
+    }
+
     /** Turns the model a quarter turn about x (on its back ↔ upright) or y; any line-up is lost. */
     suspend fun turn(m: House3D, aboutX: Boolean): House3D = withContext(Dispatchers.IO) {
         val rot: (P3) -> P3 = { p -> if (aboutX) P3(p.x, -p.z, p.y) else P3(p.z, p.y, -p.x) }
