@@ -174,9 +174,8 @@ class ModelStore(private val context: Context) {
      */
     suspend fun sharpen(m: House3D, onProgress: (Float) -> Unit): House3D = withContext(Dispatchers.IO) {
         val dir = dir(m)
-        val plainFile = File(dir, PLAIN)
-        if (!plainFile.exists()) File(dir, MESH).copyTo(plainFile)
-        val plain = plainFile.inputStream().use { MeshFile.read(it) }
+        // Painted from the whole original scan (its squares intact), then the edits done again.
+        val plain = original(m, sharp = false)
         val part = plain.parts.firstOrNull() ?: throw IllegalStateException("The model is empty.")
         val photos = File(dir, PHOTOS)
         val ids = photos.listFiles { f -> f.name.endsWith(".bin") }.orEmpty()
@@ -202,21 +201,55 @@ class ModelStore(private val context: Context) {
             },
             onProgress = onProgress,
         )
-        File(dir, MESH).outputStream().use { MeshFile.write(mesh, it) }
-        cached = m.dir to mesh
-        m.copy(sharpened = true)
+        File(dir, ORIG_SHARP).outputStream().use { MeshFile.write(mesh, it) }
+        val edited = MeshEditor.apply(mesh, m.edits)
+        File(dir, MESH).outputStream().use { MeshFile.write(edited, it) }
+        cached = m.dir to edited
+        m.copy(sharpened = true, triangles = edited.triangleCount)
     }
 
     /** Back to the scan's own colours. */
     suspend fun plainColours(m: House3D): House3D = withContext(Dispatchers.IO) {
         val dir = dir(m)
-        val plainFile = File(dir, PLAIN)
-        if (plainFile.exists()) {
-            plainFile.copyTo(File(dir, MESH), overwrite = true)
-            textures(m).forEach { it.delete() }
-            cached = null
+        val edited = MeshEditor.apply(original(m, sharp = false), m.edits)
+        File(dir, MESH).outputStream().use { MeshFile.write(edited, it) }
+        textures(m).forEach { it.delete() }
+        File(dir, ORIG_SHARP).delete()
+        cached = m.dir to edited
+        m.copy(sharpened = false, triangles = edited.triangleCount)
+    }
+
+    /**
+     * The model as it was before any edits ([sharp]: painted from the photos). Kept the first
+     * time it's needed: the model as it is then has had no edits yet.
+     */
+    private fun original(m: House3D, sharp: Boolean): Mesh {
+        val dir = dir(m)
+        val orig = File(dir, ORIG)
+        if (!orig.exists()) {
+            // Sharpened by an earlier version: its own colours were kept here.
+            val oldPlain = File(dir, PLAIN)
+            if (oldPlain.exists()) {
+                oldPlain.renameTo(orig)
+                if (m.sharpened && !File(dir, ORIG_SHARP).exists()) File(dir, MESH).copyTo(File(dir, ORIG_SHARP))
+            } else if (m.edits.isEmpty()) {
+                File(dir, MESH).copyTo(File(dir, if (m.sharpened) ORIG_SHARP else ORIG))
+            }
         }
-        m.copy(sharpened = false)
+        if (m.sharpened && !File(dir, ORIG_SHARP).exists() && m.edits.isEmpty()) File(dir, MESH).copyTo(File(dir, ORIG_SHARP))
+        val f = File(dir, if (sharp) ORIG_SHARP else ORIG)
+        if (!f.exists()) throw IllegalStateException("The original model is missing, so it can't be edited.")
+        return f.inputStream().use { MeshFile.read(it) }
+    }
+
+    /** The model with [edits] (all of them, in order) done to its original. */
+    suspend fun edit(m: House3D, edits: List<MeshEdit>): House3D = withContext(Dispatchers.IO) {
+        val base = original(m, sharp = m.sharpened)
+        val mesh = MeshEditor.apply(base, edits)
+        require(mesh.triangleCount > 0) { "That would leave nothing of the model." }
+        File(dir(m), MESH).outputStream().use { MeshFile.write(mesh, it) }
+        cached = m.dir to mesh
+        m.copy(edits = edits, triangles = mesh.triangleCount)
     }
 
     /** Saves the model to [uri] for other 3D software: .glb, or .obj in a .zip; [lights] as markers. */
@@ -233,17 +266,20 @@ class ModelStore(private val context: Context) {
     /** Turns the model a quarter turn about x (on its back ↔ upright) or y; any line-up is lost. */
     suspend fun turn(m: House3D, aboutX: Boolean): House3D = withContext(Dispatchers.IO) {
         val rot: (P3) -> P3 = { p -> if (aboutX) P3(p.x, -p.z, p.y) else P3(p.z, p.y, -p.x) }
+        // The originals turn too (made now if there aren't any yet), and the edits with them.
+        if (m.edits.isEmpty()) runCatching { original(m, sharp = m.sharpened) }
         var mesh = mesh(m).transformed(rot)
         val (lo, hi) = mesh.bounds
         val shift = P3(-(lo.x + hi.x) / 2, -lo.y, -(lo.z + hi.z) / 2)
         mesh = mesh.transformed { it + shift }
         File(dir(m), MESH).outputStream().use { MeshFile.write(mesh, it) }
         cached = m.dir to mesh
-        // The scan's own colours and its photos turn with it.
-        File(dir(m), PLAIN).takeIf { it.exists() }?.let { f ->
-            val plain = f.inputStream().use { MeshFile.read(it) }.transformed { rot(it) + shift }
-            f.outputStream().use { MeshFile.write(plain, it) }
+        // The originals, the edits and the scan's photos turn with it.
+        listOf(PLAIN, ORIG, ORIG_SHARP).map { File(dir(m), it) }.filter { it.exists() }.forEach { f ->
+            val turned = f.inputStream().use { MeshFile.read(it) }.transformed { rot(it) + shift }
+            f.outputStream().use { MeshFile.write(turned, it) }
         }
+        val edits = m.edits.map { e -> e.moved { rot(it) + shift } }
         File(dir(m), PHOTOS).listFiles { f -> f.name.endsWith(".bin") }.orEmpty().forEach { f ->
             val fr = f.inputStream().use { ScanFrame.read(it) }
             val p = fr.pose.copyOf()
@@ -251,7 +287,7 @@ class ModelStore(private val context: Context) {
             val e = rot(P3(p[12], p[13], p[14])) + shift; p[12] = e.x; p[13] = e.y; p[14] = e.z
             f.outputStream().use { ScanFrame(p, fr.fx, fr.fy, fr.cx, fr.cy, fr.width, fr.height, fr.depthW, fr.depthH, fr.depth).write(it) }
         }
-        m.copy(lineup = null, lineupModel = null, lineupPhoto = null)
+        m.copy(lineup = null, lineupModel = null, lineupPhoto = null, edits = edits)
     }
 
     private fun displayName(uri: Uri): String = runCatching {
@@ -287,6 +323,9 @@ class ModelStore(private val context: Context) {
         private val lightsJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = false }
         private const val MESH = "mesh.bin"
         private const val PLAIN = "mesh_plain.bin"
+        /** The model before any edits: with its own colours, and painted from the photos. */
+        private const val ORIG = "orig.bin"
+        private const val ORIG_SHARP = "orig_sharp.bin"
         private const val PHOTOS = "photos"
         private const val MAX_TEX = 2048f
         const val MAX_TRIANGLES = 3_000_000

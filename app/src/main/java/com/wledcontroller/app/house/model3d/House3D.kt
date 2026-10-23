@@ -31,6 +31,8 @@ data class House3D(
     val photos: Int = 0,
     /** Painted from those photos (rather than the scan's own colours). */
     val sharpened: Boolean = false,
+    /** Cropping, erasing and tidying done to it, in order; the original is kept, so they can be undone. */
+    val edits: List<MeshEdit> = emptyList(),
 ) {
     @Serializable
     enum class Kind { PHOTOS, SCAN }

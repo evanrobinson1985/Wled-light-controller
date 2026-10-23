@@ -27,6 +27,13 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
     /** Tapped at (x, y) across the view, 0..1. */
     var onTap: ((Float, Float) -> Unit)? = null
 
+    /**
+     * Painting (the eraser): one finger paints, reporting each spot (x, y, 0..1) and then the
+     * end of the stroke; two fingers turn the model round, pinch zooms.
+     */
+    var onPaint: ((Float, Float, Boolean) -> Unit)? = null
+    private var lastPaintAt = 0L
+
     @Volatile var fixedCamera: Camera? = null
         set(v) { field = v; requestRender() }
 
@@ -94,12 +101,30 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
         val cx = (0 until e.pointerCount).map { e.getX(it) }.average().toFloat()
         val cy = (0 until e.pointerCount).map { e.getY(it) }.average().toFloat()
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; downAt = e.eventTime; multi = false; lastX = cx; lastY = cy; parent?.requestDisallowInterceptTouchEvent(true) }
-            MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> { multi = true; lastX = cx; lastY = cy }
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.x; downY = e.y; downAt = e.eventTime; multi = false; lastX = cx; lastY = cy; parent?.requestDisallowInterceptTouchEvent(true)
+                onPaint?.let { it(e.x / width, e.y / height, false); lastPaintAt = e.eventTime }
+            }
+            MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> {
+                // A second finger: not painting any more.
+                if (!multi) onPaint?.invoke(e.x / width, e.y / height, true)
+                multi = true; lastX = cx; lastY = cy
+            }
             MotionEvent.ACTION_MOVE -> {
                 val dx = cx - lastX; val dy = cy - lastY
                 lastX = cx; lastY = cy
                 if (fixedCamera != null) return true
+                val paint = onPaint
+                if (paint != null) {
+                    if (e.pointerCount == 1 && !multi) {
+                        if (e.eventTime - lastPaintAt >= 30) { paint(e.x / width, e.y / height, false); lastPaintAt = e.eventTime }
+                    } else {
+                        yaw -= dx / width * 3.5f
+                        pitch = (pitch + dy / height * 2.5f).coerceIn(-0.2f, 1.45f)
+                        requestRender()
+                    }
+                    return true
+                }
                 if (e.pointerCount >= 2) {
                     // Move sideways and up/down with two fingers.
                     val cam = camera(width.toFloat() / height)
@@ -112,6 +137,11 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
                 requestRender()
             }
             MotionEvent.ACTION_UP -> {
+                if (onPaint != null) {
+                    if (!multi) onPaint?.invoke(e.x / width, e.y / height, true)
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    return true
+                }
                 if (!multi && e.eventTime - downAt < 350 && hypot(e.x - downX, e.y - downY) < 24f) {
                     onTap?.invoke(e.x / width, e.y / height)
                     performClick()

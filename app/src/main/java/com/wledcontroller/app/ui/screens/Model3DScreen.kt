@@ -256,7 +256,7 @@ private fun ModelEditor(
     val scope = rememberCoroutineScope()
     var loaded by remember { mutableStateOf<Pair<Mesh, List<File>>?>(null) }
     var missing by remember { mutableStateOf(false) }
-    LaunchedEffect(model.dir, meshVersion, model.sharpened) {
+    LaunchedEffect(model.dir, meshVersion, model.sharpened, model.edits) {
         loaded = null; missing = false
         runCatching { container.models.mesh(model) to container.models.textures(model) }
             .onSuccess { loaded = it }.onFailure { missing = true }
@@ -350,8 +350,35 @@ private fun ModelEditor(
         Switch(checked = model.show, onCheckedChange = { on -> save { it.copy(model3d = it.model3d?.copy(show = on)) } }, modifier = Modifier.padding(start = 8.dp))
     }
 
+    // Editing the model: cropping to a box, or erasing with a brush.
+    var editTool by remember { mutableStateOf<String?>(null) }
+    var brushCm by remember { mutableFloatStateOf(40f) }
+    val stroke = remember { mutableStateListOf<P3>() }
+    var cropX by remember { mutableStateOf(0f..1f) }
+    var cropY by remember { mutableStateOf(0f..1f) }
+    var cropZ by remember { mutableStateOf(0f..1f) }
+    var editBusy by remember { mutableStateOf(false) }
+    var askBits by remember { mutableStateOf(false) }
+    fun commit(edits: List<com.wledcontroller.app.house.model3d.MeshEdit>, done: String) {
+        scope.launch {
+            editBusy = true
+            runCatching { container.models.edit(model, edits) }
+                .onSuccess { m -> container.store.updateHouseMap { it.copy(model3d = m) }; onMessage(done) }
+                .onFailure { onMessage(it.message ?: "Couldn't change the model.") }
+            editBusy = false
+        }
+    }
+    val bounds = loaded?.first?.bounds
+    fun along(range: ClosedFloatingPointRange<Float>, lo: Float, hi: Float) = (lo + (hi - lo) * range.start) to (lo + (hi - lo) * range.endInclusive)
+    fun cropBox(): Pair<P3, P3>? = bounds?.let { (lo, hi) ->
+        val (x0, x1) = along(cropX, lo.x, hi.x); val (y0, y1) = along(cropY, lo.y, hi.y); val (z0, z1) = along(cropZ, lo.z, hi.z)
+        P3(x0, y0, z0) to P3(x1, y1, z1)
+    }
+
     // What to tap, when tapping.
     when {
+        editTool == "erase" -> Text("Erase: paint over what you don't want with one finger. Two fingers turn the model; pinch to zoom.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        editTool == "crop" -> Text("Crop: move the sliders until the yellow box holds just what you want to keep. Drag to turn the model to check.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         picking -> Text("Tap the front wall's ${CORNER_NAMES[picked.size.coerceAtMost(3)]} corner on the model (${picked.size}/4). Drag to turn the model, pinch to zoom.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         traceRun != null -> Text("Tracing \"${traceRun.name}\": tap along where its lights go on the model, starting at its first light. ${draft.size} point${if (draft.size == 1) "" else "s"}.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         checking -> Text("Your house photo over the model, from where it was taken. The two should match.", style = MaterialTheme.typography.bodySmall)
@@ -373,7 +400,16 @@ private fun ModelEditor(
             draft.forEach { pts += it; cols += 0xFFFFFF }
         }
         if (picking) picked.forEachIndexed { i, p -> pts += p; cols += CORNER_COLORS[i] }
-        if (!picking && !checking && traceRun == null) model.lineupModel?.forEachIndexed { i, p -> pts += p; cols += CORNER_COLORS[i % 4] }
+        if (!picking && !checking && traceRun == null && editTool == null) model.lineupModel?.forEachIndexed { i, p -> pts += p; cols += CORNER_COLORS[i % 4] }
+        // The eraser's stroke so far, in red.
+        if (editTool == "erase") stroke.forEach { pts += it; cols += 0xFF3030 }
+        // The crop box's edges, in yellow dots.
+        if (editTool == "crop") cropBox()?.let { (lo, hi) ->
+            val c = listOf(P3(lo.x, lo.y, lo.z), P3(hi.x, lo.y, lo.z), P3(hi.x, hi.y, lo.z), P3(lo.x, hi.y, lo.z), P3(lo.x, lo.y, hi.z), P3(hi.x, lo.y, hi.z), P3(hi.x, hi.y, hi.z), P3(lo.x, hi.y, hi.z))
+            listOf(0 to 1, 1 to 2, 2 to 3, 3 to 0, 4 to 5, 5 to 6, 6 to 7, 7 to 4, 0 to 4, 1 to 5, 2 to 6, 3 to 7).forEach { (a, b) ->
+                for (k in 0..30) { pts += c[a] + (c[b] - c[a]) * (k / 30f); cols += 0xFFE040 }
+            }
+        }
         HouseModelView(
             mesh.first, mesh.second, pts, cols.toIntArray(), Modifier.fillMaxSize(),
             brightness = if (checking) 0.8f else 1f,
@@ -386,7 +422,17 @@ private fun ModelEditor(
                 traceRun != null -> { p -> if (p == null) onMessage("Missed the model — tap right on it.") else { onMessage(null); draft += p } }
                 else -> null
             },
+            onPaint = if (editTool == "erase" && !editBusy) { { p, end ->
+                val r = brushCm / 100f
+                if (p != null && (stroke.isEmpty() || (stroke.last() - p).length > r * 0.3f)) stroke += p
+                if (end && stroke.isNotEmpty()) {
+                    val spots = stroke.toList()
+                    stroke.clear()
+                    commit(model.edits + com.wledcontroller.app.house.model3d.MeshEdit.Erase(spots, r), "Erased. Undo puts it back.")
+                }
+            } } else null,
         )
+        if (editBusy) CircularProgressIndicator(Modifier.size(32.dp))
         if (checking) map.photoPath?.let { path ->
             val photo by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, path) {
                 value = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = 2 })?.asImageBitmap() }
@@ -396,6 +442,36 @@ private fun ModelEditor(
     }
 
     when {
+        editTool == "erase" -> Column {
+            Text("Brush: ${formatLength(brushCm, map.useInches)} across", style = MaterialTheme.typography.labelSmall)
+            Slider(value = brushCm, onValueChange = { brushCm = it }, valueRange = 10f..200f)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(enabled = model.edits.isNotEmpty() && !editBusy, onClick = { commit(model.edits.dropLast(1), "Undone.") }) { Text("Undo") }
+                Button(onClick = { editTool = null; stroke.clear() }) { Text("Done") }
+            }
+        }
+        editTool == "crop" -> Column {
+            val b = bounds
+            if (b != null) {
+                val (lo, hi) = b
+                @Composable
+                fun Range(label: String, value: ClosedFloatingPointRange<Float>, from: Float, to: Float, set: (ClosedFloatingPointRange<Float>) -> Unit) {
+                    val (a, c) = along(value, from, to)
+                    Text("$label: ${formatLength((c - a) * 100, map.useInches)}", style = MaterialTheme.typography.labelSmall)
+                    androidx.compose.material3.RangeSlider(value = value, onValueChange = set, valueRange = 0f..1f)
+                }
+                Range("Left to right", cropX, lo.x, hi.x) { cropX = it }
+                Range("Ground to top (raise the bottom to cut off the lawn)", cropY, lo.y, hi.y) { cropY = it }
+                Range("Back to front", cropZ, lo.z, hi.z) { cropZ = it }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { editTool = null }) { Text("Cancel") }
+                Button(enabled = !editBusy, onClick = {
+                    cropBox()?.let { (lo, hi) -> commit(model.edits + com.wledcontroller.app.house.model3d.MeshEdit.Crop(lo, hi), "Cropped. Undo puts it back.") }
+                    editTool = null
+                }) { Text("Crop") }
+            }
+        }
         picking -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = picked.isNotEmpty(), onClick = { picked.removeAt(picked.lastIndex) }) { Text("Undo") }
             TextButton(onClick = { picking = false; picked.clear() }) { Text("Cancel") }
@@ -423,7 +499,31 @@ private fun ModelEditor(
         }
     }
 
-    if (!picking && traceRun == null && !checking) {
+    if (!picking && traceRun == null && !checking && editTool == null) {
+        // Tidying up the model: cropping, erasing, loose bits.
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Edit the model", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Cut away the lawn, trees and stray bits. " +
+                        if (model.edits.isEmpty()) "The original is kept, so any edit can be undone."
+                        else "${model.edits.size} edit${if (model.edits.size == 1) "" else "s"} so far; the original is kept.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(enabled = !editBusy && bounds != null, onClick = { cropX = 0f..1f; cropY = 0f..1f; cropZ = 0f..1f; editTool = "crop"; onMessage(null) }) { Text("Crop") }
+                    OutlinedButton(enabled = !editBusy, onClick = { stroke.clear(); editTool = "erase"; onMessage(null) }) { Text("Erase") }
+                    OutlinedButton(enabled = !editBusy, onClick = { askBits = true }) { Text("Remove loose bits") }
+                }
+                if (model.edits.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(enabled = !editBusy, onClick = { commit(model.edits.dropLast(1), "Undone.") }) { Text("Undo") }
+                    TextButton(enabled = !editBusy, onClick = { commit(emptyList(), "Back to the original.") }) { Text("Reset to original") }
+                }
+                if (editBusy) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Text("Working…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         // Lining up with the house photo.
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -522,6 +622,26 @@ private fun ModelEditor(
             }
         }
     }
+
+    if (askBits) AlertDialog(
+        onDismissRequest = { askBits = false },
+        title = { Text("Remove loose bits") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Bits of the scan that float on their own, not joined to the rest.", style = MaterialTheme.typography.bodySmall)
+                listOf(
+                    Triple("Tiny specks", "Pieces under 200 triangles", com.wledcontroller.app.house.model3d.MeshEdit.DropBits(200)),
+                    Triple("Bigger bits too", "Pieces under 3,000 triangles", com.wledcontroller.app.house.model3d.MeshEdit.DropBits(3000)),
+                    Triple("Keep only the biggest piece", "Everything not joined to the main part goes", com.wledcontroller.app.house.model3d.MeshEdit.DropBits(keepLargestOnly = true)),
+                ).forEach { (label, about, e) ->
+                    TextButton(onClick = { askBits = false; commit(model.edits + e, "Loose bits removed. Undo puts them back.") }, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth()) { Text(label); Text(about, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { askBits = false }) { Text("Cancel") } },
+    )
 
     if (askPhoto) {
         val path = map.photoPath

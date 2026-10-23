@@ -63,6 +63,8 @@ fun HouseModelView(
     brightness: Float = 0.35f,
     fixedCamera: Camera? = null,
     onTap: ((P3?) -> Unit)? = null,
+    /** Painting on the model: each spot touched (null: off the model), and true at the end of a stroke. */
+    onPaint: ((P3?, Boolean) -> Unit)? = null,
 ) {
     AndroidView(
         factory = { HouseGlView(it) },
@@ -72,6 +74,16 @@ fun HouseModelView(
             v.brightness = brightness
             v.fixedCamera = fixedCamera
             v.setLights(lights, colors)
+            v.onPaint = onPaint?.let { paint ->
+                { x: Float, y: Float, end: Boolean ->
+                    val aspect = v.width.toFloat() / v.height.coerceAtLeast(1)
+                    val cam = v.camera(aspect)
+                    val dir = cam.ray(x, y, aspect)
+                    // Back to the drawing thread's caller (the UI) with where it touched.
+                    val hit = if (end) null else mesh.raycast(cam.eye, dir)?.let { cam.eye + dir * it }
+                    paint(hit, end)
+                }
+            }
             v.onTap = onTap?.let { tap ->
                 { x: Float, y: Float ->
                     val aspect = v.width.toFloat() / v.height.coerceAtLeast(1)
@@ -93,7 +105,7 @@ fun HousePreview3D(map: HouseMap, leds: List<PlacedLed>, colorOf: (Int) -> Int, 
     val model = map.model3d?.takeIf { it.show }
     if (model == null) { House3DView(map, leds, colorOf, modifier); return }
     val container = LocalAppContainer.current
-    val loaded by produceState<Pair<Mesh, List<File>>?>(null, model.dir, model.sharpened) {
+    val loaded by produceState<Pair<Mesh, List<File>>?>(null, model.dir, model.sharpened, model.edits) {
         value = runCatching { container.models.mesh(model) to container.models.textures(model) }.getOrNull()
     }
     val mesh = loaded
