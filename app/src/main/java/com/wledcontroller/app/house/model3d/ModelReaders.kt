@@ -13,8 +13,11 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.max
 
-/** A model read from a file: the mesh and its pictures (still encoded, as in the file). */
-class ModelData(val mesh: Mesh, val images: List<ByteArray>)
+/**
+ * A model read from a file: the mesh and its pictures (still encoded, as in the file), and
+ * where the lights go on it if this app saved it ([lights], JSON).
+ */
+class ModelData(val mesh: Mesh, val images: List<ByteArray>, val lights: String? = null)
 
 /** Reads binary glTF (.glb), what Scaniverse, Polycam and KIRI Engine export. */
 object GlbReader {
@@ -54,12 +57,18 @@ object GlbReader {
                 ?: nodes.indices.toList()
             roots.forEach { visit(it, IDENTITY, 0) }
             if (parts.isEmpty()) throw IllegalArgumentException("No shapes in that model.")
-            return ModelData(Mesh(parts), imageBytes)
+            return ModelData(Mesh(parts), imageBytes, appData?.toString())
         }
+
+        /** Where the lights go, if this app saved the file (kept in the asset's or scene's extras). */
+        val appData = (doc["asset"] as? JsonObject)?.get("extras")?.let { it as? JsonObject }?.get(ModelExport.KEY)
+            ?: arr("scenes").firstOrNull()?.let { it as? JsonObject }?.get("extras")?.let { it as? JsonObject }?.get(ModelExport.KEY)
 
         fun visit(n: Int, parent: FloatArray, depth: Int) {
             if (depth > 64) return
             val node = nodes.getOrNull(n)?.jsonObject ?: return
+            // The light markers this app adds to its own exports aren't part of the house.
+            if (appData != null && node["name"]?.jsonPrimitive?.content == ModelExport.LIGHTS) return
             val m = Camera.multiply(parent, local(node))
             node["mesh"]?.jsonPrimitive?.intOrNull?.let { addMesh(it, m) }
             node["children"]?.jsonArray?.forEach { c -> c.jsonPrimitive.intOrNull?.let { visit(it, m, depth + 1) } }
@@ -188,6 +197,7 @@ object ObjReader {
         val groups = LinkedHashMap<String?, Group>()
         var current: Group = Group(null).also { groups[null] = it }
         val mtlFiles = ArrayList<String>()
+        var skipping = false
         for (raw in obj.lineSequence()) {
             val line = raw.trim()
             if (line.isEmpty() || line[0] == '#') continue
@@ -203,7 +213,10 @@ object ObjReader {
                 "vt" -> { vt += t[1].toFloat(); vt += t.getOrNull(2)?.toFloatOrNull() ?: 0f }
                 "mtllib" -> mtlFiles += line.substringAfter(' ').trim()
                 "usemtl" -> { val name = t.getOrNull(1); current = groups.getOrPut(name) { Group(name) } }
+                // This app's light markers aren't part of the house.
+                "o", "g" -> skipping = t.getOrNull(1)?.startsWith("lights_") == true
                 "f" -> {
+                    if (skipping) continue
                     val corners = t.drop(1).map { c ->
                         val bits = c.split('/')
                         fun ref(s: String?, n: Int) = s?.toIntOrNull()?.let { if (it < 0) n + it else it - 1 }

@@ -84,8 +84,11 @@ class ModelStore(private val context: Context) {
         return out
     }
 
-    /** Imports a 3D scan: .glb, .obj, or a .zip with an .obj, its .mtl and pictures. */
-    suspend fun importScan(uri: Uri): House3D = withContext(Dispatchers.IO) {
+    /**
+     * Loads a 3D model: .glb, .obj, or a .zip with an .obj, its .mtl and pictures. Also gives
+     * where the lights go on it, when this app saved it.
+     */
+    suspend fun importScan(uri: Uri): Pair<House3D, ModelLights?> = withContext(Dispatchers.IO) {
         val name = displayName(uri)
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IllegalArgumentException("Couldn't open that file.")
         val data = when {
@@ -99,7 +102,10 @@ class ModelStore(private val context: Context) {
                     }
                 }
                 files.entries.firstOrNull { it.key.endsWith(".glb") }?.let { GlbReader.read(it.value) }
-                    ?: files.entries.firstOrNull { it.key.endsWith(".obj") }?.let { obj -> ObjReader.read(obj.value.decodeToString()) { files[it.substringAfterLast('/').substringAfterLast('\\').lowercase()] } }
+                    ?: files.entries.firstOrNull { it.key.endsWith(".obj") }?.let { obj ->
+                        val d = ObjReader.read(obj.value.decodeToString()) { files[it.substringAfterLast('/').substringAfterLast('\\').lowercase()] }
+                        ModelData(d.mesh, d.images, files[ModelExport.OBJ_DATA]?.decodeToString())
+                    }
                     ?: throw IllegalArgumentException("No .obj or .glb in that zip.")
             }
             name.endsWith(".gltf", true) -> throw IllegalArgumentException("Export as .glb (one file) rather than .gltf.")
@@ -117,13 +123,16 @@ class ModelStore(private val context: Context) {
             bmp.recycle(); true
         }
         var mesh = Mesh(data.mesh.parts.map { p -> if (p.texture >= 0 && ok.getOrElse(p.texture) { false }) p else MeshPart(p.positions, null, p.indices, -1, p.color, p.vertexColors) })
-        // Stood on the ground, centred.
-        val (lo, hi) = mesh.bounds
-        val shift = P3(-(lo.x + hi.x) / 2, -lo.y, -(lo.z + hi.z) / 2)
-        mesh = mesh.transformed { it + shift }
+        val lights = data.lights?.let { runCatching { lightsJson.decodeFromString<ModelLights>(it) }.getOrNull() }
+        // Stood on the ground, centred — unless it's one of this app's, already placed just so.
+        if (lights == null) {
+            val (lo, hi) = mesh.bounds
+            val shift = P3(-(lo.x + hi.x) / 2, -lo.y, -(lo.z + hi.z) / 2)
+            mesh = mesh.transformed { it + shift }
+        }
         File(dir, MESH).outputStream().use { MeshFile.write(mesh, it) }
         cached = m.dir to mesh
-        m.copy(triangles = mesh.triangleCount)
+        m.copy(triangles = mesh.triangleCount) to lights
     }
 
     /** Where the phone's scanner keeps its photos until the scan is saved. */
@@ -211,12 +220,13 @@ class ModelStore(private val context: Context) {
     }
 
     /** Saves the model to [uri] for other 3D software: .glb, or .obj in a .zip; [lights] as markers. */
-    suspend fun export(m: House3D, uri: Uri, glb: Boolean, lights: MeshPart?) = withContext(Dispatchers.IO) {
+    suspend fun export(m: House3D, uri: Uri, glb: Boolean, lights: MeshPart?, placement: ModelLights?) = withContext(Dispatchers.IO) {
+        val appData = placement?.let { lightsJson.encodeToJsonElement(ModelLights.serializer(), it) as kotlinx.serialization.json.JsonObject }
         val mesh = mesh(m)
         val count = mesh.parts.maxOfOrNull { it.texture }?.plus(1) ?: 0
         val images = (0 until count).map { i -> File(dir(m), "tex$i.jpg").takeIf { it.exists() }?.readBytes() ?: ByteArray(0) }
         context.contentResolver.openOutputStream(uri)?.use { out ->
-            if (glb) ModelExport.writeGlb(mesh, images, out, lights) else ModelExport.writeObjZip(mesh, images, out, lights)
+            if (glb) ModelExport.writeGlb(mesh, images, out, lights, appData) else ModelExport.writeObjZip(mesh, images, out, lights, appData)
         } ?: throw IllegalStateException("Couldn't write there.")
     }
 
@@ -274,6 +284,7 @@ class ModelStore(private val context: Context) {
     }
 
     companion object {
+        private val lightsJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = false }
         private const val MESH = "mesh.bin"
         private const val PLAIN = "mesh_plain.bin"
         private const val PHOTOS = "photos"

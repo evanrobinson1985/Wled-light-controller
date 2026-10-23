@@ -79,6 +79,7 @@ import com.wledcontroller.app.house.placedLeds
 import com.wledcontroller.app.ui.components.CornerPicker
 import com.wledcontroller.app.ui.components.HouseModelView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -116,7 +117,18 @@ fun Model3DScreen(onBack: () -> Unit, onScan: () -> Unit = {}) {
         if (uri != null) scope.launch {
             busy = "Importing the scan…"; message = null
             runCatching { container.models.importScan(uri) }
-                .onSuccess { replaceWith(it).join(); message = "Imported ${it.triangles / 1000}k triangles. Now line it up with your house photo." }
+                .onSuccess { (m, lights) ->
+                    if (lights == null) { replaceWith(m).join(); message = "Loaded ${m.triangles / 1000}k triangles. Now line it up with your house photo." }
+                    else {
+                        // One of this app's own: everything back where it was.
+                        val old = map.model3d
+                        container.store.updateHouseMap { lights.applyTo(it, m) }
+                        if (old != null && old.dir != m.dir) container.models.delete(old)
+                        meshVersion++
+                        val now = container.store.houseMap.first()
+                        message = "Loaded, with your lights back where they were" + lights.summary(now).let { if (it.isBlank()) "." else ": $it." }
+                    }
+                }
                 .onFailure { message = it.message ?: "Couldn't import that file." }
             busy = null
         }
@@ -267,7 +279,7 @@ private fun ModelEditor(
         val lights = if (exportLights) positions?.let { com.wledcontroller.app.house.model3d.ModelExport.lightMarkers(it, runColors) } else null
         scope.launch {
             exportBusy = true
-            runCatching { container.models.export(model, uri, glb, lights) }
+            runCatching { container.models.export(model, uri, glb, lights, com.wledcontroller.app.house.model3d.ModelLights.of(map, model)) }
                 .onSuccess { onMessage("Exported. Open it in Blender or other 3D software: it's in metres, the right way up.") }
                 .onFailure { onMessage("Couldn't export: ${it.message}") }
             exportBusy = false; exporting = false

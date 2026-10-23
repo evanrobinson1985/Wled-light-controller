@@ -36,6 +36,55 @@ data class House3D(
     enum class Kind { PHOTOS, SCAN }
 }
 
+/** One run's place on the model, saved with an exported model. */
+@Serializable
+data class SavedPlacement(val id: String, val name: String, val points3d: List<P3>)
+
+/**
+ * Where the lights go on a model, saved inside an exported model file so loading it again puts
+ * everything back: the line-up with the house photo, and each run traced on the model.
+ */
+@Serializable
+data class ModelLights(
+    val lineup: Camera? = null,
+    val lineupModel: List<P3>? = null,
+    val lineupPhoto: List<MapPoint>? = null,
+    /** The house photo's shape when it was lined up: a different photo needs lining up again. */
+    val photoAspect: Float? = null,
+    val runs: List<SavedPlacement> = emptyList(),
+) {
+    /** [map] with [model] in place and the lights put back: runs matched by id, or else by name. */
+    fun applyTo(map: HouseMap, model: House3D): HouseMap {
+        val samePhoto = map.photoPath != null && photoAspect != null && kotlin.math.abs(map.aspect - photoAspect) < 0.01f
+        val placed = if (lineup != null && samePhoto) model.copy(lineup = lineup, lineupModel = lineupModel, lineupPhoto = lineupPhoto) else model
+        val byName = runs.groupBy { it.name }
+        return map.copy(
+            model3d = placed,
+            runs = map.runs.map { r ->
+                val saved = runs.firstOrNull { it.id == r.id } ?: byName[r.name]?.singleOrNull()
+                r.copy(points3d = saved?.points3d)
+            },
+        )
+    }
+
+    /** How much came back, for saying so. */
+    fun summary(map: HouseMap): String {
+        val lined = lineup != null && map.model3d?.lineup != null
+        val traced = map.runs.count { it.points3d != null }
+        return listOfNotNull(
+            if (lined) "lined up with your house photo" else if (lineup != null) "line it up again (the house photo has changed)" else null,
+            if (traced > 0) "$traced run${if (traced == 1) "" else "s"} traced on it" else null,
+        ).joinToString(", ")
+    }
+
+    companion object {
+        fun of(map: HouseMap, model: House3D) = ModelLights(
+            model.lineup, model.lineupModel, model.lineupPhoto, map.aspect.takeIf { model.lineup != null },
+            map.runs.mapNotNull { r -> r.points3d?.let { SavedPlacement(r.id, r.name, it) } },
+        )
+    }
+}
+
 /** Where each light is on the 3D model. */
 object Led3D {
     /**

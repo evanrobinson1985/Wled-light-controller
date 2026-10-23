@@ -57,3 +57,53 @@ class ModelExportTest {
         assertEquals(0xFF0000FF.toInt(), colored.vertexColors!![2])
     }
 }
+
+class ModelLightsTest {
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = false }
+
+    @Test
+    fun lightsComeBackWhereTheyWere() {
+        val spec = ShellSpec()
+        val mesh = Shell.build(spec)
+        val wall = Shell.frontCorners(spec)
+        val cam = Camera.orbit(P3(0f, 2f, 0f), 0.3f, 0.1f, 15f, 1f)
+        val photo = wall.map { cam.project(it, 1.5f)!!.let { (x, y, _) -> com.wledcontroller.app.house.MapPoint(x, y) } }
+        val model = House3D("a", House3D.Kind.SCAN, lineup = cam, lineupModel = wall, lineupPhoto = photo)
+        val side = listOf(P3(6f, 3f, 0f), P3(6f, 3f, -9f))
+        val back = listOf(P3(6f, 3f, -9f), P3(-6f, 3f, -9f))
+        val runs = listOf(
+            com.wledcontroller.app.house.LightRun("r1", "Side eave", "d", 0, 10, points3d = side),
+            com.wledcontroller.app.house.LightRun("r2", "Back eave", "d", 10, 10, points3d = back),
+            com.wledcontroller.app.house.LightRun("r3", "Bush", "d", 20, 1),
+        )
+        val map = com.wledcontroller.app.house.HouseMap(photoPath = "/p.jpg", aspect = 1.5f, runs = runs, model3d = model)
+        val placement = ModelLights.of(map, model)
+        val data = json.encodeToJsonElement(ModelLights.serializer(), placement) as kotlinx.serialization.json.JsonObject
+        val markers = ModelExport.lightMarkers(listOf(P3(0f, 3f, 5f)), intArrayOf(0xFFFFFF))
+
+        // Saved as .glb and opened again: same model (markers left out), same placement.
+        val glb = java.io.ByteArrayOutputStream().also { ModelExport.writeGlb(mesh, emptyList(), it, markers, data) }.toByteArray()
+        val read = GlbReader.read(glb)
+        assertEquals(mesh.triangleCount, read.mesh.triangleCount)
+        val restoredFrom = json.decodeFromString(ModelLights.serializer(), read.lights!!)
+        assertEquals(placement, restoredFrom)
+
+        // On another phone: the same runs but new ids — matched by name. A different photo: needs lining up again.
+        val elsewhere = map.copy(model3d = null, runs = runs.map { it.copy(id = it.id + "x", points3d = null) })
+        val fresh = House3D("b", House3D.Kind.SCAN)
+        val restored = restoredFrom.applyTo(elsewhere, fresh)
+        assertEquals(side, restored.runs[0].points3d); assertEquals(back, restored.runs[1].points3d)
+        assertEquals(null, restored.runs[2].points3d)
+        assertEquals(cam, restored.model3d!!.lineup)
+        assertTrue(restoredFrom.summary(restored).contains("2 runs"))
+        val newPhoto = restoredFrom.applyTo(elsewhere.copy(aspect = 0.75f), fresh)
+        assertEquals(null, newPhoto.model3d!!.lineup)
+
+        // As an OBJ zip: the placement goes along beside it, and the markers aren't read in as house.
+        val zip = java.io.ByteArrayOutputStream().also { ModelExport.writeObjZip(mesh, emptyList(), it, markers, data) }.toByteArray()
+        val files = HashMap<String, ByteArray>()
+        java.util.zip.ZipInputStream(zip.inputStream()).use { z -> while (true) { val e = z.nextEntry ?: break; files[e.name] = z.readBytes() } }
+        assertEquals(placement, json.decodeFromString(ModelLights.serializer(), files.getValue(ModelExport.OBJ_DATA).decodeToString()))
+        assertEquals(mesh.triangleCount, ObjReader.read(files.getValue("house.obj").decodeToString()) { files[it] }.mesh.triangleCount)
+    }
+}

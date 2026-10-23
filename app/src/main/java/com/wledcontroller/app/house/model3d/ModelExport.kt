@@ -21,6 +21,13 @@ import java.util.zip.ZipOutputStream
  * standard for both, so it opens at its true size the right way up.
  */
 object ModelExport {
+    /** Where this app keeps its own data (where the lights go) in a .glb's extras. */
+    const val KEY = "wledController"
+    /** The light markers' object. */
+    const val LIGHTS = "Lights"
+    /** The same data in an OBJ zip. */
+    const val OBJ_DATA = "wled-controller.json"
+
     /** Small markers where the lights are, in their colours, to go with the model. */
     fun lightMarkers(positions: List<P3?>, colors: IntArray, size: Float = 0.03f): MeshPart? {
         val pts = positions.withIndex().filter { it.value != null }
@@ -37,7 +44,7 @@ object ModelExport {
     }
 
     /** Writes [mesh] (its pictures as JPEGs, by texture number) as .glb, with [lights] as an object of its own. */
-    fun writeGlb(mesh: Mesh, images: List<ByteArray>, out: OutputStream, lights: MeshPart? = null) {
+    fun writeGlb(mesh: Mesh, images: List<ByteArray>, out: OutputStream, lights: MeshPart? = null, appData: JsonObject? = null) {
         val bin = ByteArrayOutputStream()
         val views = ArrayList<JsonObject>(); val accessors = ArrayList<JsonObject>()
         fun view(bytes: ByteArray, target: Int?): Int {
@@ -91,12 +98,21 @@ object ModelExport {
         val house = mesh.parts.filter { it.triangleCount > 0 }.map(::primitive)
         val lightPrim = lights?.takeIf { it.triangleCount > 0 }?.let(::primitive)
         val json = buildJsonObject {
-            putJsonObject("asset") { put("version", "2.0"); put("generator", "WLED Controller") }
+            putJsonObject("asset") {
+                put("version", "2.0"); put("generator", "WLED Controller")
+                appData?.let { putJsonObject("extras") { put(KEY, it) } }
+            }
             put("scene", 0)
-            putJsonArray("scenes") { addJsonObject { putJsonArray("nodes") { add(JsonPrimitive(0)); if (lightPrim != null) add(JsonPrimitive(1)) } } }
+            putJsonArray("scenes") {
+                addJsonObject {
+                    putJsonArray("nodes") { add(JsonPrimitive(0)); if (lightPrim != null) add(JsonPrimitive(1)) }
+                    // Also here: 3D software that keeps custom properties keeps the scene's.
+                    appData?.let { putJsonObject("extras") { put(KEY, it) } }
+                }
+            }
             putJsonArray("nodes") {
                 addJsonObject { put("name", "House"); put("mesh", 0) }
-                if (lightPrim != null) addJsonObject { put("name", "Lights"); put("mesh", 1) }
+                if (lightPrim != null) addJsonObject { put("name", LIGHTS); put("mesh", 1) }
             }
             putJsonArray("meshes") {
                 addJsonObject { put("name", "House"); put("primitives", JsonArray(house)) }
@@ -126,7 +142,7 @@ object ModelExport {
     }
 
     /** Writes [mesh] as house.obj + house.mtl + its pictures, zipped; colour at each corner as "v x y z r g b". */
-    fun writeObjZip(mesh: Mesh, images: List<ByteArray>, out: OutputStream, lights: MeshPart? = null) {
+    fun writeObjZip(mesh: Mesh, images: List<ByteArray>, out: OutputStream, lights: MeshPart? = null, appData: JsonObject? = null) {
         val obj = StringBuilder("# WLED Controller house model — metres, y up\nmtllib house.mtl\n")
         val mtl = StringBuilder()
         var base = 1; var uvBase = 1
@@ -163,6 +179,7 @@ object ModelExport {
         z.putNextEntry(ZipEntry("house.obj")); z.write(obj.toString().toByteArray()); z.closeEntry()
         z.putNextEntry(ZipEntry("house.mtl")); z.write(mtl.toString().toByteArray()); z.closeEntry()
         images.forEachIndexed { i, b -> z.putNextEntry(ZipEntry("tex$i.jpg")); z.write(b); z.closeEntry() }
+        appData?.let { z.putNextEntry(ZipEntry(OBJ_DATA)); z.write(it.toString().toByteArray()); z.closeEntry() }
         z.finish(); z.flush()
     }
 
