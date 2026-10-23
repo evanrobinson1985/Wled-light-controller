@@ -8,6 +8,7 @@ class WledApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReport.install(this)
         container = AppContainer(this)
     }
 }

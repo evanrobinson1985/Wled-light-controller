@@ -63,6 +63,26 @@ class MainActivity : ComponentActivity() {
                             container.store.setTutorialSeen()
                         }
                     }
+                    // The app closed unexpectedly last time: offer to share what went wrong.
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
+                    var crash by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(CrashReport.pending(ctx)) }
+                    crash?.let { report ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { CrashReport.clear(ctx); crash = null },
+                            title = { androidx.compose.material3.Text("The app closed unexpectedly") },
+                            text = { androidx.compose.material3.Text("Sorry about that. A report of what went wrong was kept: share it (e.g. paste it into your chat with Claude) so it can be fixed.") },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                        .putExtra(android.content.Intent.EXTRA_SUBJECT, "WLED Controller crash report")
+                                        .putExtra(android.content.Intent.EXTRA_TEXT, report)
+                                    ctx.startActivity(android.content.Intent.createChooser(send, "Share the crash report"))
+                                    CrashReport.clear(ctx); crash = null
+                                }) { androidx.compose.material3.Text("Share report") }
+                            },
+                            dismissButton = { androidx.compose.material3.TextButton(onClick = { CrashReport.clear(ctx); crash = null }) { androidx.compose.material3.Text("Dismiss") } },
+                        )
+                    }
                     Box(Modifier.fillMaxSize()) {
                     NavHost(navController = nav, startDestination = "home") {
                         composable("tutorial") {

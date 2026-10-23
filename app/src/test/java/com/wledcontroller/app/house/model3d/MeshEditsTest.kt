@@ -82,3 +82,28 @@ class MeshEditsTest {
         assertEquals(b.triangleCount, a.triangleCount)
     }
 }
+
+class CastFromTest {
+    @Test
+    fun aPhotoTakenStandingOnTheScannedLawnStillPlacesLights() {
+        // 40 × 40 m of lawn (51,200 triangles) all round where the photo was taken, and the house.
+        val n = 160
+        val pos = FloatArray((n + 1) * (n + 1) * 3); val idx = IntArray(n * n * 6)
+        for (j in 0..n) for (i in 0..n) { val k = j * (n + 1) + i; pos[k * 3] = -20f + i * 0.25f; pos[k * 3 + 1] = 0f; pos[k * 3 + 2] = 20f - j * 0.25f }
+        var w = 0
+        for (j in 0 until n) for (i in 0 until n) { val a = j * (n + 1) + i; for (v in intArrayOf(a, a + 1, a + n + 2, a, a + n + 2, a + n + 1)) idx[w++] = v }
+        val lawn = MeshPart(pos, null, idx)
+        val house = Shell.build(ShellSpec(widthM = 10f, depthM = 8f, wallM = 3f))
+        val mesh = Mesh(house.parts + lawn)
+        // Standing 12 m in front, phone at 1.6 m: most of the lawn is beside and behind.
+        val cam = Camera(P3(0f, 1.6f, 12f), P3(0f, -0.05f, -1f).normalized(), P3.UP, 1f)
+        val wall = Shell.frontCorners(ShellSpec(widthM = 10f, depthM = 8f, wallM = 3f))
+        val photo = wall.map { cam.project(it, 1.5f)!!.let { (x, y, _) -> x to y } }
+        val start = System.nanoTime()
+        val hits = mesh.castFrom(cam, 1.5f, photo + listOf(0.5f to 0.98f))
+        assertTrue("took ${(System.nanoTime() - start) / 1_000_000} ms", System.nanoTime() - start < 3_000_000_000L)
+        wall.zip(hits.take(4)).forEach { (p, h) -> assertTrue("$p vs $h", (p - h!!).length < 0.05f) }
+        // Low in the picture: the lawn in front of the house.
+        assertEquals(0f, hits[4]!!.y, 1e-3f)
+    }
+}

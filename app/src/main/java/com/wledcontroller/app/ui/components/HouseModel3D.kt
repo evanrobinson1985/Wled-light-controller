@@ -49,6 +49,7 @@ import com.wledcontroller.app.house.model3d.Led3D
 import com.wledcontroller.app.house.model3d.Mesh
 import com.wledcontroller.app.house.model3d.P3
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -66,6 +67,8 @@ fun HouseModelView(
     /** Painting on the model: each spot touched (null: off the model), and true at the end of a stroke. */
     onPaint: ((P3?, Boolean) -> Unit)? = null,
 ) {
+    // Finding the spot tapped on a big scan takes a moment: done off the screen's thread.
+    val tapScope = androidx.compose.runtime.rememberCoroutineScope()
     AndroidView(
         factory = { HouseGlView(it) },
         modifier = modifier,
@@ -89,7 +92,10 @@ fun HouseModelView(
                     val aspect = v.width.toFloat() / v.height.coerceAtLeast(1)
                     val cam = v.camera(aspect)
                     val dir = cam.ray(x, y, aspect)
-                    tap(mesh.raycast(cam.eye, dir)?.let { cam.eye + dir * it })
+                    tapScope.launch {
+                        val hit = withContext(Dispatchers.Default) { mesh.raycast(cam.eye, dir) }
+                        tap(hit?.let { cam.eye + dir * it })
+                    }
                 }
             }
         },

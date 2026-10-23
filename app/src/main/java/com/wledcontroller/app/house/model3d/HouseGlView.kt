@@ -93,6 +93,7 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
             dist = (dist / d.scaleFactor).coerceIn(0.5f, 500f); requestRender(); return true
         }
     })
+    private val tapSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop * 1.5f
     private var lastX = 0f; private var lastY = 0f; private var downX = 0f; private var downY = 0f
     private var downAt = 0L; private var multi = false
 
@@ -114,6 +115,8 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
                 val dx = cx - lastX; val dy = cy - lastY
                 lastX = cx; lastY = cy
                 if (fixedCamera != null) return true
+                // Still within a tap: don't turn the model yet.
+                if (!multi && onPaint == null && e.pointerCount == 1 && hypot(e.x - downX, e.y - downY) < tapSlop) return true
                 val paint = onPaint
                 if (paint != null) {
                     if (e.pointerCount == 1 && !multi) {
@@ -142,7 +145,8 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
                     parent?.requestDisallowInterceptTouchEvent(false)
                     return true
                 }
-                if (!multi && e.eventTime - downAt < 350 && hypot(e.x - downX, e.y - downY) < 24f) {
+                // A tap: as Android judges one on this screen (a finger always moves a little).
+                if (!multi && e.eventTime - downAt < 500 && hypot(e.x - downX, e.y - downY) < tapSlop) {
                     onTap?.invoke(e.x / width, e.y / height)
                     performClick()
                 }

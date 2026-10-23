@@ -149,6 +149,8 @@ class Mesh(val parts: List<MeshPart>) {
     fun castFrom(camera: Camera, aspect: Float, points: List<Pair<Float, Float>>): List<P3?> {
         val n = GRID
         val cells = Array(n * n) { IntArrayList() }
+        // Triangles crossing the camera's own plane: few, so tested for every ray rather than put in every cell.
+        val everywhere = IntArrayList()
         // Each vertex's spot on the picture, once.
         val projected = parts.map { p ->
             val xy = FloatArray(p.vertexCount * 2)
@@ -164,8 +166,9 @@ class Mesh(val parts: List<MeshPart>) {
             val (xy, ok) = projected[k]
             for (t in 0 until p.triangleCount) {
                 val a = p.indices[t * 3]; val b = p.indices[t * 3 + 1]; val c = p.indices[t * 3 + 2]
-                // Partly behind the camera: test it everywhere (rare; near the photographer).
-                if (!ok[a] || !ok[b] || !ok[c]) { cells.forEach { it.add(starts[k] + t) }; continue }
+                // Wholly behind the camera: it can't be seen. Partly: tested for every ray.
+                if (!ok[a] && !ok[b] && !ok[c]) continue
+                if (!ok[a] || !ok[b] || !ok[c]) { everywhere.add(starts[k] + t); continue }
                 val x0 = minOf(xy[a * 2], xy[b * 2], xy[c * 2]); val x1 = maxOf(xy[a * 2], xy[b * 2], xy[c * 2])
                 val y0 = minOf(xy[a * 2 + 1], xy[b * 2 + 1], xy[c * 2 + 1]); val y1 = maxOf(xy[a * 2 + 1], xy[b * 2 + 1], xy[c * 2 + 1])
                 if (x1 < 0f || y1 < 0f || x0 > 1f || y0 > 1f) continue
@@ -179,8 +182,8 @@ class Mesh(val parts: List<MeshPart>) {
             val dir = camera.ray(sx, sy, aspect)
             val cell = cells[(sy * n).toInt().coerceIn(0, n - 1) * n + (sx * n).toInt().coerceIn(0, n - 1)]
             var best = Float.MAX_VALUE
-            for (j in 0 until cell.size) {
-                val g = cell[j]
+            for (j in 0 until cell.size + everywhere.size) {
+                val g = if (j < cell.size) cell[j] else everywhere[j - cell.size]
                 var k = 0
                 while (k < parts.size - 1 && g >= starts[k + 1]) k++
                 val d = hitTriangle(parts[k], g - starts[k], camera.eye, dir) ?: continue
