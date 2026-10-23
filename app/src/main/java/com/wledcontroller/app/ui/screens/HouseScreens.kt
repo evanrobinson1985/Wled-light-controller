@@ -48,6 +48,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FitScreen
@@ -460,10 +461,16 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
             // Shadow figures moving about over the effect, by holiday.
             SectionTitle("Holiday shadows")
             Text(
-                if (shown.shadow != null) "${shown.shadow.label} over ${shown.effect.label}. Pick any effect above to change what's underneath; tap the shadow again to turn it off."
-                else "Pick one to play its shadows over the effect above (tap again to turn it off).",
+                if (shown.shadow != null) "${shown.shadow.label} over ${shown.effect.label}. Pick any effect above to change what's underneath, or Off to stop the shadows."
+                else "Off. Pick one to play its shadows over the effect above.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FilterChip(
+                selected = shown.shadow == null,
+                onClick = { container.house.params.value = shown.copy(shadow = null) },
+                label = { Text("Off") },
+                leadingIcon = { Icon(Icons.Filled.Block, null, Modifier.size(18.dp)) },
             )
             HouseEffect.entries.filter { it.holiday != null && fits(it) }.groupBy { it.holiday!! }.forEach { (holiday, list) ->
                 Text(holiday, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
@@ -516,6 +523,9 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                 )
                 Spacer(Modifier.height(10.dp))
                 GradientSlider(shown.shadowSpeed, { v -> set { it.copy(shadowSpeed = v) } }, label = "$noun speed", valueText = "${(shown.shadowSpeed * 100).toInt()}%", height = 34.dp)
+                TextButton(onClick = { set { it.copy(shadow = null) } }) {
+                    Icon(Icons.Filled.Block, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Turn off the ${fx.plural}")
+                }
             }
             Spacer(Modifier.height(10.dp))
             GradientSlider(shown.brightness, { v -> set { it.copy(brightness = v) } }, label = "Brightness", valueText = "${(params.brightness * 100).toInt()}%", height = 34.dp)

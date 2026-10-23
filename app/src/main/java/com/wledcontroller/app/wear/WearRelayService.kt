@@ -129,6 +129,8 @@ class WearRelayService : WearableListenerService() {
         val house = container.house
         var p = house.params.value.normalized()
         req.str("effect")?.let { name -> HouseEffect.entries.firstOrNull { it.name == name }?.let { p = p.pick(it) } }
+        // "shadow": "off" stops the holiday shadow, leaving the effect underneath playing.
+        if (req.str("shadow") == "off") p = p.copy(shadow = null)
         req["shadowSize"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(shadowSize = it.coerceIn(0f, 1f)) }
         req["shadowSpeed"]?.jsonPrimitive?.floatOrNull?.let { p = p.copy(shadowSpeed = it.coerceIn(0f, 1f)) }
         // Live text from the watch: a message on the matrices ("" turns it off).

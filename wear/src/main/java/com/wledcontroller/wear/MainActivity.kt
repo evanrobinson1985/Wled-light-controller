@@ -330,6 +330,15 @@ private fun HouseScreen(link: WatchLink) {
                 )
             }
         }
+        if (shadow != null) item {
+            Chip(
+                label = { Text("${shadow.label} off") },
+                secondaryLabel = { Text("Stop the holiday shadow") },
+                colors = ChipDefaults.secondaryChipColors(),
+                onClick = { status = st.copy(shadow = null); update { link.house(shadowOff = true) } },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         // Words on the matrices, over the effect.
         item { ListHeader { Text("Text on matrices") } }
         items(listOf("Merry Christmas!", "Happy Holidays!", "Happy New Year!", "Happy Halloween!", "Welcome!"), key = { "text-$it" }) { msg ->

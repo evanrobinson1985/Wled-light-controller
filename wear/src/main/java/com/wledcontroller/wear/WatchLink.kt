@@ -250,13 +250,14 @@ class WatchLink(private val context: Context) {
      */
     suspend fun house(
         action: String? = null, effect: String? = null, speed: Float? = null, size: Float? = null, count: Int? = null,
-        shadowSize: Float? = null, shadowSpeed: Float? = null, text: String? = null,
+        shadowSize: Float? = null, shadowSpeed: Float? = null, text: String? = null, shadowOff: Boolean = false,
     ): HouseStatus? =
         phone("/wled/house", buildJsonObject {
             action?.let { put("action", it) }; effect?.let { put("effect", it) }
             speed?.let { put("speed", it) }; size?.let { put("size", it) }; count?.let { put("count", it) }
             shadowSize?.let { put("shadowSize", it) }; shadowSpeed?.let { put("shadowSpeed", it) }
             text?.let { put("text", it) }
+            if (shadowOff) put("shadow", "off")
         })?.let { runCatching { WledParse.houseStatus(String(it)) }.getOrNull() }
 
     /** The shows: [action] "play" (playlist id [arg]), "schedule", "jukebox", "skip", "stop", or null to just ask. */
