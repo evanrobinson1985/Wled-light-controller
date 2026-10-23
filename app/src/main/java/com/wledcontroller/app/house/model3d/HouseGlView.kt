@@ -71,14 +71,14 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
     /** Where the lights are and what colour each one is (0 = off). Null positions aren't drawn. */
     fun setLights(positions: List<P3?>, colors: IntArray) {
         val n = positions.count { it != null }
-        val buf = ByteBuffer.allocateDirect(n * 7 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        // Each light: position (3) and colour with brightness (4), as drawn (28 bytes apart).
+        val buf = ByteBuffer.allocateDirect(n * LIGHT_FLOATS * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
         positions.forEachIndexed { i, p ->
             if (p == null) return@forEachIndexed
             val c = colors.getOrElse(i) { 0 }
             buf.put(p.x); buf.put(p.y); buf.put(p.z)
             if (c == 0) { buf.put(0.16f); buf.put(0.17f); buf.put(0.2f); buf.put(0.45f) }
             else { buf.put(((c shr 16) and 0xFF) / 255f); buf.put(((c shr 8) and 0xFF) / 255f); buf.put((c and 0xFF) / 255f); buf.put(1f) }
-            buf.put(1f) // reserved
         }
         buf.position(0)
         renderer.lights = buf to n
@@ -276,10 +276,10 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
             GLES30.glUniform1f(GLES30.glGetUniformLocation(ledProg, "uSize"), h * 0.09f)
             buf.position(0)
             GLES30.glEnableVertexAttribArray(0)
-            GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 28, buf)
+            GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, LIGHT_FLOATS * 4, buf)
             buf.position(3)
             GLES30.glEnableVertexAttribArray(2)
-            GLES30.glVertexAttribPointer(2, 4, GLES30.GL_FLOAT, false, 28, buf)
+            GLES30.glVertexAttribPointer(2, 4, GLES30.GL_FLOAT, false, LIGHT_FLOATS * 4, buf)
             GLES30.glDrawArrays(GLES30.GL_POINTS, 0, n)
             GLES30.glDisableVertexAttribArray(2)
             buf.position(0)
@@ -296,6 +296,7 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
     }
 
     companion object {
+        private const val LIGHT_FLOATS = 7
         private const val MESH_VS = """#version 300 es
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aUv;
