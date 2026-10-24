@@ -40,12 +40,30 @@ data class ScanStatus(
 /**
  * The phone as a 3D scanner, with ARCore: it tracks where the phone is as you walk, measures
  * how far away things are from the camera's movement, and combines every view into one
- * coloured surface ([TsdfVolume]), 5 cm cubes at a time.
+ * coloured surface ([TsdfVolume]), 5 cm cubes at a time (3 cm in high detail).
  */
 class ArScanner(private val context: Context, private val photoDir: java.io.File) {
     @Volatile var session: Session? = null
         private set
-    val volume = TsdfVolume(voxel = 0.05f, truncation = 0.15f)
+    /** The scan so far: 5 cm cubes, or 3 cm with [highDetail]. */
+    @Volatile var volume = TsdfVolume(voxel = 0.05f, truncation = 0.15f)
+        private set
+    /** Finer detail (3 cm): more memory and work; can only be chosen before scanning starts. */
+    @Volatile var highDetail = false
+        set(v) {
+            if (_status.value.views > 0 || v == field) return
+            field = v
+            volume = if (v) TsdfVolume(voxel = 0.03f, truncation = 0.1f) else TsdfVolume(voxel = 0.05f, truncation = 0.15f)
+        }
+    /** The progress shown over the camera: how well each part's scanned (red, yellow, green), or its colours. */
+    @Volatile var showQuality = true
+        set(v) { field = v; refreshPreview = true }
+    @Volatile private var refreshPreview = false
+    // Where the phone was a moment ago, to notice tracking jumps; views are ignored until this time.
+    private var lastPose: FloatArray? = null
+    private var lastPoseAt = 0L
+    private var steadyAt = 0L
+    private var wasTracking = false
     private val _status = MutableStateFlow(ScanStatus())
     val status: StateFlow<ScanStatus> = _status.asStateFlow()
 
@@ -78,9 +96,10 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
                 s.getSupportedCameraConfigs(filter).filter { it.imageSize.width <= 1920 }
                     .maxByOrNull { it.imageSize.width * it.imageSize.height }?.let { s.cameraConfig = it }
             }
+            // Automatic gives both the confident depth and the smoothed depth that fills its gaps.
             val mode = when {
-                s.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY) -> Config.DepthMode.RAW_DEPTH_ONLY
                 s.isDepthModeSupported(Config.DepthMode.AUTOMATIC) -> Config.DepthMode.AUTOMATIC
+                s.isDepthModeSupported(Config.DepthMode.RAW_DEPTH_ONLY) -> Config.DepthMode.RAW_DEPTH_ONLY
                 else -> { s.close(); return "This phone can't measure depth with ARCore, so it can't scan." }
             }
             s.configure(Config(s).apply {
@@ -104,7 +123,9 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
     /** Each camera frame, on the drawing thread: takes in a view now and then. */
     fun onFrame(frame: Frame) {
         val cam = frame.camera
+        val now = System.currentTimeMillis()
         if (cam.trackingState != TrackingState.TRACKING) {
+            wasTracking = false
             _status.value = _status.value.copy(tracking = false, hint = when (cam.trackingFailureReason) {
                 TrackingFailureReason.INSUFFICIENT_LIGHT -> "Too dark — scan in daylight."
                 TrackingFailureReason.EXCESSIVE_MOTION -> "Moving too fast — slow down."
@@ -114,23 +135,32 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
             })
             return
         }
-        val now = System.currentTimeMillis()
+        // Tracking just came back, or jumped as it caught up with itself: views from the next
+        // moment would land in slightly the wrong place, so wait for it to settle.
+        val pose = FloatArray(16).also { cam.pose.toMatrix(it, 0) }
+        lastPose?.let { if (DepthFusion.jumped(it, pose, (now - lastPoseAt) / 1000f)) steadyAt = now + 800 }
+        if (!wasTracking) steadyAt = now + 800
+        wasTracking = true; lastPose = pose; lastPoseAt = now
         if (!recording) { _status.value = _status.value.copy(tracking = true, hint = if (_status.value.views == 0) "Ready: point at the house and press Start." else "Paused."); return }
-        if (busy || now - lastAt < 180) return
+        if (now < steadyAt) { _status.value = _status.value.copy(hint = "Steadying — hold still a moment."); return }
+        // Every new depth picture, as fast as they can be taken in.
+        if (busy) return
         val depth = try { frame.acquireRawDepthImage16Bits() } catch (_: NotYetAvailableException) { return } catch (_: Exception) { return }
         if (depth.timestamp == lastDepthTime) { depth.close(); return }
         val conf = try { frame.acquireRawDepthConfidenceImage() } catch (_: Exception) { depth.close(); return }
         val image = try { frame.acquireCameraImage() } catch (_: Exception) { depth.close(); conf.close(); return }
+        // The smoothed depth too, where there is one, to fill gaps.
+        val smooth = try { frame.acquireDepthImage16Bits() } catch (_: Exception) { null }
         try {
             lastDepthTime = depth.timestamp
             lastAt = now
-            val view = View.copy(depth, conf, image, cam)
+            val view = View.copy(depth, conf, image, cam, smooth)
             busy = true
             worker.execute {
                 try { take(view) } finally { busy = false }
             }
         } finally {
-            depth.close(); conf.close(); image.close()
+            depth.close(); conf.close(); image.close(); smooth?.close()
         }
     }
 
@@ -139,9 +169,10 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
         val dw: Int, val dh: Int, val depth: ShortArray, val conf: ByteArray,
         val iw: Int, val ih: Int, val y: ByteArray, val yRow: Int, val u: ByteArray, val v: ByteArray, val uvRow: Int, val uvPix: Int,
         val pose: FloatArray, val fx: Float, val fy: Float, val cx: Float, val cy: Float, val imgW: Int, val imgH: Int,
+        val smooth: ShortArray?, val sw: Int, val sh: Int,
     ) {
         companion object {
-            fun copy(depth: android.media.Image, conf: android.media.Image, image: android.media.Image, cam: com.google.ar.core.Camera): View {
+            fun copy(depth: android.media.Image, conf: android.media.Image, image: android.media.Image, cam: com.google.ar.core.Camera, smooth: android.media.Image?): View {
                 val dw = depth.width; val dh = depth.height
                 val dp = depth.planes[0]
                 val db = dp.buffer.order(ByteOrder.nativeOrder())
@@ -156,10 +187,15 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
                 val pose = FloatArray(16).also { cam.pose.toMatrix(it, 0) }
                 val intr = cam.imageIntrinsics
                 val f = intr.focalLength; val pp = intr.principalPoint; val dims = intr.imageDimensions
+                val sm = smooth?.let { s ->
+                    val sp = s.planes[0]; val sb = sp.buffer.order(ByteOrder.nativeOrder())
+                    ShortArray(s.width * s.height).also { out -> for (r in 0 until s.height) for (c in 0 until s.width) out[r * s.width + c] = sb.getShort(r * sp.rowStride + c * sp.pixelStride) }
+                }
                 return View(
                     dw, dh, d, cf, image.width, image.height,
                     bytes(pl[0].buffer), pl[0].rowStride, bytes(pl[1].buffer), bytes(pl[2].buffer), pl[1].rowStride, pl[1].pixelStride,
                     pose, f[0], f[1], pp[0], pp[1], dims[0], dims[1],
+                    sm, smooth?.width ?: 0, smooth?.height ?: 0,
                 )
             }
         }
@@ -169,31 +205,21 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
         // The depth picture is a smaller copy of the camera's.
         val sx = v.dw.toFloat() / v.imgW; val sy = v.dh.toFloat() / v.imgH
         val fx = v.fx * sx; val fy = v.fy * sy; val cx = v.cx * sx; val cy = v.cy * sy
-        val n = v.dw * v.dh
-        val pts = FloatArray(n * 3); val cols = IntArray(n); val wts = FloatArray(n)
-        var k = 0
         val m = v.pose
-        for (r in 0 until v.dh) for (c in 0 until v.dw) {
-            val mm = v.depth[r * v.dw + c].toInt() and 0xFFFF
-            if (mm < 300 || mm > 6500) continue
-            val confidence = v.conf[r * v.dw + c].toInt() and 0xFF
-            if (confidence < 60) continue
-            val z = mm / 1000f
-            // In the camera's own space (OpenGL style: looking down -z), then in the world.
-            val xc = (c + 0.5f - cx) / fx * z; val yc = -(r + 0.5f - cy) / fy * z; val zc = -z
-            pts[k * 3] = m[0] * xc + m[4] * yc + m[8] * zc + m[12]
-            pts[k * 3 + 1] = m[1] * xc + m[5] * yc + m[9] * zc + m[13]
-            pts[k * 3 + 2] = m[2] * xc + m[6] * yc + m[10] * zc + m[14]
-            cols[k] = colorAt(v, ((c + 0.5f) * v.iw / v.dw).toInt(), ((r + 0.5f) * v.ih / v.dh).toInt())
-            wts[k] = confidence / 255f
-            k++
+        // Confident depth, gaps filled from the smoothed depth, slanted surfaces trusted less.
+        val fused = DepthFusion.fuse(v.dw, v.dh, v.depth, v.conf, v.smooth, v.sw, v.sh, fx, fy, cx, cy, m) { c, r ->
+            colorAt(v, ((c + 0.5f) * v.iw / v.dw).toInt(), ((r + 0.5f) * v.ih / v.dh).toInt())
         }
-        volume.integrate(P3(m[12], m[13], m[14]), pts, cols, wts, k)
+        val vol = volume
+        vol.integrate(P3(m[12], m[13], m[14]), fused.points, fused.colors, fused.weights, fused.count)
         if (wantPhoto(m)) runCatching { keepPhoto(v) }
         val views = _status.value.views + 1
-        if (views % 4 == 1) preview = volume.surfacePoints(160_000)
-        val area = (preview?.second?.size ?: 0) * volume.voxel * volume.voxel
-        _status.value = ScanStatus(true, "Scanning — walk slowly along the house, sweeping up to the roof edge and down to the ground.", views, area, photos)
+        if (views % 6 == 1 || refreshPreview) { refreshPreview = false; preview = vol.surfacePoints(160_000, quality = showQuality) }
+        val area = (preview?.second?.size ?: 0) * vol.voxel * vol.voxel
+        val hint = DepthFusion.distanceHint(fused.medianM)
+            ?: if (showQuality) "Scanning — go back over red and yellow until it's green. Walk slowly, sweeping up to the roof edge and down to the ground."
+            else "Scanning — walk slowly along the house, sweeping up to the roof edge and down to the ground."
+        _status.value = ScanStatus(true, hint, views, area, photos)
     }
 
     /** A photo every so often: when the phone has moved or turned enough since the last. */
@@ -336,6 +362,8 @@ class ArScanView(context: Context, private val scanner: ArScanner) : GLSurfaceVi
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
             GLES20.glUseProgram(ptProg)
             GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(ptProg, "uMvp"), 1, false, mvp, 0)
+            // The scan's own colours get a green tint to stand out from the camera; quality colours don't need it.
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(ptProg, "uTint"), if (scanner.showQuality) 0f else 0.35f)
             val pPos = GLES20.glGetAttribLocation(ptProg, "aPos"); val pCol = GLES20.glGetAttribLocation(ptProg, "aColor")
             pos.position(0); col.position(0)
             GLES20.glEnableVertexAttribArray(pPos); GLES20.glVertexAttribPointer(pPos, 3, GLES20.GL_FLOAT, false, 0, pos)
@@ -386,7 +414,8 @@ void main() {
         private const val PT_FS = """
 precision mediump float;
 varying vec4 vColor;
-void main() { gl_FragColor = vec4(mix(vColor.rgb, vec3(0.2, 1.0, 0.6), 0.35), 0.85); }
+uniform float uTint;
+void main() { gl_FragColor = vec4(mix(vColor.rgb, vec3(0.2, 1.0, 0.6), uTint), 0.85); }
 """
     }
 }

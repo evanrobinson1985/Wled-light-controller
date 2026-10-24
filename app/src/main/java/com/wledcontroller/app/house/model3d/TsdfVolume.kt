@@ -86,9 +86,12 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
         return if (b.colorCount[k].toInt() != 0) b.rgb[k] else null
     }
 
-    /** Points on the surface so far, for showing progress: x, y, z each, and their colours. */
+    /**
+     * Points on the surface so far, for showing progress: x, y, z each, and their colours — or
+     * with [quality], how well each is scanned: red thin, yellow fair, green solid.
+     */
     @Synchronized
-    fun surfacePoints(max: Int): Pair<FloatArray, IntArray> {
+    fun surfacePoints(max: Int, quality: Boolean = false): Pair<FloatArray, IntArray> {
         val pts = FloatArray(max * 3); val cols = IntArray(max)
         var n = 0
         loop@ for ((key, b) in blocks) {
@@ -98,7 +101,12 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
                 if (n >= max) break@loop
                 val x = k % N; val y = (k / N) % N; val z = k / (N * N)
                 pts[n * 3] = (bx + x + 0.5f) * voxel; pts[n * 3 + 1] = (by + y + 0.5f) * voxel; pts[n * 3 + 2] = (bz + z + 0.5f) * voxel
-                cols[n] = b.rgb[k]; n++
+                cols[n] = if (!quality) b.rgb[k] else when {
+                    b.weight[k] < 5f -> 0xFFFF3B30.toInt()
+                    b.weight[k] < 20f -> 0xFFFFCC00.toInt()
+                    else -> 0xFF34C759.toInt()
+                }
+                n++
             }
         }
         return pts.copyOf(n * 3) to cols.copyOf(n)

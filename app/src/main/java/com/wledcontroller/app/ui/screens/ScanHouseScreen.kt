@@ -110,7 +110,10 @@ fun ScanHouseScreen(onBack: () -> Unit, onDone: () -> Unit) {
         scope.launch {
             finishing = "Building your 3D house…"
             runCatching {
-                val mesh = withContext(Dispatchers.Default) { scanner.volume.extract() }
+                val mesh = withContext(Dispatchers.Default) {
+                    // Small holes filled and the surface gently smoothed.
+                    scanner.volume.extract().let { m -> m.parts.firstOrNull()?.let { com.wledcontroller.app.house.model3d.Mesh(listOf(com.wledcontroller.app.house.model3d.MeshTidy.tidy(it))) } ?: m }
+                }
                 finishing = "Saving…"
                 val m = container.models.saveScanned(mesh)
                 val old = container.store.houseMap.first().model3d
@@ -144,6 +147,22 @@ fun ScanHouseScreen(onBack: () -> Unit, onDone: () -> Unit) {
             )
             if (status.views > 0) Text(
                 "${status.views} views · about ${status.areaM2.toInt()} m² of surface",
+                style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.75f),
+            )
+            if (granted && ready && problem == null) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                var quality by remember { mutableStateOf(scanner.showQuality) }
+                var high by remember { mutableStateOf(scanner.highDetail) }
+                val chipColors = androidx.compose.material3.FilterChipDefaults.filterChipColors(labelColor = Color.White, selectedLabelColor = Color.Black, selectedContainerColor = Color(0xFFFFEB3B))
+                androidx.compose.material3.FilterChip(selected = quality, onClick = { quality = true; scanner.showQuality = true }, label = { Text("Show scan quality") }, colors = chipColors)
+                androidx.compose.material3.FilterChip(selected = !quality, onClick = { quality = false; scanner.showQuality = false }, label = { Text("Show colours") }, colors = chipColors)
+                // Detail can only be chosen before starting.
+                if (status.views == 0) {
+                    androidx.compose.material3.FilterChip(selected = !high, onClick = { scanner.highDetail = false; high = scanner.highDetail }, label = { Text("Standard detail") }, colors = chipColors)
+                    androidx.compose.material3.FilterChip(selected = high, onClick = { scanner.highDetail = true; high = scanner.highDetail }, label = { Text("High detail (3 cm)") }, colors = chipColors)
+                }
+            }
+            if (status.views > 0 && scanner.showQuality) Text(
+                "Red: barely scanned · yellow: fair · green: solid",
                 style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.75f),
             )
             if (!granted) TextButton(onClick = { askCamera.launch(Manifest.permission.CAMERA) }) { Text("Allow the camera") }
@@ -206,10 +225,11 @@ fun ScanHouseScreen(onBack: () -> Unit, onDone: () -> Unit) {
         text = {
             Text(
                 "• Scan in daylight.\n" +
-                    "• Stand 2–4 m (6–12 ft) from the house. Depth works up to about 5 m.\n" +
+                    "• Stand 2–4 m (6–12 ft) from the house. Depth works up to about 5 m; the app says when you're too far or too close.\n" +
+                    "• What's scanned shows over the camera: red is barely scanned, yellow fair, green solid. Go back over red and yellow.\n" +
+                    "• High detail (3 cm) catches more but takes longer and more memory: choose it before starting.\n" +
                     "• Start at one corner. Press Start and walk slowly along the house, sweeping the phone up to the roof's edge and down to the ground as you go.\n" +
                     "• Go round to the sides, porches and anything set back, and step in under porch roofs.\n" +
-                    "• Scanned parts show green-tinted over the camera. Go back over gaps.\n" +
                     "• The top of the roof can't be seen from the ground; its edges can, and that's where lights go.\n" +
                     "• Press Finish when you're done. A whole house takes a few minutes.",
             )
