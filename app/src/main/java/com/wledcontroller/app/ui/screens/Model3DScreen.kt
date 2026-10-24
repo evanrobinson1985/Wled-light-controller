@@ -353,6 +353,9 @@ private fun ModelEditor(
     // Editing the model: cropping to a box, or erasing with a brush.
     var editTool by remember { mutableStateOf<String?>(null) }
     var brushCm by remember { mutableFloatStateOf(40f) }
+    // Erasing by circling an area (rather than brushing), and whether right through the model.
+    var eraseLoop by remember { mutableStateOf(false) }
+    var eraseThrough by remember { mutableStateOf(false) }
     val stroke = remember { mutableStateListOf<P3>() }
     var cropX by remember { mutableStateOf(0f..1f) }
     var cropY by remember { mutableStateOf(0f..1f) }
@@ -377,7 +380,11 @@ private fun ModelEditor(
 
     // What to tap, when tapping.
     when {
-        editTool == "erase" -> Text("Erase: paint over what you don't want with one finger. Two fingers turn the model; pinch to zoom.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        editTool == "erase" -> Text(
+            if (eraseLoop) "Erase: draw a loop round what you don't want with one finger; lift it to erase inside. Two fingers turn the model; pinch to zoom."
+            else "Erase: paint over what you don't want with one finger. Two fingers turn the model; pinch to zoom.",
+            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+        )
         editTool == "crop" -> Text("Crop: move the sliders until the yellow box holds just what you want to keep. Drag to turn the model to check.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         picking -> Text("Tap the front wall's ${CORNER_NAMES[picked.size.coerceAtMost(3)]} corner on the model (${picked.size}/4). Drag to turn the model, pinch to zoom.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         traceRun != null -> Text("Tracing \"${traceRun.name}\": tap along where its lights go on the model, starting at its first light. ${draft.size} point${if (draft.size == 1) "" else "s"}.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
@@ -402,7 +409,6 @@ private fun ModelEditor(
         if (picking) picked.forEachIndexed { i, p -> pts += p; cols += CORNER_COLORS[i] }
         if (!picking && !checking && traceRun == null && editTool == null) model.lineupModel?.forEachIndexed { i, p -> pts += p; cols += CORNER_COLORS[i % 4] }
         // The eraser's stroke so far, in red.
-        if (editTool == "erase") stroke.forEach { pts += it; cols += 0xFF3030 }
         // The crop box's edges, in yellow dots.
         if (editTool == "crop") cropBox()?.let { (lo, hi) ->
             val c = listOf(P3(lo.x, lo.y, lo.z), P3(hi.x, lo.y, lo.z), P3(hi.x, hi.y, lo.z), P3(lo.x, hi.y, lo.z), P3(lo.x, lo.y, hi.z), P3(hi.x, lo.y, hi.z), P3(hi.x, hi.y, hi.z), P3(lo.x, hi.y, hi.z))
@@ -422,7 +428,14 @@ private fun ModelEditor(
                 traceRun != null -> { p -> if (p == null) onMessage("Missed the model — tap right on it.") else { onMessage(null); draft += p } }
                 else -> null
             },
-            onPaint = if (editTool == "erase" && !editBusy) { { p, end ->
+            onPaintCancel = { stroke.clear() },
+            onLasso = if (editTool == "erase" && eraseLoop && !editBusy) { { loop, cam, aspect ->
+                commit(
+                    model.edits + com.wledcontroller.app.house.model3d.MeshEdit.Lasso(cam, aspect, loop.map { it.first }, loop.map { it.second }, eraseThrough),
+                    "Erased inside the loop. Undo puts it back.",
+                )
+            } } else null,
+            onPaint = if (editTool == "erase" && !eraseLoop && !editBusy) { { p, end ->
                 val r = brushCm / 100f
                 if (p != null && (stroke.isEmpty() || (stroke.last() - p).length > r * 0.3f)) stroke += p
                 if (end && stroke.isNotEmpty()) {
@@ -443,8 +456,24 @@ private fun ModelEditor(
 
     when {
         editTool == "erase" -> Column {
-            Text("Brush: ${formatLength(brushCm, map.useInches)} across", style = MaterialTheme.typography.labelSmall)
-            Slider(value = brushCm, onValueChange = { brushCm = it }, valueRange = 10f..200f)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !eraseLoop, onClick = { eraseLoop = false }, label = { Text("Brush") })
+                FilterChip(selected = eraseLoop, onClick = { eraseLoop = true }, label = { Text("Circle") })
+            }
+            if (eraseLoop) Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Through the whole model", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (eraseThrough) "Everything inside the loop goes, behind as well — e.g. to slice off the yard."
+                        else "Only what you can see inside the loop goes; what's behind it stays.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = eraseThrough, onCheckedChange = { eraseThrough = it })
+            } else {
+                Text("Brush: ${formatLength(brushCm, map.useInches)} across", style = MaterialTheme.typography.labelSmall)
+                Slider(value = brushCm, onValueChange = { brushCm = it }, valueRange = 10f..200f)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(enabled = model.edits.isNotEmpty() && !editBusy, onClick = { commit(model.edits.dropLast(1), "Undone.") }) { Text("Undo") }
                 Button(onClick = { editTool = null; stroke.clear() }) { Text("Done") }

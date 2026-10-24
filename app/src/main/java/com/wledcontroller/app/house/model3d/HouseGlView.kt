@@ -32,6 +32,8 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
      * end of the stroke; two fingers turn the model round, pinch zooms.
      */
     var onPaint: ((Float, Float, Boolean) -> Unit)? = null
+    /** A second finger came down mid-stroke: the stroke is dropped (the fingers are turning the model). */
+    var onPaintCancel: (() -> Unit)? = null
     private var lastPaintAt = 0L
 
     @Volatile var fixedCamera: Camera? = null
@@ -99,22 +101,28 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         scale.onTouchEvent(e)
-        val cx = (0 until e.pointerCount).map { e.getX(it) }.average().toFloat()
-        val cy = (0 until e.pointerCount).map { e.getY(it) }.average().toFloat()
+        // The middle of the fingers still down (a finger being lifted doesn't count).
+        val lifting = if (e.actionMasked == MotionEvent.ACTION_POINTER_UP) e.actionIndex else -1
+        val down = (0 until e.pointerCount).filter { it != lifting }
+        val cx = down.map { e.getX(it) }.average().toFloat()
+        val cy = down.map { e.getY(it) }.average().toFloat()
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = e.x; downY = e.y; downAt = e.eventTime; multi = false; lastX = cx; lastY = cy; parent?.requestDisallowInterceptTouchEvent(true)
                 onPaint?.let { it(e.x / width, e.y / height, false); lastPaintAt = e.eventTime }
             }
             MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> {
-                // A second finger: not painting any more.
-                if (!multi) onPaint?.invoke(e.x / width, e.y / height, true)
+                // A second finger: not painting any more, but turning.
+                if (!multi && e.actionMasked == MotionEvent.ACTION_POINTER_DOWN) onPaintCancel?.invoke()
                 multi = true; lastX = cx; lastY = cy
             }
             MotionEvent.ACTION_MOVE -> {
                 val dx = cx - lastX; val dy = cy - lastY
                 lastX = cx; lastY = cy
                 if (fixedCamera != null) return true
+                // Two fingers were down and one's been lifted: nothing moves until the other is too
+                // (fingers never leave the screen at quite the same moment).
+                if (multi && e.pointerCount < 2) return true
                 // Still within a tap: don't turn the model yet.
                 if (!multi && onPaint == null && e.pointerCount == 1 && hypot(e.x - downX, e.y - downY) < tapSlop) return true
                 val paint = onPaint

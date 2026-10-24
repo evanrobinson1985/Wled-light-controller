@@ -66,26 +66,45 @@ fun HouseModelView(
     onTap: ((P3?) -> Unit)? = null,
     /** Painting on the model: each spot touched (null: off the model), and true at the end of a stroke. */
     onPaint: ((P3?, Boolean) -> Unit)? = null,
+    /** A loop drawn round part of the model: its points on the screen (0..1), and the view it was drawn on. */
+    onLasso: ((List<Pair<Float, Float>>, Camera, Float) -> Unit)? = null,
+    /** A stroke or loop given up (a second finger came down to turn the model). */
+    onPaintCancel: (() -> Unit)? = null,
 ) {
     // Finding the spot tapped on a big scan takes a moment: done off the screen's thread.
     val tapScope = androidx.compose.runtime.rememberCoroutineScope()
+    // The finger's path while painting or drawing a loop, shown as a bright line.
+    val path = remember { mutableStateListOf<Offset>() }
+    Box(modifier) {
     AndroidView(
         factory = { HouseGlView(it) },
-        modifier = modifier,
+        modifier = Modifier.fillMaxSize(),
         update = { v ->
+            v.onPaintCancel = if (onPaint != null || onLasso != null) { { path.clear(); onPaintCancel?.invoke() } } else null
             v.setModel(mesh, textures)
             v.brightness = brightness
             v.fixedCamera = fixedCamera
             v.setLights(lights, colors)
-            v.onPaint = onPaint?.let { paint ->
-                { x: Float, y: Float, end: Boolean ->
+            v.onPaint = when {
+                onLasso != null -> { x: Float, y: Float, end: Boolean ->
+                    if (!end) path += Offset(x, y)
+                    else {
+                        val aspect = v.width.toFloat() / v.height.coerceAtLeast(1)
+                        if (path.size >= 3) onLasso(path.map { it.x to it.y }, v.camera(aspect), aspect)
+                        path.clear()
+                    }
+                }
+                onPaint != null -> { x: Float, y: Float, end: Boolean ->
                     val aspect = v.width.toFloat() / v.height.coerceAtLeast(1)
                     val cam = v.camera(aspect)
                     val dir = cam.ray(x, y, aspect)
-                    // Back to the drawing thread's caller (the UI) with where it touched.
+                    if (!end) path += Offset(x, y)
+                    // Where it touched on the model.
                     val hit = if (end) null else mesh.raycast(cam.eye, dir)?.let { cam.eye + dir * it }
-                    paint(hit, end)
+                    onPaint(hit, end)
+                    if (end) path.clear()
                 }
+                else -> null
             }
             v.onTap = onTap?.let { tap ->
                 { x: Float, y: Float ->
@@ -100,6 +119,19 @@ fun HouseModelView(
             }
         },
     )
+    // The finger's path: bright yellow with a dark edge, to show on any part of the model; a loop
+    // is shown closed.
+    Canvas(Modifier.fillMaxSize()) {
+        if (path.size < 2) return@Canvas
+        val line = androidx.compose.ui.graphics.Path().apply {
+            moveTo(path[0].x * size.width, path[0].y * size.height)
+            for (k in 1 until path.size) lineTo(path[k].x * size.width, path[k].y * size.height)
+            if (onLasso != null && path.size >= 3) close()
+        }
+        drawPath(line, Color.Black.copy(alpha = 0.6f), style = Stroke(9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        drawPath(line, Color(0xFFFFEB3B), style = Stroke(5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+    }
+    }
 }
 
 /**

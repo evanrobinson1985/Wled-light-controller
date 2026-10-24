@@ -107,3 +107,42 @@ class CastFromTest {
         assertEquals(0f, hits[4]!!.y, 1e-3f)
     }
 }
+
+class LassoTest {
+    @Test
+    fun circlingErasesWhatCanBeSeenOrRightThrough() {
+        // A house of fine pieces (so a loop can take part of a wall), seen straight on.
+        val v = TsdfVolume(voxel = 0.1f, truncation = 0.3f)
+        val box = Shell.build(ShellSpec(widthM = 6f, depthM = 4f, wallM = 3f, roof = Roof.FLAT))
+        for (k in 0..24) {
+            val cam = Camera.orbit(P3(0f, 1.5f, -2f), k * 0.26f, 0.2f, 8f, 0.8f)
+            val w = 80; val h = 60
+            val pts = FloatArray(w * h * 3); val cols = IntArray(w * h); val wts = FloatArray(w * h); var n = 0
+            for (y in 0 until h) for (x in 0 until w) {
+                val dir = cam.ray((x + 0.5f) / w, (y + 0.5f) / h, w.toFloat() / h)
+                val d = box.raycast(cam.eye, dir) ?: continue
+                val p = cam.eye + dir * d
+                pts[n * 3] = p.x; pts[n * 3 + 1] = p.y; pts[n * 3 + 2] = p.z; cols[n] = -1; wts[n] = 1f; n++
+            }
+            v.integrate(cam.eye, pts, cols, wts, n)
+        }
+        val mesh = v.extract()
+        val cam = Camera.orbit(P3(0f, 1.5f, -2f), 0f, 0f, 12f, 1f)
+        // A loop round the middle of the front wall.
+        val loop = (0 until 24).map { val a = it / 24f * 6.2832f; 0.5f + 0.12f * kotlin.math.cos(a) to 0.5f + 0.12f * kotlin.math.sin(a) }
+        fun lasso(through: Boolean) = MeshEdit.Lasso(cam, 1.5f, loop.map { it.first }, loop.map { it.second }, through)
+        fun frontMiddle(m: Mesh) = m.raycast(P3(0f, 1.5f, 12f), P3(0f, 0f, -1f))
+        val seen = MeshEditor.apply(mesh, lasso(false))
+        assertTrue(seen.triangleCount < mesh.triangleCount)
+        // The front wall's middle is gone, so the ray now reaches the back wall, still there.
+        assertEquals(16f, frontMiddle(seen)!!, 0.2f)
+        // Right through: the back wall goes too.
+        val through = MeshEditor.apply(mesh, lasso(true))
+        assertTrue(frontMiddle(through) == null || frontMiddle(through)!! > 16.5f)
+        // Kept as an edit, and it turns with the model.
+        val turn: (P3) -> P3 = { p -> P3(p.z, p.y, -p.x) }
+        assertEquals(seen.triangleCount, MeshEditor.apply(mesh.transformed(turn), listOf(lasso(false).moved(turn))).triangleCount)
+        val json = kotlinx.serialization.json.Json.encodeToString(MeshEdit.serializer(), lasso(true))
+        assertEquals(lasso(true), kotlinx.serialization.json.Json.decodeFromString(MeshEdit.serializer(), json))
+    }
+}

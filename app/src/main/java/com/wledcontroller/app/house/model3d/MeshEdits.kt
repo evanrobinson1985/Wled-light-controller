@@ -16,6 +16,14 @@ sealed interface MeshEdit {
     @Serializable @SerialName("erase")
     data class Erase(val spots: List<P3>, val radius: Float) : MeshEdit
 
+    /**
+     * Take away what's inside a loop drawn on the screen ([xs], [ys]: 0..1 across and down) as
+     * seen from [camera] on a screen [aspect] wide: only what could be seen there, or [through]
+     * the whole model.
+     */
+    @Serializable @SerialName("lasso")
+    data class Lasso(val camera: Camera, val aspect: Float, val xs: List<Float>, val ys: List<Float>, val through: Boolean = false) : MeshEdit
+
     /** Take away loose bits: pieces smaller than [minTriangles], or every piece but the biggest. */
     @Serializable @SerialName("bits")
     data class DropBits(val minTriangles: Int = 200, val keepLargestOnly: Boolean = false) : MeshEdit
@@ -24,6 +32,10 @@ sealed interface MeshEdit {
     fun moved(f: (P3) -> P3): MeshEdit = when (this) {
         is Crop -> { val a = f(lo); val b = f(hi); Crop(P3(minOf(a.x, b.x), minOf(a.y, b.y), minOf(a.z, b.z)), P3(maxOf(a.x, b.x), maxOf(a.y, b.y), maxOf(a.z, b.z))) }
         is Erase -> Erase(spots.map(f), radius)
+        is Lasso -> {
+            val e = f(camera.eye)
+            Lasso(Camera(e, (f(camera.eye + camera.forward) - e).normalized(), (f(camera.eye + camera.up) - e).normalized(), camera.focal), aspect, xs, ys, through)
+        }
         is DropBits -> this
     }
 }
@@ -35,6 +47,7 @@ object MeshEditor {
     fun apply(mesh: Mesh, e: MeshEdit): Mesh = when (e) {
         is MeshEdit.Crop -> keep(mesh) { c -> c.x in e.lo.x..e.hi.x && c.y in e.lo.y..e.hi.y && c.z in e.lo.z..e.hi.z }
         is MeshEdit.Erase -> erase(mesh, e)
+        is MeshEdit.Lasso -> lasso(mesh, e)
         is MeshEdit.DropBits -> dropBits(mesh, e)
     }
 
@@ -89,6 +102,45 @@ object MeshEditor {
                 }
             }
             true
+        }
+    }
+
+    private fun lasso(mesh: Mesh, e: MeshEdit.Lasso): Mesh {
+        val n = minOf(e.xs.size, e.ys.size)
+        if (n < 3) return mesh
+        fun inside(x: Float, y: Float): Boolean {
+            var odd = false
+            var j = n - 1
+            for (i in 0 until n) {
+                val yi = e.ys[i]; val yj = e.ys[j]
+                if ((yi > y) != (yj > y) && x < (e.xs[j] - e.xs[i]) * (y - yi) / (yj - yi) + e.xs[i]) odd = !odd
+                j = i
+            }
+            return odd
+        }
+        val cam = e.camera
+        // What can be seen: the nearest surface, across a grid over the screen.
+        val gw = 320; val gh = (320 / e.aspect).toInt().coerceIn(64, 640)
+        val nearest = if (e.through) null else FloatArray(gw * gh) { Float.MAX_VALUE }.also { z ->
+            for (p in mesh.parts) for (t in 0 until p.triangleCount) {
+                val q = (0 until 3).map { j -> cam.project(p.vertex(p.indices[t * 3 + j]), e.aspect) }
+                if (q.any { it == null }) continue
+                val x0 = q.minOf { it!!.first }; val x1 = q.maxOf { it!!.first }
+                val y0 = q.minOf { it!!.second }; val y1 = q.maxOf { it!!.second }
+                val d = q.minOf { it!!.third }
+                if (x1 < 0f || y1 < 0f || x0 > 1f || y0 > 1f) continue
+                val cx0 = (x0 * gw).toInt().coerceIn(0, gw - 1); val cx1 = (x1 * gw).toInt().coerceIn(0, gw - 1)
+                val cy0 = (y0 * gh).toInt().coerceIn(0, gh - 1); val cy1 = (y1 * gh).toInt().coerceIn(0, gh - 1)
+                for (cy in cy0..cy1) for (cx in cx0..cx1) { val k = cy * gw + cx; if (d < z[k]) z[k] = d }
+            }
+        }
+        return keep(mesh) { c ->
+            val (x, y, depth) = cam.project(c, e.aspect) ?: return@keep true
+            if (x !in 0f..1f || y !in 0f..1f || !inside(x, y)) return@keep true
+            if (nearest == null) return@keep false
+            val front = nearest[(y * gh).toInt().coerceIn(0, gh - 1) * gw + (x * gw).toInt().coerceIn(0, gw - 1)]
+            // Kept when it's well behind what can be seen there.
+            depth > front + 0.15f + front * 0.02f
         }
     }
 
