@@ -95,6 +95,9 @@ fun HomeScreen(
     val groups by container.store.groups.collectAsStateWithLifecycle(emptyList())
     val scenes by container.store.scenes.collectAsStateWithLifecycle(emptyList())
     val simActive by container.simulator.active.collectAsStateWithLifecycle()
+    val projectList by container.projects.list.collectAsStateWithLifecycle()
+    val activeProject by container.projects.active.collectAsStateWithLifecycle()
+    val projectName = projectList.firstOrNull { it.id == activeProject }?.name?.takeIf { activeProject != com.wledcontroller.app.data.Projects.MAIN }
 
     var showAdd by remember { mutableStateOf(false) }
     var editGroup by remember { mutableStateOf<DeviceGroup?>(null) }
@@ -107,7 +110,7 @@ fun HomeScreen(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             LargeTopAppBar(
-                title = { Text(if (simActive) "Lights · simulator" else "Lights") },
+                title = { Text(if (simActive) "Lights · simulator" else if (projectName != null) "Lights · $projectName" else "Lights", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                 actions = {
                     IconButton(onClick = { controllers.forEach { it.setPower(false) } }, enabled = controllers.isNotEmpty()) {
                         Icon(Icons.Filled.PowerSettingsNew, "All off")

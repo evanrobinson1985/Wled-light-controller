@@ -64,6 +64,10 @@ class AppContainer(context: Context) {
     /** A copy of everything in Downloads, which outlasts uninstalling the app. */
     val autoBackup = com.wledcontroller.app.data.AutoBackup(context, store, backup)
     val simulator = com.wledcontroller.app.sim.Simulator(context, store, backup, sequences, house, player, devices)
+    /** Separate projects (houses, layouts and their shows), one open at a time. */
+    val projects = com.wledcontroller.app.data.Projects(context, store, backup, house, player, devices)
+    /** Opens zipped xLights show folders as projects. */
+    val xlightsPackage = com.wledcontroller.app.data.XlightsPackage(context, store, house, sequences, projects)
     /** Keeps the watch app's controller list up to date. */
     val wear = com.wledcontroller.app.wear.WearBridge(context, store, scope)
 

@@ -115,8 +115,9 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("settings") {
-                            SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }, onOpenTest = { nav.navigate("test") }, onOpenFirmware = { nav.navigate("firmware") })
+                            SettingsScreen(onBack = { nav.popBackStack() }, onOpenTutorial = { nav.navigate("tutorial") }, onOpenTest = { nav.navigate("test") }, onOpenFirmware = { nav.navigate("firmware") }, onOpenProjects = { nav.navigate("projects") })
                         }
+                        composable("projects") { com.wledcontroller.app.ui.screens.ProjectsScreen(onBack = { nav.popBackStack() }, onOpenMap = { nav.navigate("house/map") }) }
                         composable("house/controllers") { com.wledcontroller.app.ui.screens.ControllerMapScreen(onBack = { nav.popBackStack() }) }
                         composable("house/model3d") { com.wledcontroller.app.ui.screens.Model3DScreen(onBack = { nav.popBackStack() }, onScan = { nav.navigate("house/scan3d") }) }
                         composable("house/scan3d") { com.wledcontroller.app.ui.screens.ScanHouseScreen(onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() }) }

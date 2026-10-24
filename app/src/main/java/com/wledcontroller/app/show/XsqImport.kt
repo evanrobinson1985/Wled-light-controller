@@ -203,10 +203,11 @@ object XsqImport {
 
     /**
      * Turns [xsq] into a show. [targets] maps each element's [XsqElement.label] to where it goes
-     * here; elements mapped to null are left out. Returns the show and how many effects had no
-     * equivalent here.
+     * here; elements mapped to null are left out. [files] finds the app's copy of a picture or
+     * video the sequence names (by its xLights path). Returns the show and how many effects had
+     * no equivalent here.
      */
-    fun toSequence(xsq: XsqSequence, name: String, targets: Map<String, TrackTarget?>): Pair<Sequence, Int> {
+    fun toSequence(xsq: XsqSequence, name: String, targets: Map<String, TrackTarget?>, files: (String) -> String? = { null }): Pair<Sequence, Int> {
         var skipped = 0
         val tracks = ArrayList<Track>()
         val timing = xsq.timingTracks.map { (n, l) -> TimingTrack(UUID.randomUUID().toString(), n, l.sortedBy { it.startMs }) }
@@ -231,6 +232,9 @@ object XsqImport {
                         outTransition = transitionFor(s["T_CHOICE_Out_Transition_Type"]),
                         text = s.entries.firstOrNull { it.key.startsWith("E_TEXTCTRL_Text") && it.key != "E_TEXTCTRL_Text_Font" }?.value,
                         timingTrackId = s["E_CHOICE_State_TimingTrack"]?.let { n -> timing.firstOrNull { it.name == n }?.id },
+                        // Pictures and videos, when they came with it.
+                        imageFile = s["E_FILEPICKER_Pictures_Filename"]?.let(files),
+                        videoFile = s["E_FILEPICKERCTRL_Video_Filename"]?.let(files),
                     )
                 }
                 if (clips.isEmpty()) return@forEachIndexed

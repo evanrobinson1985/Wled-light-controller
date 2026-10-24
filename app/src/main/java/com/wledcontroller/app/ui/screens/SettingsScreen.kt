@@ -54,7 +54,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTest: () -> Unit = {}, onOpenFirmware: () -> Unit = {}) {
+fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTest: () -> Unit = {}, onOpenFirmware: () -> Unit = {}, onOpenProjects: () -> Unit = {}) {
     val container = LocalAppContainer.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -102,6 +102,19 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTe
                     Text(
                         "A walk-through of every feature, with shortcuts to try each one. Also on the home screen's ? button.",
                         style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            val projectList by container.projects.list.collectAsStateWithLifecycle()
+            val activeProject by container.projects.active.collectAsStateWithLifecycle()
+            Card(onClick = onOpenProjects, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Projects", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Open: ${projectList.firstOrNull { it.id == activeProject }?.name ?: "My house"}. Keep more than one house or layout, each with its own shows, and open xLights show packages (.zip) without touching your own.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

@@ -21,10 +21,28 @@ data class XlModel(
     /** Its real size when the file gives one (newer xLights files carry widthmm / heightmm). */
     val widthCm: Float? = null,
     val heightCm: Float? = null,
+    /** Where it is in the xLights layout (see [XlightsPlacement]); null in a single exported model. */
+    val place: XlPlace? = null,
 )
 
+/**
+ * A prop's place in an xLights layout, in its world units (y up from the bottom): its
+ * position, scale, and its shape — a box [gridW] × [gridH] wide and high before scaling, a
+ * second point ([x2], [y2]) from the first, or [points] from the position.
+ */
+data class XlPlace(
+    val x: Float, val y: Float,
+    val scaleX: Float = 1f, val scaleY: Float = 1f,
+    val x2: Float? = null, val y2: Float? = null,
+    val points: List<Pair<Float, Float>>? = null,
+    val gridW: Int = 1, val gridH: Int = 1,
+)
+
+/** The layout's own view: its size, and the background picture (file name only) and how it's fitted. */
+data class XlPreview(val width: Float, val height: Float, val image: String?, val scaleImage: Boolean)
+
 /** Everything worth bringing over from an xLights layout. */
-data class XlLayout(val models: List<XlModel>, val groups: List<Pair<String, List<String>>>) {
+data class XlLayout(val models: List<XlModel>, val groups: List<Pair<String, List<String>>>, val preview: XlPreview? = null) {
     /** Controllers the props are on, by xLights name. */
     val controllers get() = models.mapNotNull { it.controller }.distinct()
 }
@@ -126,7 +144,18 @@ object XlightsModels {
         val groups = root.children("modelGroups").flatMap { it.children("modelGroup") }.map { g ->
             g.getAttribute("name") to g.getAttribute("models").split(',').map { it.trim() }.filter { it.isNotEmpty() }
         }
-        return XlLayout(models, groups)
+        // The default view's size and background picture.
+        val settings = root.children("settings").firstOrNull()
+        fun setting(name: String) = settings?.children(name)?.firstOrNull()?.getAttribute("value")?.takeIf { it.isNotBlank() }
+        val preview = settings?.let {
+            XlPreview(
+                setting("previewWidth")?.toFloatOrNull() ?: 1280f,
+                setting("previewHeight")?.toFloatOrNull() ?: 720f,
+                setting("backgroundImage")?.substringAfterLast('/')?.substringAfterLast('\\'),
+                setting("scaleImage") == "1",
+            )
+        }
+        return XlLayout(models, groups, preview)
     }
 
     private fun Element.int(name: String, default: Int) = getAttribute(name).trim().toIntOrNull() ?: default
@@ -229,7 +258,27 @@ object XlightsModels {
         }
         if (controller != null && startChannel == null) startChannel = absolute
         fun cm(attr: String) = e.getAttribute(attr).trim().toFloatOrNull()?.takeIf { it > 0f }?.div(10f)
-        return XlModel(name, displayAs, count, model, prop, subs, controller, startChannel, chained, absolute, cm("widthmm"), cm("heightmm"))
+        return XlModel(name, displayAs, count, model, prop, subs, controller, startChannel, chained, absolute, cm("widthmm"), cm("heightmm"), placeOf(e, type, p1, p2, p3))
+    }
+
+    /** Where the prop is in the layout, if the file says. */
+    private fun placeOf(e: Element, type: String, p1: Int, p2: Int, p3: Int): XlPlace? {
+        fun f(name: String) = e.getAttribute(name).trim().toFloatOrNull()
+        val x = f("WorldPosX") ?: return null
+        val y = f("WorldPosY") ?: return null
+        val sx = f("ScaleX") ?: 1f; val sy = f("ScaleY") ?: 1f
+        val points = e.getAttribute("PointData").takeIf { it.isNotBlank() }?.split(',')?.mapNotNull { it.trim().toFloatOrNull() }
+            ?.chunked(3)?.filter { it.size >= 2 }?.map { it[0] to it[1] }?.takeIf { it.size >= 2 }
+        // The grid it's drawn in, before scaling.
+        val (gw, gh) = when {
+            type == "custom" -> p1 to p2
+            type.startsWith("vert") && type.contains("matrix") -> (p1 * p3) to (p2 / p3.coerceAtLeast(1))
+            type.contains("matrix") -> (p2 / p3.coerceAtLeast(1)) to (p1 * p3)
+            type.startsWith("window") -> maxOf(p1, p3) to p2
+            type.startsWith("tree") -> p1 to p2
+            else -> p1 to p2
+        }
+        return XlPlace(x, y, sx, sy, f("X2"), f("Y2"), points, gw.coerceAtLeast(1), gh.coerceAtLeast(1))
     }
 
     /** A custom grid: "CustomModel" rows split by ';', cells by ',' (layers by '|'), or the compressed "node,row,col[,layer];…" form. */
