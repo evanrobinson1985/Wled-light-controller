@@ -4,7 +4,6 @@ package com.wledcontroller.app.ui.screens
 
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -113,7 +112,7 @@ fun Model3DScreen(onBack: () -> Unit, onScan: () -> Unit = {}) {
         meshVersion++
     }
 
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val importer = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             busy = "Importing the scan…"; message = null
             runCatching { container.models.importScan(uri) }
@@ -713,7 +712,7 @@ private fun BuildFromPhotos(map: HouseMap, existing: House3D?, onBuilt: (House3D
     var sizeKey by remember { mutableIntStateOf(0) }
     val inches = map.useInches
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    val picker = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         val f = pickFor
         if (uri != null && f != null) scope.launch {
             runCatching { container.models.keepPhoto(uri) }
@@ -776,7 +775,7 @@ private fun BuildFromPhotos(map: HouseMap, existing: House3D?, onBuilt: (House3D
                 if (Shell.hasGable(spec, face))
                     Text("Gable end: mark the corners of the rectangular wall; the triangle above comes from the photo.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { pickFor = face; picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text(if (fp == null) "Choose photo" else "Change photo") }
+                    OutlinedButton(onClick = { pickFor = face; picker.launch(arrayOf("image/*")) }) { Text(if (fp == null) "Choose photo" else "Change photo") }
                     val housePhoto = map.photoPath
                     if (face == Face.FRONT && housePhoto != null && fp?.path != housePhoto)
                         OutlinedButton(onClick = { faces[face] = FacePhoto(face, housePhoto, emptyList(), map.aspect); cornersFor = face }) { Text("Use my house photo") }

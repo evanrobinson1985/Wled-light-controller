@@ -82,7 +82,7 @@ fun LayoutsDialog(map: HouseMap, onDismiss: () -> Unit, onOpen: (HouseMap) -> Un
             }.fold({ "Saved ${l.name} to a file." }, { "Couldn't save the file: ${it.message}" })
         }
     }
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val importer = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             note = runCatching {
                 withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { library.importLayout(it) } }
@@ -117,7 +117,7 @@ fun LayoutsDialog(map: HouseMap, onDismiss: () -> Unit, onOpen: (HouseMap) -> Un
                             }
                         },
                     ) { Icon(Icons.Filled.Save, null); Spacer(Modifier.width(6.dp)); Text("Save") }
-                    OutlinedButton(onClick = { importer.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }) {
+                    OutlinedButton(onClick = { importer.launch(arrayOf("*/*")) }) {
                         Icon(Icons.Filled.FileOpen, null); Spacer(Modifier.width(6.dp)); Text("From file")
                     }
                 }
@@ -213,7 +213,7 @@ fun ModelsDialog(onDismiss: () -> Unit, onUse: (SavedModel) -> Unit) {
     }
     val jsonExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> writeTo(uri, library::modelFile) }
     val xmodelExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri -> writeTo(uri) { SavedModel.toXmodel(it) } }
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val importer = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             note = runCatching {
                 val text = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() } }

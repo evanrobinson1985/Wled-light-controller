@@ -9,8 +9,8 @@ import com.wledcontroller.app.house.allSubmodels
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material.icons.automirrored.filled.ShowChart
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import com.wledcontroller.app.ui.components.displayName
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Path
@@ -188,7 +188,7 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
     val context = androidx.compose.ui.platform.LocalContext.current
     val controllers by container.devices.list.collectAsStateWithLifecycle()
     val importer = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+        com.wledcontroller.app.ui.components.PickFile()
     ) { uri ->
         if (uri != null) scope.launch {
             importError = null
@@ -212,12 +212,12 @@ fun ShowsScreen(onBack: () -> Unit, onOpen: (String) -> Unit, onEditMap: () -> U
     // An xLights .xsq waiting for its models to be matched to the house.
     var xsqPending by remember { mutableStateOf<Pair<com.wledcontroller.app.show.XsqSequence, String>?>(null) }
     val xsqImporter = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+        com.wledcontroller.app.ui.components.PickFile()
     ) { uri ->
         if (uri != null) scope.launch {
             importError = null
             runCatching {
-                val name = uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':')?.removeSuffix(".xsq") ?: "xLights sequence"
+                val name = uri.displayName(context)?.removeSuffix(".xsq")?.removeSuffix(".XSQ") ?: "xLights sequence"
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)!!.use { com.wledcontroller.app.show.XsqImport.parse(it) }
                 } to name
@@ -1374,7 +1374,7 @@ private fun ClipInspector(
     if (sketching) SketchDialog(clip.sketch, onDismiss = { sketching = false }) { onChange(clip.copy(sketch = it)); sketching = false }
     var videoError by remember { mutableStateOf<String?>(null) }
     var gledSize by remember { mutableStateOf(32 to 16) }
-    val pickGled = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val pickGled = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) container.scope.launch {
             videoError = null
             runCatching { container.sequences.importGlediator(context, uri, gledSize.first, gledSize.second) }
@@ -1382,7 +1382,7 @@ private fun ClipInspector(
                 .onFailure { videoError = it.message ?: "Couldn't read that recording." }
         }
     }
-    val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    val pickVideo = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) container.scope.launch {
             videoProgress = 0f; videoError = null
             runCatching { container.sequences.importVideo(context, uri) { videoProgress = it } }
@@ -1391,7 +1391,7 @@ private fun ClipInspector(
             videoProgress = null
         }
     }
-    val pickPicture = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    val pickPicture = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             runCatching { container.sequences.importPicture(context, uri) }.onSuccess { onChange(clip.copy(imageFile = it)) }
         }
@@ -1437,7 +1437,7 @@ private fun ClipInspector(
                 supportingText = { Text("Scrolls across the lights at the speed below (speed 0 holds it still). Size sets how tall it is.") },
             )
             clip.effect == SeqEffect.PICTURE -> Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = { pickPicture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                OutlinedButton(onClick = { pickPicture.launch(arrayOf("image/*")) }) {
                     Text(if (clip.imageFile == null) "Choose picture" else "Change picture")
                 }
                 Spacer(Modifier.width(8.dp))
@@ -1509,7 +1509,7 @@ private fun ClipInspector(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(
                         enabled = videoProgress == null,
-                        onClick = { pickVideo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                        onClick = { pickVideo.launch(arrayOf("video/*")) },
                     ) { Text(if (clip.videoFile == null) "Choose video" else "Change video") }
                     Spacer(Modifier.width(8.dp))
                     Text(
@@ -1818,7 +1818,7 @@ internal fun MusicSheet(
     var colors by remember { mutableStateOf(themes.first().colors) }
 
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+        com.wledcontroller.app.ui.components.PickFile()
     ) { uri ->
         if (uri != null) scope.launch {
             busy = "Importing song…"; error = null

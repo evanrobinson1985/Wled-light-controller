@@ -142,7 +142,7 @@ internal fun FseqShowEditor(initial: Sequence, onBack: () -> Unit) {
 
     var showMusic by remember { mutableStateOf(false) }
     var networksMessage by remember { mutableStateOf<String?>(null) }
-    val networksPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val networksPicker = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching { context.contentResolver.openInputStream(uri)!!.use { XlightsNetworks.parse(it) } }

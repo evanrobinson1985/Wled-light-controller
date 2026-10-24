@@ -76,7 +76,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTe
             busy = null
         }
     }
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val importer = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) confirmRestore = uri
     }
 
@@ -153,7 +153,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTe
                         Button(onClick = { exporter.launch("wled-controller-backup-${LocalDate.now()}.zip") }, enabled = busy == null) {
                             Icon(Icons.Filled.Save, null); Spacer(Modifier.width(8.dp)); Text("Back up")
                         }
-                        OutlinedButton(onClick = { importer.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }, enabled = busy == null) {
+                        OutlinedButton(onClick = { importer.launch(arrayOf("*/*")) }, enabled = busy == null) {
                             Icon(Icons.Filled.Restore, null); Spacer(Modifier.width(8.dp)); Text("Restore")
                         }
                     }

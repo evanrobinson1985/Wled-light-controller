@@ -11,7 +11,6 @@ import android.Manifest
 import android.graphics.BitmapFactory
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -604,14 +603,14 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
     fun keepUndo() { adjustUndo += adjustPoints.toList() to adjustHidden.toList(); if (adjustUndo.size > 50) adjustUndo.removeAt(0) }
     var placingLed by remember { mutableStateOf<Int?>(null) }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    val picker = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             runCatching { container.house.importPhoto(uri) }
                 .onSuccess { (path, aspect) -> container.store.updateHouseMap { it.copy(photoPath = path, aspect = aspect) } }
                 .onFailure { importError = it.message }
         }
     }
-    fun pickPhoto() = picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    fun pickPhoto() = picker.launch(arrayOf("image/*"))
 
     // Importing props from xLights: one model (.xmodel) or a whole layout (xlights_rgbeffects.xml).
     val context = LocalContext.current
@@ -666,7 +665,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
             )
         }.onFailure { importError = it.message ?: "Couldn't read that model." }
     }
-    val xmodelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val xmodelPicker = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             importError = null
             runCatching {
@@ -674,7 +673,7 @@ fun HouseMapEditor(onBack: () -> Unit, onScan: () -> Unit, onControllers: () -> 
             }.onSuccess { importModelXml(it, null) }.onFailure { importError = it.message ?: "Couldn't read that model." }
         }
     }
-    val layoutPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val layoutPicker = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             importError = null
             runCatching {

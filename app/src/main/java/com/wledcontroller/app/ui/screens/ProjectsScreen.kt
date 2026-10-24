@@ -68,7 +68,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
     var deleting by remember { mutableStateOf<ProjectInfo?>(null) }
     var peeked by remember { mutableStateOf<XlightsPackage.Peek?>(null) }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val picker = rememberLauncherForActivityResult(com.wledcontroller.app.ui.components.PickFile()) { uri ->
         if (uri != null) scope.launch {
             busy = "Unpacking…"; message = null
             runCatching { container.xlightsPackage.peek(uri) }
@@ -139,7 +139,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
                 }
             }
 
-            Button(onClick = { picker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { picker.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.FolderZip, null)
                 Text("  Open xLights package (.zip)")
             }
