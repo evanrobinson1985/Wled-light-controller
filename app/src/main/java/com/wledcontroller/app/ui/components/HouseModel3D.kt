@@ -70,6 +70,8 @@ fun HouseModelView(
     onLasso: ((List<Pair<Float, Float>>, Camera, Float) -> Unit)? = null,
     /** A stroke or loop given up (a second finger came down to turn the model). */
     onPaintCancel: (() -> Unit)? = null,
+    /** While cropping: what's outside this box shows red. */
+    cropBox: Pair<P3, P3>? = null,
 ) {
     // Finding the spot tapped on a big scan takes a moment: done off the screen's thread.
     val tapScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -84,6 +86,7 @@ fun HouseModelView(
             v.setModel(mesh, textures)
             v.brightness = brightness
             v.fixedCamera = fixedCamera
+            v.cropBox = cropBox
             v.setLights(lights, colors)
             v.onPaint = when {
                 onLasso != null -> { x: Float, y: Float, end: Boolean ->

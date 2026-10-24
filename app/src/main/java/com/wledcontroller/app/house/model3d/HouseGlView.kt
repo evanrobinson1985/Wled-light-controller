@@ -39,6 +39,10 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
     @Volatile var fixedCamera: Camera? = null
         set(v) { field = v; requestRender() }
 
+    /** While cropping: everything outside this box is shown red, as what would be cut off. */
+    @Volatile var cropBox: Pair<P3, P3>? = null
+        set(v) { field = v; requestRender() }
+
     /** How bright the house itself is: low for night-time previews, full for editing. */
     @Volatile var brightness = 0.35f
         set(v) { field = v; requestRender() }
@@ -250,6 +254,12 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
             GLES30.glUseProgram(meshProg)
             GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(meshProg, "uMvp"), 1, false, mvp, 0)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(meshProg, "uBright"), brightness)
+            val crop = cropBox
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(meshProg, "uCrop"), if (crop != null) 1 else 0)
+            if (crop != null) {
+                GLES30.glUniform3f(GLES30.glGetUniformLocation(meshProg, "uCropLo"), crop.first.x, crop.first.y, crop.first.z)
+                GLES30.glUniform3f(GLES30.glGetUniformLocation(meshProg, "uCropHi"), crop.second.x, crop.second.y, crop.second.z)
+            }
             val uTex = GLES30.glGetUniformLocation(meshProg, "uMode")
             val uColor = GLES30.glGetUniformLocation(meshProg, "uColor")
             for (p in parts) {
@@ -316,12 +326,17 @@ layout(location = 3) in vec3 aColor;
 uniform mat4 uMvp;
 out vec2 vUv;
 out vec3 vColor;
-void main() { vUv = aUv; vColor = aColor; gl_Position = uMvp * vec4(aPos, 1.0); }
+out vec3 vPos;
+void main() { vUv = aUv; vColor = aColor; vPos = aPos; gl_Position = uMvp * vec4(aPos, 1.0); }
 """
         private const val MESH_FS = """#version 300 es
 precision mediump float;
 in vec2 vUv;
 in vec3 vColor;
+in vec3 vPos;
+uniform int uCrop;
+uniform vec3 uCropLo;
+uniform vec3 uCropHi;
 uniform sampler2D uTex;
 uniform int uMode;
 uniform vec3 uColor;
@@ -329,6 +344,8 @@ uniform float uBright;
 out vec4 frag;
 void main() {
     vec3 c = uMode == 1 ? texture(uTex, vUv).rgb : (uMode == 2 ? vColor : uColor);
+    // What a crop would cut off: red.
+    if (uCrop == 1 && (any(lessThan(vPos, uCropLo)) || any(greaterThan(vPos, uCropHi)))) c = mix(c, vec3(1.0, 0.08, 0.08), 0.75);
     frag = vec4(c * uBright, 1.0);
 }
 """

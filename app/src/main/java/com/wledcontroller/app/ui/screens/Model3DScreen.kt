@@ -385,7 +385,7 @@ private fun ModelEditor(
             else "Erase: paint over what you don't want with one finger. Two fingers turn the model; pinch to zoom.",
             style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
         )
-        editTool == "crop" -> Text("Crop: move the sliders until the yellow box holds just what you want to keep. Drag to turn the model to check.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        editTool == "crop" -> Text("Crop: move the sliders until just what you want to keep is left. Anything shown red will be cut off. Drag to turn the model to check.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         picking -> Text("Tap the front wall's ${CORNER_NAMES[picked.size.coerceAtMost(3)]} corner on the model (${picked.size}/4). Drag to turn the model, pinch to zoom.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         traceRun != null -> Text("Tracing \"${traceRun.name}\": tap along where its lights go on the model, starting at its first light. ${draft.size} point${if (draft.size == 1) "" else "s"}.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         checking -> Text("Your house photo over the model, from where it was taken. The two should match.", style = MaterialTheme.typography.bodySmall)
@@ -429,6 +429,7 @@ private fun ModelEditor(
                 else -> null
             },
             onPaintCancel = { stroke.clear() },
+            cropBox = if (editTool == "crop") cropBox() else null,
             onLasso = if (editTool == "erase" && eraseLoop && !editBusy) { { loop, cam, aspect ->
                 commit(
                     model.edits + com.wledcontroller.app.house.model3d.MeshEdit.Lasso(cam, aspect, loop.map { it.first }, loop.map { it.second }, eraseThrough),
