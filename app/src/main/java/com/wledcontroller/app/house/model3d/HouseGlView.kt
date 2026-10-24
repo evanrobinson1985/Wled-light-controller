@@ -227,6 +227,8 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
         override fun onDrawFrame(gl: GL10?) {
             pending?.let { (m, f) -> pending = null; upload(m, f) }
             GLES30.glClearColor(0.043f, 0.05f, 0.07f, 1f)
+            // Depth writing must be on for the clear to wipe the depth: the lights turn it off.
+            GLES30.glDepthMask(true)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
             val aspect = w.toFloat() / h
             val cam = camera(aspect)
@@ -283,6 +285,8 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
             GLES30.glDrawArrays(GLES30.GL_POINTS, 0, n)
             GLES30.glDisableVertexAttribArray(2)
             buf.position(0)
+            GLES30.glDepthMask(true)
+            GLES30.glDisable(GLES30.GL_BLEND)
         }
 
         private fun program(vs: String, fs: String): Int {
