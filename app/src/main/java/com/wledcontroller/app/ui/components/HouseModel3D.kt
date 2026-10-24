@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -197,7 +199,8 @@ fun CornerPicker(path: String, aspect: Float, title: String, initial: List<MapPo
                 "Drag each dot onto its corner of the wall: where the wall meets the ground and the roof's edge.",
                 style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.75f),
             )
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            // The photo takes the room it needs (up to what's left), with the buttons right under it.
+            Box(Modifier.weight(1f, fill = false).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Box(Modifier.fillMaxWidth().aspectRatio(aspect.coerceIn(0.2f, 5f))) {
                     image?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds) }
                     Canvas(
@@ -232,9 +235,9 @@ fun CornerPicker(path: String, aspect: Float, title: String, initial: List<MapPo
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onCancel) { Text("Cancel") }
-                TextButton(onClick = { onDone(pts.toList()) }) { Text("Done") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
+                OutlinedButton(onClick = onCancel) { Text("Cancel") }
+                Button(onClick = { onDone(pts.toList()) }) { Text("Done") }
             }
         }
     }
