@@ -490,7 +490,12 @@ private fun ModelEditor(
                     androidx.compose.material3.RangeSlider(value = value, onValueChange = set, valueRange = 0f..1f)
                 }
                 Range("Left to right", cropX, lo.x, hi.x) { cropX = it }
-                Range("Ground to top (raise the bottom to cut off the lawn)", cropY, lo.y, hi.y) { cropY = it }
+                // Height as two plain sliders, each doing what it says.
+                val (bottom, top) = along(cropY, lo.y, hi.y)
+                Text("Raise the bottom: ${formatLength((bottom - lo.y) * 100, map.useInches)} cut off (slide right to cut off the lawn)", style = MaterialTheme.typography.labelSmall)
+                Slider(value = cropY.start, onValueChange = { v -> cropY = v.coerceAtMost(cropY.endInclusive - 0.02f)..cropY.endInclusive })
+                Text("Lower the top: ${formatLength((hi.y - top) * 100, map.useInches)} cut off", style = MaterialTheme.typography.labelSmall)
+                Slider(value = 1f - cropY.endInclusive, onValueChange = { v -> cropY = cropY.start..(1f - v).coerceAtLeast(cropY.start + 0.02f) })
                 Range("Back to front", cropZ, lo.z, hi.z) { cropZ = it }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
