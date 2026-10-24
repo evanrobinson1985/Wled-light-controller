@@ -104,28 +104,28 @@ object Led3D {
             if (t != null) out[i] = t.getOrNull(l.orderInRun) else fromPhoto += i
         }
         val cam = model.lineup ?: return out.toList()
-        val rawHits = mesh.castFrom(cam, map.aspect, fromPhoto.map { leds[it].x to leds[it].y })
-        // A string hangs on one surface: each light's depth is steadied against its neighbours',
-        // so a ray slipping through a hole in the scan or catching a stray bit doesn't pull it off.
-        val hits = arrayOfNulls<P3>(fromPhoto.size)
-        fromPhoto.indices.groupBy { leds[fromPhoto[it]].runIndex }.values.forEach { ks ->
-            val inRun = ks.sortedBy { leds[fromPhoto[it]].orderInRun }
-            val depths = steadyDepths(inRun.map { k -> rawHits[k]?.let { (it - cam.eye).length } })
-            inRun.forEachIndexed { j, k ->
-                val l = leds[fromPhoto[k]]
-                hits[k] = depths[j]?.let { t -> cam.eye + cam.ray(l.x, l.y, map.aspect) * t }
-            }
-        }
+        val hits = mesh.castFrom(cam, map.aspect, fromPhoto.map { leds[it].x to leds[it].y })
         val plane = model.lineupModel?.takeIf { it.size >= 3 }
         val normal = plane?.let { ((it[1] - it[0]) cross (it[3 % it.size] - it[0])).normalized() }
+        val dirs = fromPhoto.map { i -> cam.ray(leds[i].x, leds[i].y, map.aspect) }
+        // How far along its ray each light is: where it meets the model, or (missed) the wall's plane.
+        val raw = fromPhoto.indices.map { k ->
+            hits[k]?.let { (it - cam.eye).length } ?: if (plane != null && normal != null) {
+                val denom = dirs[k] dot normal
+                if (kotlin.math.abs(denom) > 1e-4f) (((plane[0] - cam.eye) dot normal) / denom).takeIf { it > 0f } else null
+            } else null
+        }
+        // A string hangs on one surface: each light's distance is steadied against its neighbours',
+        // so a ray slipping through a hole in the scan or catching a stray bit doesn't pull it off.
+        val depthAt = arrayOfNulls<Float>(fromPhoto.size)
+        fromPhoto.indices.groupBy { leds[fromPhoto[it]].runIndex }.values.forEach { ks ->
+            val inRun = ks.sortedBy { leds[fromPhoto[it]].orderInRun }
+            steadyDepths(inRun.map { raw[it] }).forEachIndexed { j, t -> depthAt[inRun[j]] = t }
+        }
         fromPhoto.forEachIndexed { k, i ->
             val l = leds[i]
-            val dir = cam.ray(l.x, l.y, map.aspect)
-            // Missed the model: onto the wall's plane.
-            var p = hits[k] ?: if (plane != null && normal != null) {
-                val denom = dir dot normal
-                if (kotlin.math.abs(denom) > 1e-4f) cam.eye + dir * (((plane[0] - cam.eye) dot normal) / denom) else null
-            } else null
+            val dir = dirs[k]
+            var p = depthAt[k]?.let { cam.eye + dir * it }
             val depth = (map.runs.getOrNull(l.runIndex)?.depthCm ?: 0f) / 100f
             if (p != null && depth > 0f && model.kind == House3D.Kind.PHOTOS && normal != null) {
                 // Toward the camera until it's that far out from the wall.
@@ -138,8 +138,8 @@ object Led3D {
 
     /**
      * Steadies the distances to a run's lights (in order along it; null where the model was
-     * missed): each one goes to its neighbourhood's distance, leaning to the nearer surface (lights
-     * hang on the front of things), unless it's already close to that. Misses get it too.
+     * missed): one far from its neighbourhood's distance goes to it, leaning to the nearer surface
+     * (lights hang on the front of things). Misses get it too.
      */
     fun steadyDepths(depths: List<Float?>, near: Float = 0.35f): List<Float?> {
         val all = depths.withIndex().mapNotNull { (j, d) -> d?.let { j to it } }
@@ -158,9 +158,10 @@ object Led3D {
             }
             val slope = if (slopes.isEmpty()) 0f else slopes.sorted()[slopes.size / 2]
             val atI = pool.map { (j, d) -> d - slope * (j - i) }.sorted()
-            val typical = atI[((atI.size - 1) * near).toInt()]
+            val middle = atI[atI.size / 2]
             val d = depths[i]
-            if (d != null && kotlin.math.abs(d - typical) <= maxOf(0.25f, typical * 0.04f)) d else typical
+            if (d != null && kotlin.math.abs(d - middle) <= maxOf(0.25f, middle * 0.04f)) d
+            else atI[((atI.size - 1) * near).toInt()]
         }
     }
 
