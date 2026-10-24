@@ -104,7 +104,18 @@ object Led3D {
             if (t != null) out[i] = t.getOrNull(l.orderInRun) else fromPhoto += i
         }
         val cam = model.lineup ?: return out.toList()
-        val hits = mesh.castFrom(cam, map.aspect, fromPhoto.map { leds[it].x to leds[it].y })
+        val rawHits = mesh.castFrom(cam, map.aspect, fromPhoto.map { leds[it].x to leds[it].y })
+        // A string hangs on one surface: each light's depth is steadied against its neighbours',
+        // so a ray slipping through a hole in the scan or catching a stray bit doesn't pull it off.
+        val hits = arrayOfNulls<P3>(fromPhoto.size)
+        fromPhoto.indices.groupBy { leds[fromPhoto[it]].runIndex }.values.forEach { ks ->
+            val inRun = ks.sortedBy { leds[fromPhoto[it]].orderInRun }
+            val depths = steadyDepths(inRun.map { k -> rawHits[k]?.let { (it - cam.eye).length } })
+            inRun.forEachIndexed { j, k ->
+                val l = leds[fromPhoto[k]]
+                hits[k] = depths[j]?.let { t -> cam.eye + cam.ray(l.x, l.y, map.aspect) * t }
+            }
+        }
         val plane = model.lineupModel?.takeIf { it.size >= 3 }
         val normal = plane?.let { ((it[1] - it[0]) cross (it[3 % it.size] - it[0])).normalized() }
         fromPhoto.forEachIndexed { k, i ->
@@ -123,6 +134,34 @@ object Led3D {
             out[i] = p
         }
         return out.toList()
+    }
+
+    /**
+     * Steadies the distances to a run's lights (in order along it; null where the model was
+     * missed): each one goes to its neighbourhood's distance, leaning to the nearer surface (lights
+     * hang on the front of things), unless it's already close to that. Misses get it too.
+     */
+    fun steadyDepths(depths: List<Float?>, near: Float = 0.35f): List<Float?> {
+        val all = depths.withIndex().mapNotNull { (j, d) -> d?.let { j to it } }
+        if (all.isEmpty()) return depths
+        val half = 10
+        return depths.indices.map { i ->
+            val around = (maxOf(0, i - half)..minOf(depths.lastIndex, i + half)).mapNotNull { j -> depths[j]?.let { j to it } }
+            // Too few hits nearby to judge: the whole run's.
+            val pool = if (around.size >= 3) around else all.takeIf { it.size <= 4 * half } ?: all.filterIndexed { k, _ -> k % (all.size / (4 * half) + 1) == 0 }
+            // The string may run away from the camera (along the side of the house): follow its
+            // slope (the middle of the slopes between pairs, which stray hits barely move).
+            val slopes = ArrayList<Float>()
+            for (a in pool.indices) for (b in a + 1 until pool.size) {
+                val (ja, da) = pool[a]; val (jb, db) = pool[b]
+                slopes += (db - da) / (jb - ja)
+            }
+            val slope = if (slopes.isEmpty()) 0f else slopes.sorted()[slopes.size / 2]
+            val atI = pool.map { (j, d) -> d - slope * (j - i) }.sorted()
+            val typical = atI[((atI.size - 1) * near).toInt()]
+            val d = depths[i]
+            if (d != null && kotlin.math.abs(d - typical) <= maxOf(0.25f, typical * 0.04f)) d else typical
+        }
     }
 
     /** [run]'s LEDs along a line traced on the model: every [LightRun.spacingCm], or spread end to end. */
