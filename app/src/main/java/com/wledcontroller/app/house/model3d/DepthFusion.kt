@@ -46,7 +46,9 @@ object DepthFusion {
                 trust[k] = Math.pow(cf / 255.0, 1.2).toFloat()
             } else if (smooth != null) {
                 val sm = smooth[((r * sh / dh).coerceIn(0, sh - 1)) * sw + (c * sw / dw).coerceIn(0, sw - 1)].toInt() and 0xFFFF
-                if (sm in NEAR_MM..FAR_MM) { depth[k] = sm / 1000f; trust[k] = FILL_TRUST }
+                // Only between real measurements of about that distance: the smoothed depth also
+                // guesses one for open sky, which isn't anything.
+                if (sm in NEAR_MM..FAR_MM && supported(raw, conf, dw, dh, c, r, sm / 1000f)) { depth[k] = sm / 1000f; trust[k] = FILL_TRUST }
             }
         }
         val s = split.coerceIn(1, 4)
@@ -72,6 +74,12 @@ object DepthFusion {
             val facing = abs(normal dot p.normalized())
             if (facing < 0.2f) continue
             val col = color(c, r)
+            // Blue sky above the horizon, measured only weakly: the sensor's noise, not a surface.
+            if (trust[k] < SURE_TRUST && skyLike(col)) {
+                val len = p.length
+                val up = (pose[1] * p.x + pose[5] * p.y + pose[9] * p.z) / len
+                if (up > 0.14f) continue
+            }
             // Depth changes this much per pixel across and down (toward the neighbours used above).
             val dzc = (za - z) * (if (cn > c) 1f else -1f); val dzr = (zb - z) * (if (rn > r) 1f else -1f)
             for (i in 0 until s) for (j in 0 until s) {
@@ -91,6 +99,26 @@ object DepthFusion {
         }
         val median = if (count == 0) 0f else seen.copyOf(count).also { it.sort() }[count / 2]
         return Result(pts, cols, wts, count, median)
+    }
+
+    /** Trust of a confident measurement (confidence about 100 of 255) and up. */
+    private const val SURE_TRUST = 0.32f
+
+    /** Whether a confident measurement of about [z] metres is within a few pixels of (c, r). */
+    private fun supported(raw: ShortArray, conf: ByteArray, dw: Int, dh: Int, c: Int, r: Int, z: Float): Boolean {
+        val tol = 0.15f + 0.08f * z
+        for (y in maxOf(0, r - 3)..minOf(dh - 1, r + 3)) for (x in maxOf(0, c - 3)..minOf(dw - 1, c + 3)) {
+            val k = y * dw + x
+            val mm = raw[k].toInt() and 0xFFFF
+            if (mm in NEAR_MM..FAR_MM && (conf[k].toInt() and 0xFF) >= 15 && abs(mm / 1000f - z) < tol) return true
+        }
+        return false
+    }
+
+    /** A clear-sky colour: bright and plainly blue. */
+    fun skyLike(argb: Int): Boolean {
+        val r = (argb shr 16) and 0xFF; val g = (argb shr 8) and 0xFF; val b = argb and 0xFF
+        return b > 110 && b > r + 25 && b >= g
     }
 
     /** What to tell the person scanning, from how far away things mostly are. */

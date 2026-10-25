@@ -221,8 +221,8 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
         vol.integrate(P3(m[12], m[13], m[14]), fused.points, fused.colors, fused.weights, fused.count)
         if (wantPhoto(m)) runCatching { keepPhoto(v) }
         val views = _status.value.views + 1
-        if (views % 6 == 1 || refreshPreview) { refreshPreview = false; preview = vol.surfacePoints(160_000, quality = showQuality) }
-        val area = (preview?.second?.size ?: 0) * vol.voxel * vol.voxel
+        if (views % 6 == 1 || refreshPreview) { refreshPreview = false; preview = vol.surfacePoints(200_000, quality = showQuality) }
+        val area = vol.surfaceCount * vol.voxel * vol.voxel
         val hint = if (vol.full) "Memory's full: this scan can't take in any more. Go over what's already scanned if you like, then finish — everything so far is kept. (Standard detail covers more.)"
             else DepthFusion.distanceHint(fused.medianM)
             ?: if (showQuality) "Scanning — go back over red and yellow until it's green. Walk slowly, sweeping up to the roof edge and down to the ground."

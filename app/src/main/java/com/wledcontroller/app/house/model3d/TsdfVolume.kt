@@ -104,19 +104,27 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
         return if (b.count(k) != 0) b.rgb(k) else null
     }
 
+    /** How many cubes are on the surface (as of the last [surfacePoints]). */
+    @Volatile var surfaceCount = 0
+        private set
+
     /**
      * Points on the surface so far, for showing progress: x, y, z each, and their colours — or
-     * with [quality], how well each is scanned: red thin, yellow fair, green solid.
+     * with [quality], how well each is scanned: red thin, yellow fair, green solid. A big scan
+     * has more than [max]: every so many is shown, spread over all of it (not just the first).
      */
     @Synchronized
     fun surfacePoints(max: Int, quality: Boolean = false): Pair<FloatArray, IntArray> {
         val pts = FloatArray(max * 3); val cols = IntArray(max)
-        var n = 0
-        loop@ for ((key, b) in blocks) {
+        // Every stride-th, from how many there were last time (it grows slowly between calls).
+        val stride = maxOf(1, (surfaceCount + max - 1) / max)
+        var n = 0; var seen = 0
+        for ((key, b) in blocks) {
             val bx = unpack(key, 42) shl SHIFT; val by = unpack(key, 21) shl SHIFT; val bz = unpack(key, 0) shl SHIFT
             for (k in 0 until N3) {
                 if (b.weight(k) < MIN_WEIGHT || abs(b.sdf(k)) > 0.25f || b.count(k) == 0) continue
-                if (n >= max) break@loop
+                seen++
+                if (seen % stride != 0 || n >= max) continue
                 val x = k % N; val y = (k / N) % N; val z = k / (N * N)
                 pts[n * 3] = (bx + x + 0.5f) * voxel; pts[n * 3 + 1] = (by + y + 0.5f) * voxel; pts[n * 3 + 2] = (bz + z + 0.5f) * voxel
                 cols[n] = if (!quality) b.rgb(k) else when {
@@ -127,6 +135,7 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
                 n++
             }
         }
+        surfaceCount = seen
         return pts.copyOf(n * 3) to cols.copyOf(n)
     }
 
