@@ -70,4 +70,16 @@ class TsdfVolumeTest {
         v.integrate(P3(0f, 0f, 0f), floatArrayOf(0f, 0f, -5f), intArrayOf(0xFFFFFF), floatArrayOf(1f), 1)
         assertEquals(0, v.extract().triangleCount)
     }
+
+    @Test
+    fun aFullScanStopsGrowingInsteadOfRunningOutOfMemory() {
+        val v = TsdfVolume(voxel = 0.03f, truncation = 0.1f).apply { maxBlocks = 50 }
+        val n = 4000
+        val pts = FloatArray(n * 3); val cols = IntArray(n) { 0xFFFFFF }; val wts = FloatArray(n) { 1f }
+        val r = Random(1)
+        for (i in 0 until n) { pts[i * 3] = r.nextFloat() * 20f - 10f; pts[i * 3 + 1] = r.nextFloat() * 5f; pts[i * 3 + 2] = -5f }
+        v.integrate(P3(0f, 2f, 5f), pts, cols, wts, n)
+        assertEquals(50, v.blockCount)
+        assertTrue(v.full)
+    }
 }

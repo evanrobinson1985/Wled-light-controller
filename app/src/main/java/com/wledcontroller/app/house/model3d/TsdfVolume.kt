@@ -11,15 +11,34 @@ import kotlin.math.sqrt
  * where that distance crosses zero. Only cubes near a surface are kept, in blocks.
  */
 class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
+    /**
+     * One 8 × 8 × 8 block of cubes, packed small so big scans fit in memory: the distance and
+     * how much it's trusted as fixed-point numbers, and each colour with how many views gave it
+     * in its top byte.
+     */
     private class Block {
-        val sdf = FloatArray(N3) { 1f }
-        val weight = FloatArray(N3)
-        val rgb = IntArray(N3)
-        val colorCount = ByteArray(N3)
+        val sdfQ = ShortArray(N3) { Short.MAX_VALUE }
+        val weightQ = ShortArray(N3)
+        val rgbc = IntArray(N3)
+        fun sdf(k: Int) = sdfQ[k] / 32767f
+        fun weight(k: Int) = (weightQ[k].toInt() and 0xFFFF) / WEIGHT_STEPS
+        fun count(k: Int) = rgbc[k] ushr 24
+        fun rgb(k: Int) = rgbc[k] and 0xFFFFFF
+        fun set(k: Int, sdf: Float, weight: Float) {
+            sdfQ[k] = (sdf.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            weightQ[k] = (weight * WEIGHT_STEPS).toInt().coerceIn(0, 0xFFFF).toShort()
+        }
     }
 
     private val blocks = HashMap<Long, Block>()
     val blockCount get() = synchronized(this) { blocks.size }
+
+    /**
+     * The most blocks to keep (so a big scan can't run the phone out of memory). Once there are
+     * this many, places not seen yet are left out; [full] says so.
+     */
+    @Volatile var maxBlocks = Int.MAX_VALUE
+    val full get() = synchronized(this) { blocks.size >= maxBlocks }
 
     /** Measured points seen from [origin]: [points] x, y, z each; [colors] RGB; [weights] how much to trust each (0..1). */
     @Synchronized
@@ -37,12 +56,12 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
             while (t <= dist + truncation) {
                 val x = origin.x + ux * t; val y = origin.y + uy * t; val z = origin.z + uz * t
                 val ix = floor(x / voxel).toInt(); val iy = floor(y / voxel).toInt(); val iz = floor(z / voxel).toInt()
-                val b = block(ix, iy, iz, create = true)!!
+                val b = block(ix, iy, iz, create = blocks.size < maxBlocks)
+                if (b == null) { t += step; continue }
                 val k = local(ix, iy, iz)
                 val s = ((dist - t) / truncation).coerceIn(-1f, 1f)
-                val W = b.weight[k]
-                b.sdf[k] = (b.sdf[k] * W + s * w) / (W + w)
-                b.weight[k] = minOf(W + w, MAX_WEIGHT)
+                val W = b.weight(k)
+                b.set(k, (b.sdf(k) * W + s * w) / (W + w), minOf(W + w, MAX_WEIGHT))
                 if (abs(dist - t) < voxel * 1.5f) blendColor(b, k, c)
                 t += step
             }
@@ -50,13 +69,12 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
     }
 
     private fun blendColor(b: Block, k: Int, c: Int) {
-        val n = b.colorCount[k].toInt() and 0xFF
-        if (n == 0) { b.rgb[k] = c; b.colorCount[k] = 1; return }
+        val n = b.count(k)
+        if (n == 0) { b.rgbc[k] = (1 shl 24) or (c and 0xFFFFFF); return }
         val m = minOf(n, 30)
-        val o = b.rgb[k]
+        val o = b.rgb(k)
         fun mix(sh: Int) = ((((o shr sh) and 0xFF) * m + ((c shr sh) and 0xFF)) / (m + 1)) shl sh
-        b.rgb[k] = mix(16) or mix(8) or mix(0)
-        if (n < 255) b.colorCount[k] = (n + 1).toByte()
+        b.rgbc[k] = (minOf(n + 1, 255) shl 24) or mix(16) or mix(8) or mix(0)
     }
 
     // The last block looked up: most lookups are next to the one before.
@@ -77,13 +95,13 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
     private fun sdfAt(ix: Int, iy: Int, iz: Int): Float {
         val b = block(ix, iy, iz, false) ?: return Float.NaN
         val k = local(ix, iy, iz)
-        return if (b.weight[k] >= MIN_WEIGHT) b.sdf[k] else Float.NaN
+        return if (b.weight(k) >= MIN_WEIGHT) b.sdf(k) else Float.NaN
     }
 
     private fun colorAt(ix: Int, iy: Int, iz: Int): Int? {
         val b = block(ix, iy, iz, false) ?: return null
         val k = local(ix, iy, iz)
-        return if (b.colorCount[k].toInt() != 0) b.rgb[k] else null
+        return if (b.count(k) != 0) b.rgb(k) else null
     }
 
     /**
@@ -97,13 +115,13 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
         loop@ for ((key, b) in blocks) {
             val bx = unpack(key, 42) shl SHIFT; val by = unpack(key, 21) shl SHIFT; val bz = unpack(key, 0) shl SHIFT
             for (k in 0 until N3) {
-                if (b.weight[k] < MIN_WEIGHT || abs(b.sdf[k]) > 0.25f || b.colorCount[k].toInt() == 0) continue
+                if (b.weight(k) < MIN_WEIGHT || abs(b.sdf(k)) > 0.25f || b.count(k) == 0) continue
                 if (n >= max) break@loop
                 val x = k % N; val y = (k / N) % N; val z = k / (N * N)
                 pts[n * 3] = (bx + x + 0.5f) * voxel; pts[n * 3 + 1] = (by + y + 0.5f) * voxel; pts[n * 3 + 2] = (bz + z + 0.5f) * voxel
-                cols[n] = if (!quality) b.rgb[k] else when {
-                    b.weight[k] < 5f -> 0xFFFF3B30.toInt()
-                    b.weight[k] < 20f -> 0xFFFFCC00.toInt()
+                cols[n] = if (!quality) b.rgb(k) else when {
+                    b.weight(k) < 5f -> 0xFFFF3B30.toInt()
+                    b.weight(k) < 20f -> 0xFFFFCC00.toInt()
                     else -> 0xFF34C759.toInt()
                 }
                 n++
@@ -225,6 +243,10 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
         private const val MASK = N - 1
         private const val MAX_WEIGHT = 60f
         private const val MIN_WEIGHT = 0.4f
+        /** Trust is kept to a thousandth (up to [MAX_WEIGHT], within 16 bits). */
+        private const val WEIGHT_STEPS = 1000f
+        /** About how many bytes each block takes in memory. */
+        const val BLOCK_BYTES = N3 * 8 + 200
         private val EDGES = listOf(0 to 1, 2 to 3, 4 to 5, 6 to 7, 0 to 2, 1 to 3, 4 to 6, 5 to 7, 0 to 4, 1 to 5, 2 to 6, 3 to 7)
 
         private fun key(x: Int, y: Int, z: Int): Long =

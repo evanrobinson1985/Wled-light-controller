@@ -46,14 +46,20 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
     @Volatile var session: Session? = null
         private set
     /** The scan so far: 5 cm cubes, or 3 cm with [highDetail]. */
-    @Volatile var volume = TsdfVolume(voxel = 0.05f, truncation = 0.15f)
+    @Volatile var volume = newVolume(false)
         private set
     /** Finer detail (3 cm): more memory and work; can only be chosen before scanning starts. */
     @Volatile var highDetail = false
         set(v) {
             if (_status.value.views > 0 || v == field) return
             field = v
-            volume = if (v) TsdfVolume(voxel = 0.03f, truncation = 0.1f) else TsdfVolume(voxel = 0.05f, truncation = 0.15f)
+            volume = newVolume(v)
+        }
+
+    /** A fresh scan, kept to what memory allows (with room left to build the model at the end). */
+    private fun newVolume(high: Boolean) =
+        (if (high) TsdfVolume(voxel = 0.03f, truncation = 0.1f) else TsdfVolume(voxel = 0.05f, truncation = 0.15f)).apply {
+            maxBlocks = (Runtime.getRuntime().maxMemory() * 0.4 / TsdfVolume.BLOCK_BYTES).toInt().coerceAtLeast(2000)
         }
     /** The progress shown over the camera: how well each part's scanned (red, yellow, green), or its colours. */
     @Volatile var showQuality = true
@@ -216,7 +222,8 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
         val views = _status.value.views + 1
         if (views % 6 == 1 || refreshPreview) { refreshPreview = false; preview = vol.surfacePoints(160_000, quality = showQuality) }
         val area = (preview?.second?.size ?: 0) * vol.voxel * vol.voxel
-        val hint = DepthFusion.distanceHint(fused.medianM)
+        val hint = if (vol.full) "Memory's full: this scan can't take in any more. Go over what's already scanned if you like, then finish — everything so far is kept. (Standard detail covers more.)"
+            else DepthFusion.distanceHint(fused.medianM)
             ?: if (showQuality) "Scanning — go back over red and yellow until it's green. Walk slowly, sweeping up to the roof edge and down to the ground."
             else "Scanning — walk slowly along the house, sweeping up to the roof edge and down to the ground."
         _status.value = ScanStatus(true, hint, views, area, photos)
