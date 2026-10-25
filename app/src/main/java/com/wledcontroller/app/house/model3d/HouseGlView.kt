@@ -99,6 +99,24 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
 
     fun camera(aspect: Float): Camera = fixedCamera ?: Camera.orbit(target, yaw, pitch, dist)
 
+    // The first frame can be drawn before the screen shows the surface (it then stays blank until
+    // something changes): draw again once it's shown, and shortly after.
+    override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, w: Int, h: Int) {
+        super.surfaceChanged(holder, format, w, h)
+        redrawSoon()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        redrawSoon()
+    }
+
+    private fun redrawSoon() {
+        requestRender()
+        postDelayed({ requestRender() }, 120)
+        postDelayed({ requestRender() }, 500)
+    }
+
     // Gestures.
     private val scale = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(d: ScaleGestureDetector): Boolean {
@@ -256,7 +274,8 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
         }
 
         override fun onDrawFrame(gl: GL10?) {
-            pending?.let { (m, f) -> pending = null; upload(m, f) }
+            // The model has just gone up: draw once more, so it's on the screen even if nothing else changes.
+            pending?.let { (m, f) -> pending = null; upload(m, f); requestRender() }
             GLES30.glClearColor(0.043f, 0.05f, 0.07f, 1f)
             // Depth writing must be on for the clear to wipe the depth: the lights turn it off.
             GLES30.glDepthMask(true)
