@@ -83,17 +83,25 @@ fun HouseModelView(
     val tapScope = androidx.compose.runtime.rememberCoroutineScope()
     // The finger's path while painting or drawing a loop, shown as a bright line.
     val path = remember { mutableStateListOf<Offset>() }
+    // Just after the view appears, set it up again a few times (as a new effect would): its first
+    // frames can miss the screen, leaving the model blank until something changes.
+    var settle by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        for (wait in listOf(150L, 350L, 700L, 1500L)) { kotlinx.coroutines.delay(wait); settle++ }
+    }
     Box(modifier) {
     AndroidView(
         factory = { HouseGlView(it) },
         modifier = Modifier.fillMaxSize(),
         update = { v ->
+            v.tag = settle
             v.onPaintCancel = if (onPaint != null || onLasso != null) { { path.clear(); onPaintCancel?.invoke() } } else null
             v.setModel(mesh, textures)
             v.brightness = brightness
             v.fixedCamera = fixedCamera
             v.cropBox = cropBox
             v.setLights(lights, colors)
+            v.invalidate()
             val grabRadius = 36f * v.resources.displayMetrics.density
             v.grab = if (onHandleMove != null && handles.isNotEmpty()) { { x: Float, y: Float ->
                 val aspect = v.width.toFloat() / v.height.coerceAtLeast(1)
