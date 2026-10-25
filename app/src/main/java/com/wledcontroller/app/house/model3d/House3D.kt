@@ -40,7 +40,7 @@ data class House3D(
 
 /** One run's place on the model, saved with an exported model. */
 @Serializable
-data class SavedPlacement(val id: String, val name: String, val points3d: List<P3>)
+data class SavedPlacement(val id: String, val name: String, val points3d: List<P3>, val bends3d: List<Float>? = null)
 
 /**
  * Where the lights go on a model, saved inside an exported model file so loading it again puts
@@ -64,7 +64,7 @@ data class ModelLights(
             model3d = placed,
             runs = map.runs.map { r ->
                 val saved = runs.firstOrNull { it.id == r.id } ?: byName[r.name]?.singleOrNull()
-                r.copy(points3d = saved?.points3d)
+                r.copy(points3d = saved?.points3d, bends3d = saved?.bends3d)
             },
         )
     }
@@ -82,7 +82,7 @@ data class ModelLights(
     companion object {
         fun of(map: HouseMap, model: House3D) = ModelLights(
             model.lineup, model.lineupModel, model.lineupPhoto, map.aspect.takeIf { model.lineup != null },
-            map.runs.mapNotNull { r -> r.points3d?.let { SavedPlacement(r.id, r.name, it) } },
+            map.runs.mapNotNull { r -> r.points3d?.let { SavedPlacement(r.id, r.name, it, r.bends3d) } },
         )
     }
 }
@@ -168,7 +168,8 @@ object Led3D {
     /** [run]'s LEDs along a line traced on the model: every [LightRun.spacingCm], or spread end to end. */
     fun along(traced: List<P3>, run: LightRun): List<P3> {
         val n = run.count
-        val points = droop(traced, run.sag, run.hooksBetween)
+        // Bent by hand on the model, or else hung from hooks with the run's sag.
+        val points = if (run.bends3d?.any { it != 0f } == true) bent(traced, run.bends3d) else droop(traced, run.sag, run.hooksBetween)
         // Nothing traced yet (tracing has just started): no lights to show.
         if (n <= 0 || points.isEmpty()) return emptyList()
         if (points.size == 1 || n == 1) return List(n) { points[0] }
@@ -182,6 +183,37 @@ object Led3D {
             val f = if (segs[k] > 0f) d / segs[k] else 0f
             points[k] + (points[k + 1] - points[k]) * f
         }
+    }
+
+    /** [points] with each span bent by [bends] at its middle (down, or up when negative), as a smooth curve. */
+    fun bent(points: List<P3>, bends: List<Float>, steps: Int = 16): List<P3> {
+        if (points.size < 2) return points
+        val out = ArrayList<P3>()
+        points.zipWithNext().forEachIndexed { k, (a, b) ->
+            val d = bends.getOrNull(k) ?: 0f
+            val n = if (d != 0f) steps else 1
+            for (s in 0 until n) { val f = s / n.toFloat(); out += a + (b - a) * f - P3.UP * (4f * d * f * (1f - f)) }
+        }
+        out += points.last()
+        return out
+    }
+
+    /** Where the handle for bending the span from [a] to [b] sits: its middle, bent by [bend]. */
+    fun bendHandle(a: P3, b: P3, bend: Float): P3 = (a + b) * 0.5f - P3.UP * bend
+
+    /**
+     * The bend that puts the span's handle where a finger is: the point straight above or below
+     * the span's middle nearest the ray from [eye] along [dir]. Null when looking straight down.
+     */
+    fun bendToward(a: P3, b: P3, eye: P3, dir: P3): Float? {
+        val mid = (a + b) * 0.5f
+        val d = dir.normalized()
+        val w = mid - eye
+        val k = P3.UP dot d
+        val denom = 1f - k * k
+        if (denom < 1e-3f) return null
+        val s = (k * (d dot w) - (P3.UP dot w)) / denom
+        return -s
     }
 
     /** A line hung between hooks on the model: extra hooks put in, and each span drooping straight down by [sag] of its length. */

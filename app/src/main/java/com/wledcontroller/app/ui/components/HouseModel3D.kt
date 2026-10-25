@@ -75,6 +75,9 @@ fun HouseModelView(
     onPaintCancel: (() -> Unit)? = null,
     /** While cropping: what's outside this box shows red. */
     cropBox: Pair<P3, P3>? = null,
+    /** Spots that can be dragged (e.g. to bend a traced line); [onHandleMove] gets the handle and the ray to the finger. */
+    handles: List<P3> = emptyList(),
+    onHandleMove: ((Int, P3, P3) -> Unit)? = null,
 ) {
     // Finding the spot tapped on a big scan takes a moment: done off the screen's thread.
     val tapScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -91,6 +94,21 @@ fun HouseModelView(
             v.fixedCamera = fixedCamera
             v.cropBox = cropBox
             v.setLights(lights, colors)
+            val grabRadius = 36f * v.resources.displayMetrics.density
+            v.grab = if (onHandleMove != null && handles.isNotEmpty()) { { x: Float, y: Float ->
+                val aspect = v.width.toFloat() / v.height.coerceAtLeast(1)
+                val cam = v.camera(aspect)
+                handles.indices.mapNotNull { i ->
+                    cam.project(handles[i], aspect)?.let { (hx, hy, _) -> i to kotlin.math.hypot((hx - x) * v.width, (hy - y) * v.height) }
+                }.filter { it.second < grabRadius }.minByOrNull { it.second }?.first ?: -1
+            } } else null
+            v.onGrabMove = onHandleMove?.let { move ->
+                { i: Int, x: Float, y: Float ->
+                    val aspect = v.width.toFloat() / v.height.coerceAtLeast(1)
+                    val cam = v.camera(aspect)
+                    move(i, cam.eye, cam.ray(x, y, aspect))
+                }
+            }
             v.onPaint = when {
                 onLasso != null -> { x: Float, y: Float, end: Boolean ->
                     if (!end) path += Offset(x, y)

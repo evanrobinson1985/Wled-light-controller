@@ -119,7 +119,7 @@ fun ScanHouseScreen(onBack: () -> Unit, onDone: () -> Unit) {
                 finishing = "Saving…"
                 val m = container.models.saveScanned(mesh)
                 val old = container.store.houseMap.first().model3d
-                container.store.updateHouseMap { it.copy(model3d = m, runs = it.runs.map { r -> r.copy(points3d = null) }) }
+                container.store.updateHouseMap { it.copy(model3d = m, runs = it.runs.map { r -> r.copy(points3d = null, bends3d = null) }) }
                 if (old != null) container.models.delete(old)
                 m
             }.onSuccess { m -> finishing = null; if (m.photos > 0) offerSharpen = m else onDone() }

@@ -36,6 +36,12 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
     var onPaintCancel: (() -> Unit)? = null
     private var lastPaintAt = 0L
 
+    /** Which handle is under the finger at (x, y, 0..1), or -1: dragging one moves it instead of the view. */
+    var grab: ((Float, Float) -> Int)? = null
+    /** A grabbed handle dragged to (x, y). */
+    var onGrabMove: ((Int, Float, Float) -> Unit)? = null
+    private var grabbed = -1
+
     @Volatile var fixedCamera: Camera? = null
         set(v) { field = v; requestRender() }
 
@@ -113,14 +119,22 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = e.x; downY = e.y; downAt = e.eventTime; multi = false; lastX = cx; lastY = cy; parent?.requestDisallowInterceptTouchEvent(true)
+                grabbed = grab?.invoke(e.x / width, e.y / height) ?: -1
+                if (grabbed >= 0) return true
                 onPaint?.let { it(e.x / width, e.y / height, false); lastPaintAt = e.eventTime }
             }
             MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> {
                 // A second finger: not painting any more, but turning.
                 if (!multi && e.actionMasked == MotionEvent.ACTION_POINTER_DOWN) onPaintCancel?.invoke()
+                grabbed = -1
                 multi = true; lastX = cx; lastY = cy
             }
             MotionEvent.ACTION_MOVE -> {
+                if (grabbed >= 0) {
+                    if (e.pointerCount == 1) onGrabMove?.invoke(grabbed, e.x / width, e.y / height)
+                    lastX = cx; lastY = cy
+                    return true
+                }
                 val dx = cx - lastX; val dy = cy - lastY
                 lastX = cx; lastY = cy
                 if (fixedCamera != null) return true
@@ -152,6 +166,11 @@ class HouseGlView(context: Context) : GLSurfaceView(context) {
                 requestRender()
             }
             MotionEvent.ACTION_UP -> {
+                if (grabbed >= 0) {
+                    grabbed = -1
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    return true
+                }
                 if (onPaint != null) {
                     if (!multi) onPaint?.invoke(e.x / width, e.y / height, true)
                     parent?.requestDisallowInterceptTouchEvent(false)

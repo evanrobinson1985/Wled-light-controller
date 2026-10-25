@@ -49,6 +49,11 @@ data class LightRun(
     /** Traced on the 3D house model (metres), for lights the photo can't show. */
     val points3d: List<com.wledcontroller.app.house.model3d.P3>? = null,
     /**
+     * How far each span of [points3d] bends at its middle, in metres: down (a strand sagging
+     * between hooks) or, when negative, up (an arch). One per span; missing ones are straight.
+     */
+    val bends3d: List<Float>? = null,
+    /**
      * How far a strand hung between hooks droops in the middle of each span, as a share of
      * the span's length (0 = pulled tight). The traced points are the hooks.
      */

@@ -107,7 +107,7 @@ fun Model3DScreen(onBack: () -> Unit, onScan: () -> Unit = {}) {
     /** Puts a new model in place of the old one: its files go, and lights traced on it need tracing again. */
     fun replaceWith(m: House3D) = scope.launch {
         val old = map.model3d
-        container.store.updateHouseMap { it.copy(model3d = m, runs = it.runs.map { r -> r.copy(points3d = null) }) }
+        container.store.updateHouseMap { it.copy(model3d = m, runs = it.runs.map { r -> r.copy(points3d = null, bends3d = null) }) }
         if (old != null && old.dir != m.dir) container.models.delete(old)
         meshVersion++
     }
@@ -170,7 +170,7 @@ fun Model3DScreen(onBack: () -> Unit, onScan: () -> Unit = {}) {
                         scope.launch {
                             busy = "Turning…"
                             runCatching { container.models.turn(model, aboutX) }.onSuccess { m ->
-                                container.store.updateHouseMap { it.copy(model3d = m, runs = it.runs.map { r -> r.copy(points3d = null) }) }
+                                container.store.updateHouseMap { it.copy(model3d = m, runs = it.runs.map { r -> r.copy(points3d = null, bends3d = null) }) }
                                 meshVersion++
                             }.onFailure { message = it.message }
                             busy = null
@@ -191,7 +191,7 @@ fun Model3DScreen(onBack: () -> Unit, onScan: () -> Unit = {}) {
                 TextButton(onClick = {
                     confirmRemove = false
                     scope.launch {
-                        container.store.updateHouseMap { it.copy(model3d = null, runs = it.runs.map { r -> r.copy(points3d = null) }) }
+                        container.store.updateHouseMap { it.copy(model3d = null, runs = it.runs.map { r -> r.copy(points3d = null, bends3d = null) }) }
                         container.models.delete(model)
                     }
                 }) { Text("Remove") }
@@ -323,6 +323,15 @@ private fun ModelEditor(
     // Tracing a run on the model.
     var tracing by remember { mutableStateOf<String?>(null) }
     val draft = remember { mutableStateListOf<P3>() }
+    // How far each span between the tapped points bends (metres down; up when negative).
+    val bends = remember { mutableStateListOf<Float>() }
+    fun startTracing(run: com.wledcontroller.app.house.LightRun?) {
+        draft.clear(); bends.clear()
+        run?.points3d?.let { pts ->
+            draft.addAll(pts)
+            bends.addAll(List((pts.size - 1).coerceAtLeast(0)) { run.bends3d?.getOrNull(it) ?: 0f })
+        }
+    }
     val traceRun = map.runs.firstOrNull { it.id == tracing }
 
     fun save(transform: (HouseMap) -> HouseMap) = scope.launch { container.store.updateHouseMap(transform) }
@@ -386,7 +395,7 @@ private fun ModelEditor(
         )
         editTool == "crop" -> Text("Crop: move the sliders until just what you want to keep is left. Anything shown red will be cut off. Drag to turn the model to check.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         picking -> Text("Tap the front wall's ${CORNER_NAMES[picked.size.coerceAtMost(3)]} corner on the model (${picked.size}/4). Drag to turn the model, pinch to zoom.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-        traceRun != null -> Text("Tracing \"${traceRun.name}\": tap along where its lights go on the model, starting at its first light. ${draft.size} point${if (draft.size == 1) "" else "s"}.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        traceRun != null -> Text("Tracing \"${traceRun.name}\": tap along where its lights go on the model, starting at its first light (tap each hook for a hanging strand). Drag the blue cross in the middle of a span down into a sag or up into an arch. ${draft.size} point${if (draft.size == 1) "" else "s"}.", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         checking -> Text("Your house photo over the model, from where it was taken. The two should match.", style = MaterialTheme.typography.bodySmall)
         else -> Text("Drag to turn · two fingers to move · pinch to zoom", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -402,8 +411,15 @@ private fun ModelEditor(
         val cols = ArrayList<Int>(runColors.toList().take(pts.size))
         if (traceRun != null) {
             // The traced run's lights as they'd be, and the points tapped.
-            Led3D.along(draft.toList(), traceRun).forEach { pts += it; cols += 0xFFE040 }
+            Led3D.along(draft.toList(), traceRun.copy(bends3d = bends.toList())).forEach { pts += it; cols += 0xFFE040 }
             draft.forEach { pts += it; cols += 0xFFFFFF }
+            // Each span's bending handle: a small blue cross.
+            draft.zipWithNext().forEachIndexed { k, (a, b) ->
+                val h = Led3D.bendHandle(a, b, bends.getOrElse(k) { 0f })
+                val along = (b - a).normalized() * 0.07f
+                val up = P3.UP * 0.07f
+                listOf(h, h + along, h - along, h + up, h - up, h + along * 2f, h - along * 2f, h + up * 2f, h - up * 2f).forEach { pts += it; cols += 0x40C4FF }
+            }
         }
         if (picking) picked.forEachIndexed { i, p -> pts += p; cols += CORNER_COLORS[i] }
         if (!picking && !checking && traceRun == null && editTool == null) model.lineupModel?.forEachIndexed { i, p -> pts += p; cols += CORNER_COLORS[i % 4] }
@@ -424,11 +440,20 @@ private fun ModelEditor(
                     if (p == null) onMessage("Missed the model — tap right on it.")
                     else { onMessage(null); picked += p; if (picked.size == 4) { picking = false; askPhoto = true } }
                 }
-                traceRun != null -> { p -> if (p == null) onMessage("Missed the model — tap right on it.") else { onMessage(null); draft += p } }
+                traceRun != null -> { p -> if (p == null) onMessage("Missed the model — tap right on it.") else { onMessage(null); draft += p; if (draft.size >= 2) bends += 0f } }
                 else -> null
             },
             onPaintCancel = { stroke.clear() },
             cropBox = if (editTool == "crop") cropBox() else null,
+            handles = if (traceRun != null) draft.zipWithNext().mapIndexed { k, (a, b) -> Led3D.bendHandle(a, b, bends.getOrElse(k) { 0f }) } else emptyList(),
+            onHandleMove = if (traceRun != null) { { k, eye, dir ->
+                val a = draft.getOrNull(k); val b = draft.getOrNull(k + 1)
+                if (a != null && b != null && k < bends.size) Led3D.bendToward(a, b, eye, dir)?.let { bend ->
+                    // Up to as deep (or high) as the span is long; close to straight snaps straight.
+                    val span = (b - a).length
+                    bends[k] = bend.coerceIn(-span, span).let { if (kotlin.math.abs(it) < span * 0.02f) 0f else it }
+                }
+            } } else null,
             onLasso = if (editTool == "erase" && eraseLoop && !editBusy) { { loop, cam, aspect ->
                 commit(
                     model.edits + com.wledcontroller.app.house.model3d.MeshEdit.Lasso(cam, aspect, loop.map { it.first }, loop.map { it.second }, eraseThrough),
@@ -511,19 +536,20 @@ private fun ModelEditor(
             TextButton(onClick = { picking = false; picked.clear() }) { Text("Cancel") }
         }
         traceRun != null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(enabled = draft.isNotEmpty(), onClick = { draft.removeAt(draft.lastIndex) }) { Text("Undo") }
-            OutlinedButton(enabled = draft.isNotEmpty(), onClick = { draft.clear() }) { Text("Clear") }
-            TextButton(onClick = { tracing = null; draft.clear() }) { Text("Cancel") }
+            OutlinedButton(enabled = draft.isNotEmpty(), onClick = { draft.removeAt(draft.lastIndex); while (bends.size > (draft.size - 1).coerceAtLeast(0)) bends.removeAt(bends.lastIndex) }) { Text("Undo") }
+            OutlinedButton(enabled = draft.isNotEmpty(), onClick = { startTracing(null) }) { Text("Clear") }
+            TextButton(onClick = { tracing = null; startTracing(null) }) { Text("Cancel") }
             Button(enabled = draft.isNotEmpty(), onClick = {
                 val run = traceRun
                 val points = draft.toList()
+                val bent = bends.toList().takeIf { b -> b.any { it != 0f } }
                 val cam = model.lineup
                 // Not on the photo yet: give it a place there too, so effects reach it.
-                val photoPoints = if (run.points.isEmpty() && run.ledPoints == null && cam != null) Led3D.toPhoto(points, cam, map.aspect) else null
-                save { m -> m.copy(runs = m.runs.map { if (it.id == run.id) it.copy(points3d = points, points = photoPoints ?: it.points) else it }) }
+                val photoPoints = if (run.points.isEmpty() && run.ledPoints == null && cam != null) Led3D.toPhoto(bent?.let { Led3D.bent(points, it) } ?: points, cam, map.aspect) else null
+                save { m -> m.copy(runs = m.runs.map { if (it.id == run.id) it.copy(points3d = points, bends3d = bent, points = photoPoints ?: it.points) else it }) }
                 if (run.points.isEmpty() && run.ledPoints == null && cam == null)
                     onMessage("Saved. Line the model up with your photo too, so effects can reach \"${run.name}\".")
-                tracing = null; draft.clear()
+                tracing = null; startTracing(null)
             }) { Text("Save") }
         }
         checking -> Column {
@@ -598,8 +624,8 @@ private fun ModelEditor(
                                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        if (run.points3d != null) TextButton(onClick = { save { m -> m.copy(runs = m.runs.map { if (it.id == run.id) it.copy(points3d = null) else it }) } }) { Text("Use photo") }
-                        if (run.model == null) TextButton(onClick = { draft.clear(); run.points3d?.let { draft.addAll(it) }; tracing = run.id; onMessage(null) }) { Text("Trace") }
+                        if (run.points3d != null) TextButton(onClick = { save { m -> m.copy(runs = m.runs.map { if (it.id == run.id) it.copy(points3d = null, bends3d = null) else it }) } }) { Text("Use photo") }
+                        if (run.model == null) TextButton(onClick = { startTracing(run); tracing = run.id; onMessage(null) }) { Text("Trace") }
                     }
                 }
             }
