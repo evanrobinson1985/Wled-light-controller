@@ -68,6 +68,8 @@ class AppContainer(context: Context) {
     val projects = com.wledcontroller.app.data.Projects(context, store, backup, house, player, devices)
     /** Opens zipped xLights show folders as projects. */
     val xlightsPackage = com.wledcontroller.app.data.XlightsPackage(context, store, house, sequences, projects)
+    /** New builds from GitHub, put in by themselves (not while a show or effect is playing). */
+    val updater = com.wledcontroller.app.update.AppUpdater(context, "WLED-Controller.apk", busy = { showRunner.state.value.running || house.running.value })
     /** Keeps the watch app's controller list up to date. */
     val wear = com.wledcontroller.app.wear.WearBridge(context, store, scope)
 

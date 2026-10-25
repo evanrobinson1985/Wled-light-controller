@@ -119,6 +119,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpenTutorial: () -> Unit = {}, onOpenTe
                 }
             }
 
+            AppUpdatesCard()
+
             Card(onClick = onOpenFirmware, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Controller updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -315,4 +317,65 @@ private fun AutoBackupSetting(enabled: Boolean, onMessage: (String) -> Unit) {
             }
         },
     ) { Text(if (saving) "Saving…" else "Save a copy now") }
+}
+
+/** This app's build, and updating it from GitHub (by itself, or now). */
+@Composable
+private fun AppUpdatesCard() {
+    val container = LocalAppContainer.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val updater = container.updater
+    val state by updater.state.collectAsStateWithLifecycle()
+    val auto by updater.auto.collectAsStateWithLifecycle()
+    val result by com.wledcontroller.app.update.AppUpdater.lastResult.collectAsStateWithLifecycle()
+    // Rechecked whenever the screen's shown (the switch is in Android's settings).
+    var canInstall by remember { mutableStateOf(updater.canInstall()) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) { canInstall = updater.canInstall(); onPauseOrDispose { } }
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("App updates", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Build ${updater.installedBuild}. New builds come from GitHub and install over this one, keeping everything in the app. The watch app updates itself the same way.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Update automatically", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Checks every few hours when you open the app, on Wi-Fi only, and never while a show or effect is playing.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(auto, { updater.setAuto(it) })
+            }
+            if (!canInstall) {
+                Text(
+                    "Android needs your OK for this app to install its updates: allow \"Install unknown apps\" for WLED Controller.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                OutlinedButton(onClick = { runCatching { context.startActivity(updater.allowInstallsIntent()) } }) { Text("Allow installing updates") }
+            }
+            val busy = state is com.wledcontroller.app.update.AppUpdater.State.Checking ||
+                state is com.wledcontroller.app.update.AppUpdater.State.Downloading ||
+                state is com.wledcontroller.app.update.AppUpdater.State.Installing
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Button(enabled = !busy, onClick = { scope.launch { updater.check(install = true) } }) { Text("Check now") }
+                if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
+            val line = when (val st = state) {
+                is com.wledcontroller.app.update.AppUpdater.State.Checking -> "Checking GitHub…"
+                is com.wledcontroller.app.update.AppUpdater.State.UpToDate -> "Up to date (build ${st.build})."
+                is com.wledcontroller.app.update.AppUpdater.State.Available -> "Build ${st.release.build} is out."
+                is com.wledcontroller.app.update.AppUpdater.State.Downloading -> "Downloading build ${st.release.build}… ${(st.progress * 100).toInt()}%"
+                is com.wledcontroller.app.update.AppUpdater.State.Installing -> "Installing build ${st.release.build}… the app restarts when it's in."
+                is com.wledcontroller.app.update.AppUpdater.State.Failed -> st.message
+                else -> null
+            }
+            (result ?: line)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
 }

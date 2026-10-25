@@ -5,6 +5,9 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Installing new builds of itself from GitHub. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <application
         android:allowBackup="true"
@@ -17,6 +20,10 @@
         <uses-library android:name="com.google.android.wearable" android:required="false" />
         <!-- Works on its own over Wi-Fi; with the phone nearby it goes through the phone. -->
         <meta-data android:name="com.google.android.wearable.standalone" android:value="true" />
+
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"

@@ -206,6 +206,9 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         container.devices.setForeground(true)
+        // A newer build on GitHub goes in by itself (at most every few hours, on Wi-Fi).
+        val c = container
+        c.scope.launch { c.updater.checkInBackground() }
     }
 
     override fun onStop() {

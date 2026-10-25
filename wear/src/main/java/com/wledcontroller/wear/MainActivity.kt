@@ -93,6 +93,9 @@ import kotlin.math.sign
 
 class MainActivity : ComponentActivity() {
     private val link by lazy { WatchLink(applicationContext) }
+    /** New builds of the watch app from GitHub, put in by themselves. */
+    private val updater by lazy { com.wledcontroller.wear.update.AppUpdater(applicationContext, "WLED-Watch.apk", wifiOnly = false) }
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -102,6 +105,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Wearable.getDataClient(this).addListener(link.listener)
+        // At most every few hours: a newer watch app on GitHub downloads and installs.
+        scope.launch { updater.checkInBackground() }
     }
 
     override fun onPause() {
