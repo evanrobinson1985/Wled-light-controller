@@ -23,12 +23,15 @@ object DepthFusion {
      * [raw] and [conf] (0..255) are [dw] × [dh]; [smooth] (or null) is [sw] × [sh]. Depth in
      * mm, 0 = none. [fx] etc. are the lens for the depth picture's size; [pose] places the
      * camera in the world (OpenGL style, looking down its -z). [color] gives the colour at a
-     * depth pixel.
+     * depth pixel. [split] > 1 spreads each pixel into split × split points over its footprint
+     * (its depth following the surface's slant), so cubes finer than the depth pixels are all
+     * reached rather than every other one.
      */
     fun fuse(
         dw: Int, dh: Int, raw: ShortArray, conf: ByteArray,
         smooth: ShortArray?, sw: Int, sh: Int,
         fx: Float, fy: Float, cx: Float, cy: Float, pose: FloatArray,
+        split: Int = 1,
         color: (Int, Int) -> Int,
     ): Result {
         val n = dw * dh
@@ -46,10 +49,12 @@ object DepthFusion {
                 if (sm in NEAR_MM..FAR_MM) { depth[k] = sm / 1000f; trust[k] = FILL_TRUST }
             }
         }
-        val pts = FloatArray(n * 3); val cols = IntArray(n); val wts = FloatArray(n)
-        val seen = FloatArray(n)
+        val s = split.coerceIn(1, 4)
+        val pts = FloatArray(n * s * s * 3); val cols = IntArray(n * s * s); val wts = FloatArray(n * s * s)
+        val seen = FloatArray(n * s * s)
         var count = 0
-        fun camPoint(c: Int, r: Int, z: Float) = P3((c + 0.5f - cx) / fx * z, -(r + 0.5f - cy) / fy * z, -z)
+        fun camPoint(c: Float, r: Float, z: Float) = P3((c + 0.5f - cx) / fx * z, -(r + 0.5f - cy) / fy * z, -z)
+        fun camPoint(c: Int, r: Int, z: Float) = camPoint(c.toFloat(), r.toFloat(), z)
         for (r in 0 until dh) for (c in 0 until dw) {
             val k = r * dw + c
             val z = depth[k]
@@ -66,14 +71,23 @@ object DepthFusion {
             val normal = ((camPoint(cn, r, za) - p) cross (camPoint(c, rn, zb) - p)).normalized()
             val facing = abs(normal dot p.normalized())
             if (facing < 0.2f) continue
-            val x = p.x; val y = p.y; val zz = p.z
-            pts[count * 3] = pose[0] * x + pose[4] * y + pose[8] * zz + pose[12]
-            pts[count * 3 + 1] = pose[1] * x + pose[5] * y + pose[9] * zz + pose[13]
-            pts[count * 3 + 2] = pose[2] * x + pose[6] * y + pose[10] * zz + pose[14]
-            cols[count] = color(c, r)
-            wts[count] = trust[k] * facing
-            seen[count] = z
-            count++
+            val col = color(c, r)
+            // Depth changes this much per pixel across and down (toward the neighbours used above).
+            val dzc = (za - z) * (if (cn > c) 1f else -1f); val dzr = (zb - z) * (if (rn > r) 1f else -1f)
+            for (i in 0 until s) for (j in 0 until s) {
+                val q = if (s == 1) p else {
+                    val oc = (i + 0.5f) / s - 0.5f; val orow = (j + 0.5f) / s - 0.5f
+                    camPoint(c + oc, r + orow, z + dzc * oc + dzr * orow)
+                }
+                val x = q.x; val y = q.y; val zz = q.z
+                pts[count * 3] = pose[0] * x + pose[4] * y + pose[8] * zz + pose[12]
+                pts[count * 3 + 1] = pose[1] * x + pose[5] * y + pose[9] * zz + pose[13]
+                pts[count * 3 + 2] = pose[2] * x + pose[6] * y + pose[10] * zz + pose[14]
+                cols[count] = col
+                wts[count] = trust[k] * facing
+                seen[count] = z
+                count++
+            }
         }
         val median = if (count == 0) 0f else seen.copyOf(count).also { it.sort() }[count / 2]
         return Result(pts, cols, wts, count, median)

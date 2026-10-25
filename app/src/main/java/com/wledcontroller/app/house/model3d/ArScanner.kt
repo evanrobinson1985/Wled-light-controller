@@ -56,10 +56,10 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
             volume = newVolume(v)
         }
 
-    /** A fresh scan, kept to what memory allows (with room left to build the model at the end). */
+    /** A fresh scan, kept to a quarter of memory (the rest is room to build the model at the end). */
     private fun newVolume(high: Boolean) =
         (if (high) TsdfVolume(voxel = 0.03f, truncation = 0.1f) else TsdfVolume(voxel = 0.05f, truncation = 0.15f)).apply {
-            maxBlocks = (Runtime.getRuntime().maxMemory() * 0.4 / TsdfVolume.BLOCK_BYTES).toInt().coerceAtLeast(2000)
+            maxBlocks = (Runtime.getRuntime().maxMemory() * 0.25 / TsdfVolume.BLOCK_BYTES).toInt().coerceAtLeast(2000)
         }
     /** The progress shown over the camera: how well each part's scanned (red, yellow, green), or its colours. */
     @Volatile var showQuality = true
@@ -213,7 +213,8 @@ class ArScanner(private val context: Context, private val photoDir: java.io.File
         val fx = v.fx * sx; val fy = v.fy * sy; val cx = v.cx * sx; val cy = v.cy * sy
         val m = v.pose
         // Confident depth, gaps filled from the smoothed depth, slanted surfaces trusted less.
-        val fused = DepthFusion.fuse(v.dw, v.dh, v.depth, v.conf, v.smooth, v.sw, v.sh, fx, fy, cx, cy, m) { c, r ->
+        // In high detail the cubes are finer than the depth pixels: each pixel is spread over its footprint.
+        val fused = DepthFusion.fuse(v.dw, v.dh, v.depth, v.conf, v.smooth, v.sw, v.sh, fx, fy, cx, cy, m, split = if (highDetail) 2 else 1) { c, r ->
             colorAt(v, ((c + 0.5f) * v.iw / v.dw).toInt(), ((r + 0.5f) * v.ih / v.dh).toInt())
         }
         val vol = volume

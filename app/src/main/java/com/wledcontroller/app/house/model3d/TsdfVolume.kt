@@ -137,7 +137,7 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
      */
     @Synchronized
     fun extract(minPiece: Int = 40): Mesh {
-        val vertexOf = HashMap<Long, Int>()
+        val vertexOf = LongIntMap(blocks.size * 16)
         val pos = FloatList(); val cols = IntList()
         val corner = FloatArray(8)
         // A corner for each cube the surface passes through.
@@ -185,7 +185,7 @@ class TsdfVolume(val voxel: Float = 0.05f, val truncation: Float = 0.15f) {
                         0 -> listOf(key(ix, iy - 1, iz - 1), key(ix, iy, iz - 1), key(ix, iy, iz), key(ix, iy - 1, iz))
                         1 -> listOf(key(ix - 1, iy, iz - 1), key(ix, iy, iz - 1), key(ix, iy, iz), key(ix - 1, iy, iz))
                         else -> listOf(key(ix - 1, iy - 1, iz), key(ix, iy - 1, iz), key(ix, iy, iz), key(ix - 1, iy, iz))
-                    }.map { vertexOf[it] ?: -1 }
+                    }.map { vertexOf[it] }
                     if (q.any { it < 0 }) continue
                     idx.add(q[0]); idx.add(q[1]); idx.add(q[2])
                     idx.add(q[0]); idx.add(q[2]); idx.add(q[3])
