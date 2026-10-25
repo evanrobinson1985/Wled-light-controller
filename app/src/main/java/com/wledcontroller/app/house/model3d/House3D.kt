@@ -169,7 +169,8 @@ object Led3D {
     fun along(traced: List<P3>, run: LightRun): List<P3> {
         val n = run.count
         val points = droop(traced, run.sag, run.hooksBetween)
-        if (n <= 0) return emptyList()
+        // Nothing traced yet (tracing has just started): no lights to show.
+        if (n <= 0 || points.isEmpty()) return emptyList()
         if (points.size == 1 || n == 1) return List(n) { points[0] }
         val segs = points.zipWithNext { a, b -> (b - a).length }
         val total = segs.sum()

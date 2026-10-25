@@ -21,6 +21,12 @@ class SteadyDepthsTest {
         raw.indices.forEach { assertEquals(raw[it]!!, out[it]!!, 0.001f) }
     }
 
+    @Test fun nothingTracedYetHasNoLights() {
+        val run = com.wledcontroller.app.house.LightRun("r", "Roofline", "d", 0, 50)
+        assertEquals(0, Led3D.along(emptyList(), run).size)
+        assertEquals(50, Led3D.along(listOf(P3(0f, 3f, 0f)), run).size)
+    }
+
     @Test fun allMissedStaysMissed() {
         assertEquals(listOf<Float?>(null, null), Led3D.steadyDepths(listOf(null, null)))
     }
