@@ -212,12 +212,19 @@ class AppStore(private val context: Context) {
      */
     private val registry = context.getSharedPreferences("device_registry", android.content.Context.MODE_PRIVATE)
 
+    /**
+     * Whether the open project is the main one ("My house"). The record above is that
+     * project's: other projects have controllers of their own, added and removed without
+     * touching it.
+     */
+    @Volatile var inMainProject = true
+
     fun rememberedDevices(): List<SavedDevice> =
         registry.getString("devices", null)?.let { runCatching { json.decodeFromString<List<SavedDevice>>(it) }.getOrNull() } ?: emptyList()
 
     /** Keeps [device] (a real one) in the record, whatever happens to the app's settings. */
     fun rememberDevice(device: SavedDevice) {
-        if (isSimulatedHost(device.host)) return
+        if (isSimulatedHost(device.host) || !inMainProject) return
         synchronized(registry) {
             val list = rememberedDevices()
             val updated = if (list.any { it.id == device.id }) list.map { if (it.id == device.id) device else it } else list + device
@@ -225,8 +232,11 @@ class AppStore(private val context: Context) {
         }
     }
 
-    private fun forgetDevice(id: String) = synchronized(registry) {
-        registry.edit().putString("devices", json.encodeToString(rememberedDevices().filterNot { it.id == id })).commit()
+    private fun forgetDevice(id: String) {
+        if (!inMainProject) return
+        synchronized(registry) {
+            registry.edit().putString("devices", json.encodeToString(rememberedDevices().filterNot { it.id == id })).commit()
+        }
     }
 
     /**
@@ -235,6 +245,12 @@ class AppStore(private val context: Context) {
      * the record doesn't yet. Returns how many came back. Not for use inside the simulator.
      */
     suspend fun restoreRememberedDevices(): Int {
+        if (!inMainProject) return 0
+        return addRememberedDevices()
+    }
+
+    /** Adds the main project's controllers to the open one's (those it hasn't got). Returns how many. */
+    suspend fun addRememberedDevices(): Int {
         var added = 0
         editList<SavedDevice>(Keys.DEVICES) { list ->
             val ids = list.map { it.id }.toSet()
@@ -243,7 +259,7 @@ class AppStore(private val context: Context) {
             added = missing.size
             list + missing
         }
-        devices.first().forEach { rememberDevice(it) }
+        if (inMainProject) devices.first().forEach { rememberDevice(it) }
         return added
     }
 

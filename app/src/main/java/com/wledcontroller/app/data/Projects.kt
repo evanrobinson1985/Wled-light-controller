@@ -48,6 +48,8 @@ class Projects(
     /** The project that's open. */
     val active: StateFlow<String> = _active.asStateFlow()
 
+    init { store.inMainProject = _active.value == MAIN }
+
     private fun load(): List<ProjectInfo> {
         val saved = runCatching { json.decodeFromString(ListSerializer(ProjectInfo.serializer()), indexFile.readText()) }.getOrNull()
         // The setup the app had before projects is the first one.
@@ -83,10 +85,11 @@ class Projects(
 
     /**
      * Starts a new, empty project called [name] (the open one kept as it is), opens it, and
-     * fills it with [fill]. If filling fails, the new project is thrown away and the previous
-     * one comes back.
+     * fills it with [fill]. It has no controllers, unless [withControllers] brings in yours (from
+     * "My house"). If filling fails, the new project is thrown away and the previous one comes
+     * back.
      */
-    suspend fun create(name: String, note: String = "", fill: suspend () -> Unit = {}): ProjectInfo = mutex.withLock {
+    suspend fun create(name: String, note: String = "", withControllers: Boolean = false, fill: suspend () -> Unit = {}): ProjectInfo = mutex.withLock {
         stopEverything()
         val previous = _active.value
         val info = ProjectInfo(UUID.randomUUID().toString(), name.ifBlank { "New project" }, System.currentTimeMillis(), note)
@@ -95,6 +98,7 @@ class Projects(
             backup.clearAll()
             saveIndex(_list.value + info)
             setActive(info.id)
+            if (withControllers) store.addRememberedDevices()
         }
         afterSwitch()
         try {
@@ -126,10 +130,11 @@ class Projects(
     private fun setActive(id: String) {
         activeFile.writeText(id)
         _active.value = id
+        store.inMainProject = id == MAIN
     }
 
     private suspend fun afterSwitch() {
-        // Your controllers belong in every project.
+        // Each project has its own controllers; only the main one puts back any that went missing.
         store.restoreRememberedDevices()
         devices.list.value.forEach { it.reconnect() }
     }

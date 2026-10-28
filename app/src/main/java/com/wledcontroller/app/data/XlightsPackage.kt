@@ -58,11 +58,11 @@ class XlightsPackage(
      * Opens the package [peek] unpacked as a new project called [name] (the open one kept as it
      * is). [progress] gets a short line on what it's doing.
      */
-    suspend fun open(name: String, progress: (String) -> Unit = {}): PackageResult {
+    suspend fun open(name: String, withControllers: Boolean = false, progress: (String) -> Unit = {}): PackageResult {
         val dir = work
         val rgb = find(dir, "xlights_rgbeffects.xml") ?: throw IllegalArgumentException("Open the package again")
         var result: PackageResult? = null
-        projects.create(name, note = "From xLights") {
+        projects.create(name, note = "From xLights", withControllers = withControllers) {
             result = fill(dir, rgb, progress)
         }
         withContext(Dispatchers.IO) { dir.deleteRecursively() }

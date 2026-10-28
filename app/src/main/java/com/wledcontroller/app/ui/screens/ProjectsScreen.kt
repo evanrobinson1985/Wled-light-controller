@@ -97,7 +97,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                "Each project has its own house photo, props, groups, shows, songs and settings. Switching puts the open one away exactly as it is, so you can always come back to it. Your controllers are in every project.",
+                "Each project has its own house photo, props, groups, shows, songs and settings. Switching puts the open one away exactly as it is, so you can always come back to it. Each project has its own light controllers too.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -166,6 +166,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
 
     naming?.let { n ->
         var name by remember(n) { mutableStateOf(if (n is Naming.Rename) n.project.name else "") }
+        var bring by remember(n) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { naming = null },
             title = { Text(if (n is Naming.Rename) "Rename project" else "New empty project") },
@@ -173,6 +174,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (n is Naming.New) Text("Starts with no house photo, props or shows. The open project is kept as it is.", style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
+                    if (n is Naming.New) BringControllers(bring) { bring = it }
                 }
             },
             confirmButton = {
@@ -180,7 +182,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
                     naming = null
                     when (n) {
                         is Naming.Rename -> projects.rename(n.project.id, name.trim())
-                        Naming.New -> run("Starting $name…") { projects.create(name.trim()) }
+                        Naming.New -> run("Starting $name…") { projects.create(name.trim(), withControllers = bring) }
                     }
                 }) { Text(if (n is Naming.Rename) "Rename" else "Create") }
             },
@@ -200,6 +202,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
 
     peeked?.let { pk ->
         var name by remember(pk) { mutableStateOf(pk.name) }
+        var bring by remember(pk) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { peeked = null },
             title = { Text("Open xLights package") },
@@ -211,6 +214,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall,
                     )
                     OutlinedTextField(name, { name = it }, label = { Text("Project name") }, singleLine = true)
+                    BringControllers(bring) { bring = it }
                 }
             },
             confirmButton = {
@@ -218,7 +222,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
                     peeked = null
                     scope.launch {
                         busy = "Opening…"; message = null
-                        runCatching { container.xlightsPackage.open(name.trim()) { line -> busy = "$line…" } }
+                        runCatching { container.xlightsPackage.open(name.trim(), withControllers = bring) { line -> busy = "$line…" } }
                             .onSuccess { r ->
                                 message = buildString {
                                     append("Opened with ${r.props} props, ${r.groups} groups and ${r.shows} show${if (r.shows == 1) "" else "s"}.")
@@ -236,6 +240,22 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenMap: () -> Unit) {
         )
     }
 
+}
+
+/** Whether a new project starts with your light controllers (from "My house") or none. */
+@Composable
+private fun BringControllers(on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Use my light controllers", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (on) "Your controllers from My house are added to it." else "It starts with none: add controllers to it from the home screen.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        androidx.compose.material3.Switch(on, onChange)
+    }
 }
 
 private sealed interface Naming {
