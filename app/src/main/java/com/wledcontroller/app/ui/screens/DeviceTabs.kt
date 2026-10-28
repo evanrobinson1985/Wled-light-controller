@@ -138,8 +138,16 @@ fun ColorsTab(controller: DeviceController, snap: DeviceSnapshot) {
     val recents by container.store.recentColors.collectAsStateWithLifecycle(emptyList())
     var showHex by remember { mutableStateOf(false) }
 
+    // A colour picked here: on lights with a white LED, coming from a pure white (white LED on,
+    // colour off) the white goes off, or the new colour would still look white; white mixed in
+    // with the slider is kept. And it takes over from a show or effect playing on the lights.
+    fun colorFor(rgb: Int) = WledColor.fromRgb(rgb, if (current.r == 0 && current.g == 0 && current.b == 0) 0 else current.w)
+    fun setPicked(rgb: Int) {
+        if (info?.live == true && snap.state?.lor == 0) controller.overrideLive()
+        controller.setColor(slot, colorFor(rgb))
+    }
     fun pick(rgb: Int) {
-        controller.setColor(slot, WledColor.fromRgb(rgb, current.w))
+        setPicked(rgb)
         scope.launch { container.store.addRecentColor(rgb) }
     }
 
@@ -160,7 +168,7 @@ fun ColorsTab(controller: DeviceController, snap: DeviceSnapshot) {
 
         ColorPickerPanel(
             color = current.rgb,
-            onColorChange = { controller.setColor(slot, WledColor.fromRgb(it, current.w)) },
+            onColorChange = { setPicked(it) },
             onCommit = { rgb -> scope.launch { container.store.addRecentColor(rgb) } },
             modifier = Modifier.fillMaxWidth(),
         )

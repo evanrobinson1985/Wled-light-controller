@@ -146,7 +146,14 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
             val leadColor = lead?.state?.activeSegment?.color(0) ?: WledColor(255, 160, 0)
             ColorPickerPanel(
                 color = leadColor.rgb,
-                onColorChange = { rgb -> online.forEach { (c, s) -> c.setColor(0, WledColor.fromRgb(rgb, s.state?.activeSegment?.color(0)?.w ?: 0)) } },
+                onColorChange = { rgb ->
+                    online.forEach { (c, s) ->
+                        // Coming from a pure white, the white LED goes off (or the colour would still look white).
+                        val cur = s.state?.activeSegment?.color(0)
+                        val w = if (cur == null || (cur.r == 0 && cur.g == 0 && cur.b == 0)) 0 else cur.w
+                        c.setColor(0, WledColor.fromRgb(rgb, w))
+                    }
+                },
                 onCommit = { rgb -> scope.launch { container.store.addRecentColor(rgb) } },
                 modifier = Modifier.fillMaxWidth(),
             )
