@@ -9,10 +9,16 @@ import kotlin.math.sin
 
 /** Effects computed from each LED's position on the house, so they flow across every controller. */
 /**
- * Whole-house effects. [holiday] puts shadow-figure effects under their holiday; [figures] are
- * the shapes whose shadows move about the lit house (several mix together in a parade).
+ * Whole-house effects. [holiday] puts holiday effects and shadow-figure effects under their
+ * holiday; [figures] are the shapes whose shadows move about the lit house (several mix
+ * together in a parade). A holiday effect brings its holiday's [palette] when picked.
  */
-enum class HouseEffect(val label: String, val holiday: String? = null, val figures: List<Figure> = emptyList()) {
+enum class HouseEffect(
+    val label: String,
+    val holiday: String? = null,
+    val figures: List<Figure> = emptyList(),
+    val palette: List<Int>? = null,
+) {
     WAVE("Colour wave"),
     GLOW("Gentle glow"),
     RAINBOW("Rainbow sweep"),
@@ -25,6 +31,23 @@ enum class HouseEffect(val label: String, val holiday: String? = null, val figur
     SNOW("Falling snow"),
     BREATHE("Breathe"),
     SOLID("Solid"),
+    // Holiday effects, in the order the holidays come round.
+    CHAMPAGNE("Champagne bubbles", "New Year's Eve", palette = rgb(0xC08A30, 0xFFF0C0, 0xFFD27A)),
+    DRAGON("Dragon dance", "Lunar New Year", palette = rgb(0xFF0000, 0xFFC000, 0xFF3000)),
+    HEARTBEAT("Heartbeat", "Valentine's Day", palette = rgb(0xFF0030, 0xFF5AA0, 0xFF1060)),
+    POT_OF_GOLD("Pot of gold", "St Patrick's Day", palette = rgb(0x00FF20, 0x00A030, 0xFFC020)),
+    PASTEL("Pastel eggs", "Easter", palette = rgb(0xFF9AD0, 0xFFF080, 0xA0B0FF)),
+    FLAG("Waving flag", "Independence Day", palette = rgb(0xFF0000, 0xFFFFFF, 0x0030FF)),
+    THUNDERSTORM("Thunderstorm", "Halloween", palette = rgb(0x5000A0, 0x102060, 0xD0D8FF)),
+    HAUNTED("Haunted flicker", "Halloween", palette = rgb(0xFF5A00, 0x8000FF, 0x40FF00)),
+    PUMPKIN_GLOW("Pumpkin glow", "Halloween", palette = rgb(0xFF5000, 0xFF8C00, 0xFFC060)),
+    DIYAS("Diya lamps", "Diwali", palette = rgb(0xFFA000, 0xC00060, 0xFFE060)),
+    LEAVES("Falling leaves", "Thanksgiving", palette = rgb(0xFF8C00, 0xC03000, 0x6A3A10)),
+    MENORAH("Menorah", "Hanukkah", palette = rgb(0x0040FF, 0xFFFFFF, 0xFFC860)),
+    CANDY_CANE("Candy cane stripes", "Christmas", palette = rgb(0xFF0000, 0xFFFFFF, 0x00C000)),
+    VINTAGE("Old-fashioned bulbs", "Christmas", palette = rgb(0xFF1000, 0x00B000, 0x0040FF, 0xFF8000, 0xFFD000)),
+    KINARA("Kinara", "Kwanzaa", palette = rgb(0xFF0000, 0x00B020, 0xFFC860)),
+    AURORA("Northern lights", "Winter", palette = rgb(0x20FF80, 0x00C0C0, 0x8040FF)),
     GHOSTS("Ghosts", "Halloween", listOf(Figure.GHOST)),
     CLOWNS("Clowns", "Halloween", listOf(Figure.CLOWN)),
     SPIDERS("Crawling spiders", "Halloween", listOf(Figure.SPIDER)),
@@ -43,10 +66,15 @@ enum class HouseEffect(val label: String, val holiday: String? = null, val figur
     /** A holiday shadow: figures that move about over whichever effect is playing. */
     val isShadow get() = figures.isNotEmpty()
 
+    /** A holiday lighting effect (not a shadow). */
+    val isHolidayEffect get() = holiday != null && !isShadow
+
     /** What the size / number / speed sliders call one of the figures, and several. */
     val noun get() = figures.singleOrNull()?.noun ?: "figure"
     val plural get() = figures.singleOrNull()?.plural ?: "figures"
 }
+
+private fun rgb(vararg hex: Int) = hex.map { it or (0xFF shl 24) }
 
 @kotlinx.serialization.Serializable
 data class HouseEffectParams(
@@ -82,7 +110,8 @@ data class HouseEffectParams(
     /** Picks [fx]: an everyday effect becomes the effect; a holiday shadow goes on over it (or off, if it's on already). */
     fun pick(fx: HouseEffect): HouseEffectParams = normalized().let { n ->
         when {
-            !fx.isShadow -> n.copy(effect = fx)
+            // A holiday effect starts in its holiday's colours (they can be changed after).
+            !fx.isShadow -> n.copy(effect = fx, colors = fx.palette ?: n.colors)
             n.shadow == fx -> n.copy(shadow = null)
             else -> n.copy(shadow = fx)
         }
@@ -181,8 +210,8 @@ object HouseRenderer {
                 maxRgb(scale(c.getOrElse(1) { c[0] }, 0.12f), scale(c[0], flake))
             }
             HouseEffect.BREATHE -> scale(palette(c, x * 0.5f), 0.15f + 0.85f * (0.5f + 0.5f * sin(t * sp * 1.5f).toFloat()))
-            // Holiday shadows only ever play over an effect (see the start).
-            else -> palette(c, x)
+            // The holiday effects (holiday shadows only ever play over an effect: see the start).
+            else -> HolidayEffects.render(p.effect, c, x, y, t, id, order, sp, sz) ?: palette(c, x)
         }
         // The holiday shadow's figures moving about over it.
         val shaded = p.shadow?.takeIf { it.isShadow }?.let { fx ->

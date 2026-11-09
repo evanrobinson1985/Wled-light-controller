@@ -155,6 +155,14 @@ object EffectFit {
             HouseEffect.SNOW -> setOf(p, m, t)
             HouseEffect.BREATHE -> setOf(f, p)
             HouseEffect.SOLID -> setOf(f, p, s)
+            HouseEffect.CANDY_CANE, HouseEffect.FLAG -> setOf(s, p, m)
+            HouseEffect.VINTAGE, HouseEffect.DIYAS -> setOf(p, s)
+            HouseEffect.THUNDERSTORM, HouseEffect.HAUNTED -> setOf(s, p, m, f)
+            HouseEffect.PUMPKIN_GLOW, HouseEffect.HEARTBEAT -> setOf(p, s, f)
+            HouseEffect.CHAMPAGNE, HouseEffect.LEAVES -> setOf(p, m, t)
+            HouseEffect.POT_OF_GOLD, HouseEffect.PASTEL, HouseEffect.AURORA -> setOf(s, m, t, p)
+            HouseEffect.MENORAH, HouseEffect.KINARA -> setOf(s, p)
+            HouseEffect.DRAGON -> setOf(s, p, m)
             else -> emptySet()
         }
     }

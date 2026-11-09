@@ -457,6 +457,12 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                 }
             }
             effectChips(HouseEffect.entries.filter { it.holiday == null && fits(it) })
+            // Holiday lighting effects, by holiday (each starts in its holiday's colours).
+            SectionTitle("Holiday effects")
+            HouseEffect.entries.filter { it.isHolidayEffect && fits(it) }.groupBy { it.holiday!! }.forEach { (holiday, list) ->
+                Text(holiday, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                effectChips(list)
+            }
             // Shadow figures moving about over the effect, by holiday.
             SectionTitle("Holiday shadows")
             Text(
@@ -471,7 +477,7 @@ fun HouseScreen(onBack: () -> Unit, onEditMap: () -> Unit, onStandalone: () -> U
                 label = { Text("Off") },
                 leadingIcon = { Icon(Icons.Filled.Block, null, Modifier.size(18.dp)) },
             )
-            HouseEffect.entries.filter { it.holiday != null && fits(it) }.groupBy { it.holiday!! }.forEach { (holiday, list) ->
+            HouseEffect.entries.filter { it.isShadow && fits(it) }.groupBy { it.holiday!! }.forEach { (holiday, list) ->
                 Text(holiday, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                 effectChips(list)
             }

@@ -358,16 +358,17 @@ private fun HouseScreen(link: WatchLink) {
             Chip(label = { Text("Text off") }, onClick = { status = st.copy(text = null); update { link.house(text = "") } },
                 colors = ChipDefaults.secondaryChipColors(), modifier = Modifier.fillMaxWidth())
         }
-        // Everyday effects first, then the holiday shadows by holiday, which play over the effect
-        // (tap one again to turn it off).
-        effects.groupBy { it.holiday ?: "" }.forEach { (holiday, list) ->
-            item { ListHeader { Text(if (holiday.isEmpty()) "Effects" else "$holiday shadows") } }
+        // Everyday effects first, then holiday effects and holiday shadows by holiday; shadows
+        // play over the effect (tap one again to turn it off).
+        effects.groupBy { e -> e.holiday?.let { if (e.noun != null) "$it shadows" else it } ?: "" }.forEach { (heading, list) ->
+            item { ListHeader { Text(heading.ifEmpty { "Effects" }) } }
             items(list, key = { it.name }) { e ->
                 Chip(
                     label = { Text(e.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     colors = if (e.name == st.effect || e.name == st.shadow) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
                     onClick = {
-                        status = if (e.holiday == null) st.copy(effect = e.name, running = true)
+                        // Only shadows (which have figures, so a noun) go on over the effect.
+                        status = if (e.noun == null) st.copy(effect = e.name, running = true)
                         else st.copy(shadow = if (st.shadow == e.name) null else e.name, running = true)
                         update { link.house("play", effect = e.name) }
                     },
