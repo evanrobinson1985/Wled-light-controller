@@ -97,6 +97,35 @@ class DeviceController(
 
     private var runJob: Job? = null
     @Volatile private var socket: WebSocket? = null
+
+    /**
+     * The colours the controller's LEDs are showing right now, as WLED reports them (every LED,
+     * or an even sample of a long strip, at most a few hundred), while [watchLeds] is on; null
+     * until the first arrives.
+     */
+    private val _liveLeds = MutableStateFlow<LiveLeds?>(null)
+    val liveLeds: StateFlow<LiveLeds?> = _liveLeds.asStateFlow()
+    @Volatile private var ledWatchers = 0
+    private var ledPoll: Job? = null
+
+    /** Starts (or, as often as it was started, stops) getting the real LED colours. */
+    fun watchLeds(on: Boolean) {
+        synchronized(this) { ledWatchers = (ledWatchers + if (on) 1 else -1).coerceAtLeast(0) }
+        val want = ledWatchers > 0
+        if (socketOpen.get()) socket?.send("""{"lv":$want}""")
+        ledPoll?.cancel(); ledPoll = null
+        if (!want) { _liveLeds.value = null; return }
+        // Without the socket's stream (older WLED, or a moment before it starts): ask over HTTP.
+        ledPoll = scope.launch {
+            while (true) {
+                delay(300)
+                if (viaMqtt) continue
+                val fresh = _liveLeds.value?.let { System.currentTimeMillis() - it.at < 1500 } == true
+                if (fresh) continue
+                runCatching { LiveLeds.fromJson(api.get(host, "/json/live")) }.getOrNull()?.let { _liveLeds.value = it }
+            }
+        }
+    }
     private val socketOpen = AtomicBoolean(false)
 
     // ------------------------------------------------------------------ lifecycle
@@ -256,6 +285,12 @@ class DeviceController(
                 opened.set(true)
                 socketOpen.set(true)
                 _snapshot.update { it.copy(live = true, conn = ConnState.ONLINE) }
+                // The preview's showing: ask for the LEDs' colours as they change.
+                if (ledWatchers > 0) webSocket.send("""{"lv":true}""")
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                LiveLeds.fromBinary(bytes.toByteArray())?.let { _liveLeds.value = it }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {

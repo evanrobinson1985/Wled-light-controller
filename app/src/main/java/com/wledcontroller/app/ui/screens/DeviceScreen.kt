@@ -313,22 +313,32 @@ private fun Banner(text: String, action: String, onAction: () -> Unit, error: Bo
 }
 
 /**
- * What the controller's LEDs show, one dot per LED, worked out in the app from the effect,
- * colours, palette and settings chosen here (the same look-alike effects as the simulator), so
- * it never waits on the controller and changes the moment a setting does.
+ * What the controller's LEDs show, one dot per LED: the real colours as WLED reports them,
+ * while they're coming in; otherwise worked out in the app from the effect, colours, palette and
+ * settings chosen here (the same look-alike effects as the simulator).
  */
 @Composable
 private fun LiveStrip(controller: DeviceController, snap: DeviceSnapshot) {
     val count = snap.info?.ledCount?.takeIf { it > 0 } ?: return
     val state = snap.state ?: return
+    // The real colours, only while this is on the screen.
+    androidx.compose.runtime.DisposableEffect(controller) {
+        controller.watchLeds(true)
+        onDispose { controller.watchLeds(false) }
+    }
+    val live by controller.liveLeds.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) withFrameMillis { now = System.currentTimeMillis() } }
-    val colors = com.wledcontroller.app.sim.StatePreview.render(state, snap.effects, snap.palettes, count, now)
+    val real = live?.takeIf { now - it.at < 2500 }
+    val colors = real?.spread(count) ?: com.wledcontroller.app.sim.StatePreview.render(state, snap.effects, snap.palettes, count, now)
     Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
         com.wledcontroller.app.ui.components.LedStripPreview(colors)
         Text(
-            (if (state.on) "Preview · $count LEDs" else "Off · $count LEDs") +
-                (if (snap.info?.live == true) " · lights are playing a show or whole-house effect" else ""),
+            when {
+                !state.on -> "Off · $count LEDs"
+                real != null -> "Live from the lights · $count LEDs"
+                else -> "Preview (worked out here) · $count LEDs"
+            } + (if (snap.info?.live == true) " · lights are playing a show or whole-house effect" else ""),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
