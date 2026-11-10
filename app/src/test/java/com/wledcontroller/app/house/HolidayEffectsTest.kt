@@ -65,8 +65,18 @@ class HolidayEffectsTest {
             }
         }
         val p = HouseEffectParams()
-        val night = 1f / ((0.1f + p.speed * 1.9f) * 0.5f)
+        val night = 1f / (HouseRenderer.speedFactor(p.speed) * 0.5f)
         assertEquals(2, litCandles(night * 1.5f))
         assertEquals(5, litCandles(night * 4.5f))
+    }
+
+    @Test fun theSlowestSpeedIsACrawl() {
+        val slowest = HouseRenderer.speedFactor(0f); val middle = HouseRenderer.speedFactor(0.5f); val fastest = HouseRenderer.speedFactor(1f)
+        assertTrue(slowest * 40 < middle)
+        assertEquals(1.05f, middle, 0.001f)
+        assertEquals(2f, fastest, 0.001f)
+        // Smooth all the way: each step a little faster than the last.
+        val steps = (0..20).map { HouseRenderer.speedFactor(it / 20f) }
+        steps.zipWithNext().forEach { (a, b) -> assertTrue(b > a) }
     }
 }

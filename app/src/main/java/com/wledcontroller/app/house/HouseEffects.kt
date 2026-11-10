@@ -122,6 +122,16 @@ object HouseRenderer {
 
     internal fun frac(v: Float) = v - floor(v)
 
+    /**
+     * How fast effects run for a 0..1 speed slider: the lower half slows gently down to a crawl
+     * (a fiftieth of the middle), the upper half speeds up to about twice the middle.
+     */
+    fun speedFactor(speed: Float, mid: Float = 1.05f, slowest: Float = 0.02f, fastest: Float = 2f): Float {
+        val s = speed.coerceIn(0f, 1f)
+        return if (s < 0.5f) slowest * Math.pow((mid / slowest).toDouble(), (s / 0.5f).toDouble()).toFloat()
+        else mid + (fastest - mid) * (s - 0.5f) / 0.5f
+    }
+
     /** Cheap deterministic hash → 0..1. */
     internal fun hash(a: Int, b: Int = 0): Float {
         var h = a * 374761393 + b * 668265263
@@ -156,7 +166,7 @@ object HouseRenderer {
      */
     fun color(p: HouseEffectParams, x: Float, y: Float, t: Float, id: Int, order: Int): Int {
         if (p.effect.isShadow) return color(p.normalized(), x, y, t, id, order)
-        val sp = 0.1f + p.speed * 1.9f          // 0.1 .. 2
+        val sp = speedFactor(p.speed)           // 0.02 .. 2
         val sz = 0.25f + (1f - p.size) * 2.75f  // features per house width: 3 (small) .. 0.25 (large)
         val c = p.colors.ifEmpty { listOf(0xFFFFFF) }
         val rgb = when (p.effect) {

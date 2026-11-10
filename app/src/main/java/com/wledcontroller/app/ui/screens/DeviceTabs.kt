@@ -442,12 +442,15 @@ private fun EffectControlsCard(
                 if (label == null) return@forEachIndexed
                 any = true
                 val max = if (i == 4) 31f else 255f
+                // Speed: WLED's slow speeds are all in the bottom few values, so the slider's
+                // lower half is spread over them (a curve); the others are straight.
+                val curved = i == 0
                 Spacer(Modifier.height(14.dp))
                 GradientSlider(
-                    value = values[i] / max,
-                    onValueChange = { controller.setSegValue(EffectMeta.SLIDER_KEYS[i], (it * max).roundToInt()); onChanged() },
+                    value = if (curved) kotlin.math.sqrt(values[i] / max) else values[i] / max,
+                    onValueChange = { v -> controller.setSegValue(EffectMeta.SLIDER_KEYS[i], ((if (curved) v * v else v) * max).roundToInt()); onChanged() },
                     label = label,
-                    valueText = "${(values[i] / max * 100).roundToInt()}%",
+                    valueText = "${((if (curved) kotlin.math.sqrt(values[i] / max) else values[i] / max) * 100).roundToInt()}%",
                     height = 34.dp,
                 )
             }

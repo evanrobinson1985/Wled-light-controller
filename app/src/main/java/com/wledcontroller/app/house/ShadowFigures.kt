@@ -53,7 +53,7 @@ internal object ShadowFigures {
      * [count] of them, [size] and [speed] 0..1. Eyes and carved faces glow in the second of [c].
      */
     fun render(figures: List<Figure>, lit: Int, c: List<Int>, count: Int, size: Float, speed01: Float, x: Float, y: Float, t: Float): Int {
-        val speed = 0.15f + speed01 * 1.6f
+        val speed = HouseRenderer.speedFactor(speed01, mid = 0.95f, slowest = 0.03f, fastest = 1.75f)
         val w = 0.06f + size * 0.26f
         val tt = t * (0.6f + speed)
         val s = Shape()

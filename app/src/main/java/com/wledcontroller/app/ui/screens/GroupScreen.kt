@@ -213,8 +213,9 @@ fun GroupScreen(groupId: String, onBack: () -> Unit, onOpenDevice: (String) -> U
                             ) {
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     GradientSlider(
-                                        value = (seg?.sx ?: 128) / 255f,
-                                        onValueChange = { v -> online.forEach { it.first.setSegValue("sx", (v * 255).roundToInt()) }; rememberSettings() },
+                                        // Curved, like a controller's: the slow speeds get the lower half.
+                                        value = kotlin.math.sqrt((seg?.sx ?: 128) / 255f),
+                                        onValueChange = { v -> online.forEach { it.first.setSegValue("sx", (v * v * 255).roundToInt()) }; rememberSettings() },
                                         label = "Speed", height = 34.dp,
                                     )
                                     GradientSlider(
