@@ -312,6 +312,15 @@ private fun Banner(text: String, action: String, onAction: () -> Unit, error: Bo
     }
 }
 
+/** Moves each colour in [shown] most of the way toward [target] (one screen frame's worth). */
+private fun glide(shown: IntArray, target: IntArray) {
+    for (i in shown.indices) {
+        val a = shown[i]; val b = target.getOrElse(i) { 0 }
+        fun ch(s: Int): Int { val x = (a shr s) and 0xFF; val y = (b shr s) and 0xFF; return (x + (y - x) * 0.55f).toInt() + if (y > x) 1 else if (y < x) -1 else 0 }
+        shown[i] = (ch(16).coerceIn(0, 255) shl 16) or (ch(8).coerceIn(0, 255) shl 8) or ch(0).coerceIn(0, 255)
+    }
+}
+
 /**
  * What the controller's LEDs show, one dot per LED: the real colours as WLED reports them,
  * while they're coming in; otherwise worked out in the app from the effect, colours, palette and
@@ -329,8 +338,11 @@ private fun LiveStrip(controller: DeviceController, snap: DeviceSnapshot) {
     val live by controller.liveLeds.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) withFrameMillis { now = System.currentTimeMillis() } }
-    val real = live?.takeIf { now - it.at < 2500 }
-    val colors = real?.spread(count) ?: com.wledcontroller.app.sim.StatePreview.render(state, snap.effects, snap.palettes, count, now)
+    val real = live?.takeIf { now - it.at < 4000 }
+    // The real colours arrive in uneven bursts over Wi-Fi: glide toward each new frame rather than jump.
+    val shown = remember(count) { IntArray(count) }
+    val colors = real?.spread(count)?.let { target -> glide(shown, target); shown.copyOf() }
+        ?: com.wledcontroller.app.sim.StatePreview.render(state, snap.effects, snap.palettes, count, now).also { it.copyInto(shown) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
         com.wledcontroller.app.ui.components.LedStripPreview(colors)
         Text(

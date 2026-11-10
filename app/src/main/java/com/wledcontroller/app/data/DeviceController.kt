@@ -115,13 +115,17 @@ class DeviceController(
         if (socketOpen.get()) socket?.send("""{"lv":$want}""")
         ledPoll?.cancel(); ledPoll = null
         if (!want) { _liveLeds.value = null; return }
-        // Without the socket's stream (older WLED, or a moment before it starts): ask over HTTP.
+        // Without the socket's stream (older WLED, or no frames from it): ask over HTTP. Not
+        // alongside a working stream: the extra requests slow the controller and stall the stream.
+        val since = System.currentTimeMillis()
         ledPoll = scope.launch {
             while (true) {
                 delay(300)
                 if (viaMqtt) continue
-                val fresh = _liveLeds.value?.let { System.currentTimeMillis() - it.at < 1500 } == true
-                if (fresh) continue
+                val last = _liveLeds.value?.at
+                val streaming = socketOpen.get() && (last != null || System.currentTimeMillis() - since < 3000)
+                val fresh = last != null && System.currentTimeMillis() - last < (if (streaming) 4000 else 1500)
+                if (fresh || (streaming && last == null)) continue
                 runCatching { LiveLeds.fromJson(api.get(host, "/json/live")) }.getOrNull()?.let { _liveLeds.value = it }
             }
         }
