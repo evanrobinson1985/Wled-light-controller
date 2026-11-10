@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { WatchApp(link) } }
+        setContent { MaterialTheme { WatchApp(link, updater) } }
     }
 
     override fun onResume() {
@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun WatchApp(link: WatchLink) {
+private fun WatchApp(link: WatchLink, updater: com.wledcontroller.wear.update.AppUpdater) {
     val nav = rememberSwipeDismissableNavController()
     val devices by link.devices.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { link.refreshDevices() }
@@ -125,7 +125,7 @@ private fun WatchApp(link: WatchLink) {
     SwipeDismissableNavHost(navController = nav, startDestination = "home") {
         composable("home") {
             HomeScreen(
-                link, devices, onOpen = { nav.navigate("device/${it.id}") },
+                link, updater, devices, onOpen = { nav.navigate("device/${it.id}") },
                 onHouse = { nav.navigate("house") }, onShows = { nav.navigate("shows") }, onScenes = { nav.navigate("scenes") }, onGroups = { nav.navigate("groups") },
             )
         }
@@ -156,6 +156,7 @@ private fun WatchList(content: androidx.wear.compose.foundation.lazy.ScalingLazy
 @Composable
 private fun HomeScreen(
     link: WatchLink,
+    updater: com.wledcontroller.wear.update.AppUpdater,
     devices: List<WatchDevice>,
     onOpen: (WatchDevice) -> Unit,
     onHouse: () -> Unit,
@@ -237,7 +238,43 @@ private fun HomeScreen(
             if (scenes.isNotEmpty()) item { NavChip("Scenes", Icons.Filled.AutoAwesomeMosaic, onScenes) }
             if (groups.isNotEmpty()) item { NavChip("Groups", Icons.Filled.Workspaces, onGroups) }
         }
+        item { UpdateChip(updater) }
     }
+}
+
+/** This watch app's build, and updating it from GitHub now (it also checks by itself every few hours). */
+@Composable
+private fun UpdateChip(updater: com.wledcontroller.wear.update.AppUpdater) {
+    val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val state by updater.state.collectAsStateWithLifecycle()
+    val result by com.wledcontroller.wear.update.AppUpdater.lastResult.collectAsStateWithLifecycle()
+    val busy = state is com.wledcontroller.wear.update.AppUpdater.State.Checking || state is com.wledcontroller.wear.update.AppUpdater.State.Downloading || state is com.wledcontroller.wear.update.AppUpdater.State.Installing
+    Chip(
+        label = { Text("Update app") },
+        secondaryLabel = {
+            Text(
+                result ?: when (val st = state) {
+                    is com.wledcontroller.wear.update.AppUpdater.State.Checking -> "Checking…"
+                    is com.wledcontroller.wear.update.AppUpdater.State.UpToDate -> "Up to date (build ${st.build})"
+                    is com.wledcontroller.wear.update.AppUpdater.State.Available -> "Build ${st.release.build} is out"
+                    is com.wledcontroller.wear.update.AppUpdater.State.Downloading -> "Downloading ${(st.progress * 100).toInt()}%"
+                    is com.wledcontroller.wear.update.AppUpdater.State.Installing -> "Installing…"
+                    is com.wledcontroller.wear.update.AppUpdater.State.Failed -> st.message
+                    else -> "Build ${updater.installedBuild}"
+                },
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        },
+        enabled = !busy,
+        colors = ChipDefaults.secondaryChipColors(),
+        onClick = {
+            // Android has to allow this app to install its updates first.
+            if (!updater.canInstall()) runCatching { context.startActivity(updater.allowInstallsIntent()) }
+            else scope.launch { updater.check(install = true) }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
